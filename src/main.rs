@@ -1,0 +1,282 @@
+mod auth;
+mod config;
+mod constants;
+mod error;
+mod routes;
+mod transforms;
+
+use auth::{AuthStore, ClientKeysStore, OAuthManager};
+use axum::ServiceExt;
+use axum::{
+    Router,
+    extract::State,
+    http::{HeaderValue, Method, StatusCode, header},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+    routing::{get, post},
+};
+use base64::Engine;
+use clap::Parser;
+use config::{Config, CorsMode};
+use reqwest::Client;
+use std::collections::HashSet;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+use subtle::ConstantTimeEq;
+use tokio::sync::Mutex;
+use tower_http::cors::{AllowOrigin, CorsLayer};
+use tower_http::normalize_path::NormalizePath;
+use tracing::info;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use utoipa_axum::{router::OpenApiRouter, routes};
+
+pub struct AppState {
+    pub auth_store: Arc<AuthStore>,
+    pub client_keys: Arc<ClientKeysStore>,
+    pub oauth: OAuthManager,
+    pub http_client: Client,
+    pub admin_credentials: (String, String),
+    pub admin_sessions: Mutex<HashSet<String>>,
+}
+
+#[derive(Parser)]
+#[command(name = "claude-proxy")]
+#[command(about = "OpenAI-compatible proxy for Claude API")]
+struct Args {
+    /// Host to bind to
+    #[arg(short = 'H', long, env = "CLAUDE_PROXY_HOST")]
+    host: Option<String>,
+
+    /// Port to bind to
+    #[arg(short, long, env = "CLAUDE_PROXY_PORT")]
+    port: Option<u16>,
+}
+
+/// Parse a named cookie from the Cookie header
+pub fn parse_cookie(header: &str, name: &str) -> Option<String> {
+    header.split(';').find_map(|cookie| {
+        let (key, value) = cookie.trim().split_once('=')?;
+        if key.trim() == name {
+            Some(value.trim().to_string())
+        } else {
+            None
+        }
+    })
+}
+
+/// Middleware for admin routes authentication (session cookie or Basic Auth)
+async fn admin_auth_middleware(
+    State(state): State<Arc<AppState>>,
+    request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let (username, password) = &state.admin_credentials;
+
+    // Check for session cookie first
+    if let Some(cookie_header) = request
+        .headers()
+        .get(header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        && let Some(token) = parse_cookie(cookie_header, "admin_session")
+    {
+        let sessions = state.admin_sessions.lock().await;
+        if sessions.contains(&token) {
+            return next.run(request).await;
+        }
+    }
+
+    // Fall through to Basic Auth check
+    let auth_header = request
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok());
+
+    let Some(auth_value) = auth_header else {
+        return unauthorized_response();
+    };
+
+    let Some(encoded) = auth_value.strip_prefix("Basic ") else {
+        return unauthorized_response();
+    };
+
+    let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded) else {
+        return unauthorized_response();
+    };
+
+    let Ok(credentials) = String::from_utf8(decoded) else {
+        return unauthorized_response();
+    };
+
+    let Some((provided_user, provided_pass)) = credentials.split_once(':') else {
+        return unauthorized_response();
+    };
+
+    // Constant-time comparison to prevent timing attacks
+    let user_match = provided_user.as_bytes().ct_eq(username.as_bytes());
+    let pass_match = provided_pass.as_bytes().ct_eq(password.as_bytes());
+
+    if user_match.into() && pass_match.into() {
+        next.run(request).await
+    } else {
+        unauthorized_response()
+    }
+}
+
+fn unauthorized_response() -> Response {
+    (StatusCode::UNAUTHORIZED, "Unauthorized").into_response()
+}
+
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
+    let args = Args::parse();
+    let config = Config::from_env();
+
+    let auth_path = config.auth_path();
+    let client_keys_path = config.client_keys_path();
+    let host = args.host.unwrap_or(config.host);
+    let port = args.port.unwrap_or(config.port);
+
+    let auth_store = Arc::new(AuthStore::new(auth_path).await);
+    let client_keys = Arc::new(ClientKeysStore::new(client_keys_path).await);
+    let oauth = OAuthManager::new(auth_store.clone());
+
+    // Shared HTTP client with connection pooling
+    let http_client = Client::builder()
+        .timeout(Duration::from_secs(300)) // 5 min timeout for long requests
+        .pool_max_idle_per_host(10)
+        .build()
+        .expect("Failed to create HTTP client");
+
+    let admin_credentials = (config.admin_username, config.admin_password);
+
+    let state = Arc::new(AppState {
+        auth_store,
+        client_keys,
+        oauth,
+        http_client,
+        admin_credentials,
+        admin_sessions: Mutex::new(HashSet::new()),
+    });
+
+    // CORS configuration based on environment
+    let cors_origins = config.cors_mode.clone();
+    let cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::predicate(move |origin: &HeaderValue, _| {
+            let Ok(origin_str) = origin.to_str() else {
+                return false;
+            };
+
+            match &cors_origins {
+                CorsMode::AllowAll => true,
+                CorsMode::LocalhostOnly => {
+                    let Ok(url) = url::Url::parse(origin_str) else {
+                        return false;
+                    };
+                    matches!(
+                        url.host_str(),
+                        Some("localhost") | Some("127.0.0.1") | Some("::1")
+                    )
+                }
+                CorsMode::AllowList(allowed) => allowed.iter().any(|a| a == origin_str),
+            }
+        }))
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers([
+            header::CONTENT_TYPE,
+            header::AUTHORIZATION,
+            header::HeaderName::from_static("x-api-key"),
+            header::HeaderName::from_static("anthropic-version"),
+        ])
+        .allow_credentials(true);
+
+    match &config.cors_mode {
+        CorsMode::AllowAll => info!("CORS: Allowing all origins"),
+        CorsMode::LocalhostOnly => info!("CORS: Localhost only"),
+        CorsMode::AllowList(list) => info!("CORS: Allowing origins: {:?}", list),
+    }
+
+    // Admin API routes with OpenAPI spec generation
+    let (api_router, openapi) = OpenApiRouter::with_openapi(Default::default())
+        .routes(routes!(routes::admin::get_oauth_status))
+        .routes(routes!(routes::admin::start_oauth_flow))
+        .routes(routes!(routes::admin::exchange_oauth_code))
+        .routes(routes!(routes::admin::delete_oauth))
+        .routes(routes!(routes::admin::create_key))
+        .routes(routes!(routes::admin::list_keys))
+        .routes(routes!(routes::admin::delete_key))
+        .routes(routes!(routes::admin::get_key_usage))
+        .routes(routes!(routes::admin::update_key_limits))
+        .routes(routes!(routes::admin::reset_key_usage))
+        .split_for_parts();
+
+    let api_router = api_router.merge(
+        utoipa_swagger_ui::SwaggerUi::new("/swagger").url("/api-docs/openapi.json", openapi),
+    );
+
+    // Auth endpoints (accessible without authentication)
+    let auth_routes = Router::new()
+        .route("/auth/login", post(routes::admin::login))
+        .route("/auth/logout", post(routes::admin::logout))
+        .route("/auth/check", get(routes::admin::auth_check))
+        .with_state(state.clone());
+
+    // Protected admin routes (session cookie or Basic Auth)
+    let protected_routes =
+        api_router
+            .merge(routes::admin::static_routes())
+            .layer(middleware::from_fn_with_state(
+                state.clone(),
+                admin_auth_middleware,
+            ));
+
+    // Combine: auth routes (unprotected) + protected routes
+    let admin_routes = Router::new().merge(auth_routes).merge(protected_routes);
+
+    // API routes
+    let api_routes = Router::new()
+        .route("/chat/completions", post(routes::openai::chat_completions))
+        .route("/models", get(routes::openai::list_models))
+        .route("/messages", post(routes::anthropic::messages))
+        .route(
+            "/messages/count_tokens",
+            post(routes::anthropic::count_tokens),
+        );
+
+    let app = NormalizePath::trim_trailing_slash(
+        Router::new()
+            .route("/health", get(routes::health::health))
+            .nest("/admin", admin_routes)
+            .nest("/v1", api_routes)
+            .layer(cors)
+            .with_state(state),
+    );
+
+    let addr: SocketAddr = format!("{}:{}", host, port)
+        .parse()
+        .expect("Invalid address");
+    info!("Starting claude-proxy on http://{}", addr);
+    info!("Admin UI: http://{}/admin", addr);
+
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    axum::serve(
+        listener,
+        ServiceExt::<axum::extract::Request>::into_make_service(app),
+    )
+    .await
+    .unwrap();
+}

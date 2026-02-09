@@ -1,0 +1,18 @@
+[Unit]
+Description=Claude Proxy - OpenAI/Anthropic API proxy for Claude Pro
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/claude-proxy
+ExecStart=/opt/claude-proxy/claude-proxy-rs
+Environment=CLAUDE_PROXY_HOST=0.0.0.0
+Environment=CLAUDE_PROXY_PORT=4096
+Environment=RUST_LOG=info
+EnvironmentFile=/opt/claude-proxy/.env
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
