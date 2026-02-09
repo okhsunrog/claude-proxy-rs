@@ -9,7 +9,7 @@ use std::sync::Arc;
 use subtle::ConstantTimeEq;
 use utoipa::ToSchema;
 
-use crate::auth::{ClientKey, TokenLimits, TokenUsage, UsageResetType};
+use crate::auth::{ClientKey, Model, ModelUsageEntry, TokenLimits, TokenUsage, UsageResetType};
 use crate::parse_cookie;
 use crate::{AppState, SESSION_TTL_SECS, now_secs};
 
@@ -92,6 +92,61 @@ pub struct ResetUsageRequest {
     /// Which counter to reset: "hourly", "weekly", "total", or "all"
     #[serde(rename = "type")]
     reset_type: String,
+}
+
+// --- Model types ---
+
+#[derive(Serialize, ToSchema)]
+pub struct ListModelsResponse {
+    pub models: Vec<Model>,
+}
+
+#[derive(Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AddModelRequest {
+    pub id: String,
+    #[serde(default)]
+    pub input_price: f64,
+    #[serde(default)]
+    pub output_price: f64,
+    #[serde(default)]
+    pub cache_read_price: f64,
+    #[serde(default)]
+    pub cache_write_price: f64,
+}
+
+#[derive(Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateModelRequest {
+    pub enabled: Option<bool>,
+    pub input_price: Option<f64>,
+    pub output_price: Option<f64>,
+    pub cache_read_price: Option<f64>,
+    pub cache_write_price: Option<f64>,
+}
+
+#[derive(Deserialize, Serialize, ToSchema)]
+pub struct ReorderModelsRequest {
+    pub ids: Vec<String>,
+}
+
+// --- Per-key model types ---
+
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyModelsResponse {
+    pub allow_all: bool,
+    pub models: Vec<String>,
+}
+
+#[derive(Deserialize, Serialize, ToSchema)]
+pub struct SetKeyModelsRequest {
+    pub models: Vec<String>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct KeyModelUsageResponse {
+    pub entries: Vec<ModelUsageEntry>,
 }
 
 // --- Static file serving ---
@@ -491,6 +546,384 @@ pub async fn reset_key_usage(
             StatusCode::NOT_FOUND,
             Json(ErrorResponse {
                 error: "Key not found".into(),
+            }),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+// ========================================================================
+// Models management
+// ========================================================================
+
+/// List all models (admin sees enabled + disabled)
+#[utoipa::path(
+    get,
+    path = "/models",
+    tag = "models",
+    responses(
+        (status = 200, body = ListModelsResponse),
+    )
+)]
+pub async fn list_models_admin(State(state): State<Arc<AppState>>) -> Json<ListModelsResponse> {
+    let models = state.models.list().await;
+    Json(ListModelsResponse { models })
+}
+
+/// Add a new model
+#[utoipa::path(
+    post,
+    path = "/models",
+    tag = "models",
+    request_body = AddModelRequest,
+    responses(
+        (status = 200, body = SuccessResponse),
+        (status = 400, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+pub async fn add_model(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<AddModelRequest>,
+) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let id = body.id.trim();
+    if id.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "Model ID cannot be empty".into(),
+            }),
+        ));
+    }
+
+    match state
+        .models
+        .add(
+            id,
+            body.input_price,
+            body.output_price,
+            body.cache_read_price,
+            body.cache_write_price,
+        )
+        .await
+    {
+        Ok(_) => Ok(Json(SuccessResponse { success: true })),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+/// Delete a model
+#[utoipa::path(
+    delete,
+    path = "/models/{id}",
+    tag = "models",
+    params(("id" = String, Path, description = "Model ID")),
+    responses(
+        (status = 200, body = SuccessResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+pub async fn delete_model(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    match state.models.remove(&id).await {
+        Ok(true) => Ok(Json(SuccessResponse { success: true })),
+        Ok(false) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "Model not found".into(),
+            }),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+/// Update a model (prices, enabled)
+#[utoipa::path(
+    put,
+    path = "/models/{id}",
+    tag = "models",
+    params(("id" = String, Path, description = "Model ID")),
+    request_body = UpdateModelRequest,
+    responses(
+        (status = 200, body = SuccessResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+pub async fn update_model(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateModelRequest>,
+) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    match state
+        .models
+        .update(
+            &id,
+            body.input_price,
+            body.output_price,
+            body.cache_read_price,
+            body.cache_write_price,
+            body.enabled,
+        )
+        .await
+    {
+        Ok(true) => Ok(Json(SuccessResponse { success: true })),
+        Ok(false) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "Model not found".into(),
+            }),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+/// Reorder models
+#[utoipa::path(
+    put,
+    path = "/models/reorder",
+    tag = "models",
+    request_body = ReorderModelsRequest,
+    responses(
+        (status = 200, body = SuccessResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+pub async fn reorder_models(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<ReorderModelsRequest>,
+) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    match state.models.reorder(body.ids).await {
+        Ok(_) => Ok(Json(SuccessResponse { success: true })),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+// ========================================================================
+// Per-key model access
+// ========================================================================
+
+/// Get allowed models for a key
+#[utoipa::path(
+    get,
+    path = "/keys/{id}/models",
+    tag = "keys",
+    params(("id" = String, Path, description = "Key ID")),
+    responses(
+        (status = 200, body = KeyModelsResponse),
+    )
+)]
+pub async fn get_key_models(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Json<KeyModelsResponse> {
+    let models = state.client_keys.get_allowed_models(&id).await;
+    let allow_all = models.is_empty();
+    Json(KeyModelsResponse { allow_all, models })
+}
+
+/// Set allowed models for a key (empty = allow all)
+#[utoipa::path(
+    put,
+    path = "/keys/{id}/models",
+    tag = "keys",
+    params(("id" = String, Path, description = "Key ID")),
+    request_body = SetKeyModelsRequest,
+    responses(
+        (status = 200, body = SuccessResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+pub async fn set_key_models(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<SetKeyModelsRequest>,
+) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    match state.client_keys.set_allowed_models(&id, body.models).await {
+        Ok(_) => Ok(Json(SuccessResponse { success: true })),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+// ========================================================================
+// Per-key per-model usage
+// ========================================================================
+
+/// Get per-model usage for a key
+#[utoipa::path(
+    get,
+    path = "/keys/{id}/model-usage",
+    tag = "keys",
+    params(("id" = String, Path, description = "Key ID")),
+    responses(
+        (status = 200, body = KeyModelUsageResponse),
+    )
+)]
+pub async fn get_key_model_usage(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Json<KeyModelUsageResponse> {
+    let entries = state.client_keys.get_model_usage(&id).await;
+    Json(KeyModelUsageResponse { entries })
+}
+
+/// Set per-model limits for a key
+#[utoipa::path(
+    put,
+    path = "/keys/{id}/model-usage/{model}/limits",
+    tag = "keys",
+    params(
+        ("id" = String, Path, description = "Key ID"),
+        ("model" = String, Path, description = "Model ID"),
+    ),
+    request_body = UpdateLimitsRequest,
+    responses(
+        (status = 200, body = SuccessResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+pub async fn set_key_model_limits(
+    State(state): State<Arc<AppState>>,
+    Path((id, model)): Path<(String, String)>,
+    Json(body): Json<UpdateLimitsRequest>,
+) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let limits = TokenLimits {
+        hourly_limit: body.hourly_limit,
+        weekly_limit: body.weekly_limit,
+        total_limit: body.total_limit,
+    };
+
+    match state
+        .client_keys
+        .set_model_limits(&id, &model, limits)
+        .await
+    {
+        Ok(_) => Ok(Json(SuccessResponse { success: true })),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+/// Remove per-model limits for a key
+#[utoipa::path(
+    delete,
+    path = "/keys/{id}/model-usage/{model}/limits",
+    tag = "keys",
+    params(
+        ("id" = String, Path, description = "Key ID"),
+        ("model" = String, Path, description = "Model ID"),
+    ),
+    responses(
+        (status = 200, body = SuccessResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+pub async fn remove_key_model_limits(
+    State(state): State<Arc<AppState>>,
+    Path((id, model)): Path<(String, String)>,
+) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    match state.client_keys.remove_model_limits(&id, &model).await {
+        Ok(true) => Ok(Json(SuccessResponse { success: true })),
+        Ok(false) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "Model usage entry not found".into(),
+            }),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+/// Reset per-model usage counters for a key
+#[utoipa::path(
+    post,
+    path = "/keys/{id}/model-usage/{model}/reset",
+    tag = "keys",
+    params(
+        ("id" = String, Path, description = "Key ID"),
+        ("model" = String, Path, description = "Model ID"),
+    ),
+    request_body = ResetUsageRequest,
+    responses(
+        (status = 200, body = SuccessResponse),
+        (status = 400, body = ErrorResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+pub async fn reset_key_model_usage(
+    State(state): State<Arc<AppState>>,
+    Path((id, model)): Path<(String, String)>,
+    Json(body): Json<ResetUsageRequest>,
+) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let reset_type = match body.reset_type.to_lowercase().as_str() {
+        "hourly" => UsageResetType::Hourly,
+        "weekly" => UsageResetType::Weekly,
+        "total" => UsageResetType::Total,
+        "all" => UsageResetType::All,
+        _ => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "Invalid reset type. Use: hourly, weekly, total, or all".into(),
+                }),
+            ));
+        }
+    };
+
+    match state
+        .client_keys
+        .reset_model_usage(&id, &model, reset_type)
+        .await
+    {
+        Ok(true) => Ok(Json(SuccessResponse { success: true })),
+        Ok(false) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "Model usage entry not found".into(),
             }),
         )),
         Err(e) => Err((

@@ -11,18 +11,29 @@ const props = defineProps<{
 }>()
 
 const toast = useToast()
-const hourlyLimit = ref<number | null>(null)
-const weeklyLimit = ref<number | null>(null)
-const totalLimit = ref<number | null>(null)
+// Display/edit in dollars, store in microdollars
+const hourlyDollars = ref<number | null>(null)
+const weeklyDollars = ref<number | null>(null)
+const totalDollars = ref<number | null>(null)
 const isSaving = ref(false)
+
+function microToDollars(micro: number | null | undefined): number | null {
+  if (micro == null) return null
+  return micro / 1_000_000
+}
+
+function dollarsToMicro(dollars: number | null): number | null {
+  if (dollars == null) return null
+  return Math.round(dollars * 1_000_000)
+}
 
 watch(
   () => props.usage,
   (u) => {
     if (u) {
-      hourlyLimit.value = u.limits.hourlyLimit ?? null
-      weeklyLimit.value = u.limits.weeklyLimit ?? null
-      totalLimit.value = u.limits.totalLimit ?? null
+      hourlyDollars.value = microToDollars(u.limits.hourlyLimit)
+      weeklyDollars.value = microToDollars(u.limits.weeklyLimit)
+      totalDollars.value = microToDollars(u.limits.totalLimit)
     }
   },
   { immediate: true },
@@ -32,9 +43,9 @@ async function handleSave() {
   isSaving.value = true
   try {
     await props.updateLimits(props.keyId, {
-      hourlyLimit: hourlyLimit.value || null,
-      weeklyLimit: weeklyLimit.value || null,
-      totalLimit: totalLimit.value || null,
+      hourlyLimit: dollarsToMicro(hourlyDollars.value),
+      weeklyLimit: dollarsToMicro(weeklyDollars.value),
+      totalLimit: dollarsToMicro(totalDollars.value),
     })
     toast.add({ title: 'Limits saved', color: 'success' })
   } catch (e: unknown) {
@@ -77,34 +88,37 @@ async function handleReset(type: 'hourly' | 'weekly' | 'total' | 'all') {
 
 <template>
   <div class="border-t border-default pt-3 mt-3">
-    <h3 class="text-sm font-semibold text-muted mb-2">Token Limits</h3>
+    <h3 class="text-sm font-semibold text-muted mb-2">Cost Limits (USD)</h3>
     <div class="flex flex-wrap gap-3 items-end">
-      <UFormField label="Hourly" class="w-32">
+      <UFormField label="Hourly ($)" class="w-32">
         <UInput
-          :model-value="hourlyLimit ?? undefined"
-          @update:model-value="(v: string | number) => hourlyLimit = v == null || v === '' ? null : Number(v)"
+          :model-value="hourlyDollars ?? undefined"
+          @update:model-value="(v: string | number) => hourlyDollars = v == null || v === '' ? null : Number(v)"
           type="number"
           placeholder="Unlimited"
+          step="0.01"
           :min="0"
           class="no-spinners"
         />
       </UFormField>
-      <UFormField label="Weekly" class="w-32">
+      <UFormField label="Weekly ($)" class="w-32">
         <UInput
-          :model-value="weeklyLimit ?? undefined"
-          @update:model-value="(v: string | number) => weeklyLimit = v == null || v === '' ? null : Number(v)"
+          :model-value="weeklyDollars ?? undefined"
+          @update:model-value="(v: string | number) => weeklyDollars = v == null || v === '' ? null : Number(v)"
           type="number"
           placeholder="Unlimited"
+          step="0.01"
           :min="0"
           class="no-spinners"
         />
       </UFormField>
-      <UFormField label="Total" class="w-32">
+      <UFormField label="Total ($)" class="w-32">
         <UInput
-          :model-value="totalLimit ?? undefined"
-          @update:model-value="(v: string | number) => totalLimit = v == null || v === '' ? null : Number(v)"
+          :model-value="totalDollars ?? undefined"
+          @update:model-value="(v: string | number) => totalDollars = v == null || v === '' ? null : Number(v)"
           type="number"
           placeholder="Unlimited"
+          step="0.01"
           :min="0"
           class="no-spinners"
         />

@@ -4,20 +4,22 @@ export type ClientOptions = {
     baseUrl: 'http://localhost:4096' | (string & {});
 };
 
+export type AddModelRequest = {
+    cacheReadPrice?: number;
+    cacheWritePrice?: number;
+    id: string;
+    inputPrice?: number;
+    outputPrice?: number;
+};
+
 export type ClientKey = {
     createdAt: number;
     enabled: boolean;
     id: string;
     key: string;
     lastUsedAt?: number | null;
-    /**
-     * Token usage limits (optional)
-     */
     limits?: TokenLimits;
     name: string;
-    /**
-     * Current token usage
-     */
     usage?: TokenUsage;
 };
 
@@ -38,6 +40,15 @@ export type ExchangeCodeRequest = {
     code: string;
 };
 
+export type KeyModelUsageResponse = {
+    entries: Array<ModelUsageEntry>;
+};
+
+export type KeyModelsResponse = {
+    allowAll: boolean;
+    models: Array<string>;
+};
+
 export type KeyUsageResponse = {
     limits: TokenLimits;
     usage: TokenUsage;
@@ -45,6 +56,36 @@ export type KeyUsageResponse = {
 
 export type ListKeysResponse = {
     keys: Array<ClientKey>;
+};
+
+export type ListModelsResponse = {
+    models: Array<Model>;
+};
+
+/**
+ * A model entry from the database
+ */
+export type Model = {
+    cacheReadPrice: number;
+    cacheWritePrice: number;
+    enabled: boolean;
+    id: string;
+    inputPrice: number;
+    outputPrice: number;
+    sortOrder: number;
+};
+
+/**
+ * Per-model usage entry with limits and token breakdowns
+ */
+export type ModelUsageEntry = {
+    hourly: TokenBreakdown;
+    hourlyResetAt: number;
+    limits: TokenLimits;
+    model: string;
+    total: TokenBreakdown;
+    weekly: TokenBreakdown;
+    weeklyResetAt: number;
 };
 
 export type OAuthStatusResponse = {
@@ -55,6 +96,10 @@ export type OAuthUrlResponse = {
     url: string;
 };
 
+export type ReorderModelsRequest = {
+    ids: Array<string>;
+};
+
 export type ResetUsageRequest = {
     /**
      * Which counter to reset: "hourly", "weekly", "total", or "all"
@@ -62,8 +107,22 @@ export type ResetUsageRequest = {
     type: string;
 };
 
+export type SetKeyModelsRequest = {
+    models: Array<string>;
+};
+
 export type SuccessResponse = {
     success: boolean;
+};
+
+/**
+ * 4-type token breakdown for display
+ */
+export type TokenBreakdown = {
+    cacheRead: number;
+    cacheWrite: number;
+    input: number;
+    output: number;
 };
 
 /**
@@ -114,6 +173,14 @@ export type UpdateLimitsRequest = {
     hourlyLimit?: number | null;
     totalLimit?: number | null;
     weeklyLimit?: number | null;
+};
+
+export type UpdateModelRequest = {
+    cacheReadPrice?: number | null;
+    cacheWritePrice?: number | null;
+    enabled?: boolean | null;
+    inputPrice?: number | null;
+    outputPrice?: number | null;
 };
 
 export type CreateKeyData = {
@@ -199,6 +266,153 @@ export type UpdateKeyLimitsResponses = {
 
 export type UpdateKeyLimitsResponse = UpdateKeyLimitsResponses[keyof UpdateKeyLimitsResponses];
 
+export type GetKeyModelUsageData = {
+    body?: never;
+    path: {
+        /**
+         * Key ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/keys/{id}/model-usage';
+};
+
+export type GetKeyModelUsageResponses = {
+    200: KeyModelUsageResponse;
+};
+
+export type GetKeyModelUsageResponse = GetKeyModelUsageResponses[keyof GetKeyModelUsageResponses];
+
+export type RemoveKeyModelLimitsData = {
+    body?: never;
+    path: {
+        /**
+         * Key ID
+         */
+        id: string;
+        /**
+         * Model ID
+         */
+        model: string;
+    };
+    query?: never;
+    url: '/keys/{id}/model-usage/{model}/limits';
+};
+
+export type RemoveKeyModelLimitsErrors = {
+    404: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type RemoveKeyModelLimitsError = RemoveKeyModelLimitsErrors[keyof RemoveKeyModelLimitsErrors];
+
+export type RemoveKeyModelLimitsResponses = {
+    200: SuccessResponse;
+};
+
+export type RemoveKeyModelLimitsResponse = RemoveKeyModelLimitsResponses[keyof RemoveKeyModelLimitsResponses];
+
+export type SetKeyModelLimitsData = {
+    body: UpdateLimitsRequest;
+    path: {
+        /**
+         * Key ID
+         */
+        id: string;
+        /**
+         * Model ID
+         */
+        model: string;
+    };
+    query?: never;
+    url: '/keys/{id}/model-usage/{model}/limits';
+};
+
+export type SetKeyModelLimitsErrors = {
+    500: ErrorResponse;
+};
+
+export type SetKeyModelLimitsError = SetKeyModelLimitsErrors[keyof SetKeyModelLimitsErrors];
+
+export type SetKeyModelLimitsResponses = {
+    200: SuccessResponse;
+};
+
+export type SetKeyModelLimitsResponse = SetKeyModelLimitsResponses[keyof SetKeyModelLimitsResponses];
+
+export type ResetKeyModelUsageData = {
+    body: ResetUsageRequest;
+    path: {
+        /**
+         * Key ID
+         */
+        id: string;
+        /**
+         * Model ID
+         */
+        model: string;
+    };
+    query?: never;
+    url: '/keys/{id}/model-usage/{model}/reset';
+};
+
+export type ResetKeyModelUsageErrors = {
+    400: ErrorResponse;
+    404: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type ResetKeyModelUsageError = ResetKeyModelUsageErrors[keyof ResetKeyModelUsageErrors];
+
+export type ResetKeyModelUsageResponses = {
+    200: SuccessResponse;
+};
+
+export type ResetKeyModelUsageResponse = ResetKeyModelUsageResponses[keyof ResetKeyModelUsageResponses];
+
+export type GetKeyModelsData = {
+    body?: never;
+    path: {
+        /**
+         * Key ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/keys/{id}/models';
+};
+
+export type GetKeyModelsResponses = {
+    200: KeyModelsResponse;
+};
+
+export type GetKeyModelsResponse = GetKeyModelsResponses[keyof GetKeyModelsResponses];
+
+export type SetKeyModelsData = {
+    body: SetKeyModelsRequest;
+    path: {
+        /**
+         * Key ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/keys/{id}/models';
+};
+
+export type SetKeyModelsErrors = {
+    500: ErrorResponse;
+};
+
+export type SetKeyModelsError = SetKeyModelsErrors[keyof SetKeyModelsErrors];
+
+export type SetKeyModelsResponses = {
+    200: SuccessResponse;
+};
+
+export type SetKeyModelsResponse = SetKeyModelsResponses[keyof SetKeyModelsResponses];
+
 export type GetKeyUsageData = {
     body?: never;
     path: {
@@ -248,6 +462,108 @@ export type ResetKeyUsageResponses = {
 };
 
 export type ResetKeyUsageResponse = ResetKeyUsageResponses[keyof ResetKeyUsageResponses];
+
+export type ListModelsAdminData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/models';
+};
+
+export type ListModelsAdminResponses = {
+    200: ListModelsResponse;
+};
+
+export type ListModelsAdminResponse = ListModelsAdminResponses[keyof ListModelsAdminResponses];
+
+export type AddModelData = {
+    body: AddModelRequest;
+    path?: never;
+    query?: never;
+    url: '/models';
+};
+
+export type AddModelErrors = {
+    400: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type AddModelError = AddModelErrors[keyof AddModelErrors];
+
+export type AddModelResponses = {
+    200: SuccessResponse;
+};
+
+export type AddModelResponse = AddModelResponses[keyof AddModelResponses];
+
+export type ReorderModelsData = {
+    body: ReorderModelsRequest;
+    path?: never;
+    query?: never;
+    url: '/models/reorder';
+};
+
+export type ReorderModelsErrors = {
+    500: ErrorResponse;
+};
+
+export type ReorderModelsError = ReorderModelsErrors[keyof ReorderModelsErrors];
+
+export type ReorderModelsResponses = {
+    200: SuccessResponse;
+};
+
+export type ReorderModelsResponse = ReorderModelsResponses[keyof ReorderModelsResponses];
+
+export type DeleteModelData = {
+    body?: never;
+    path: {
+        /**
+         * Model ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/models/{id}';
+};
+
+export type DeleteModelErrors = {
+    404: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type DeleteModelError = DeleteModelErrors[keyof DeleteModelErrors];
+
+export type DeleteModelResponses = {
+    200: SuccessResponse;
+};
+
+export type DeleteModelResponse = DeleteModelResponses[keyof DeleteModelResponses];
+
+export type UpdateModelData = {
+    body: UpdateModelRequest;
+    path: {
+        /**
+         * Model ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/models/{id}';
+};
+
+export type UpdateModelErrors = {
+    404: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type UpdateModelError = UpdateModelErrors[keyof UpdateModelErrors];
+
+export type UpdateModelResponses = {
+    200: SuccessResponse;
+};
+
+export type UpdateModelResponse = UpdateModelResponses[keyof UpdateModelResponses];
 
 export type DeleteOauthData = {
     body?: never;

@@ -24,19 +24,22 @@ pub const USER_AGENT: &str = "claude-cli/2.1.32 (external, cli)";
 /// System message prefix for OAuth requests (Claude Code identity)
 pub const SYSTEM_PREFIX: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
 
-/// Available Claude models
-pub static MODELS: &[&str] = &[
-    "claude-opus-4-6",
-    "claude-opus-4-5-20251101",
-    "claude-opus-4-5",
-    "claude-sonnet-4-5-20250929",
-    "claude-sonnet-4-5",
-    "claude-haiku-4-5-20251001",
-    "claude-haiku-4-5",
-    "claude-opus-4-1-20250805",
-    "claude-opus-4-1",
-    "claude-opus-4-20250514",
-    "claude-opus-4-0",
-    "claude-sonnet-4-20250514",
-    "claude-sonnet-4-0",
+/// Seed models for initial database population.
+/// Used only on first startup when the models table is empty.
+/// After that, models are managed via the admin UI.
+/// Format: (id, input_price, output_price, cache_read_price, cache_write_price) — all $/MTok
+pub static SEED_MODELS: &[(&str, f64, f64, f64, f64)] = &[
+    ("claude-opus-4-6", 5.0, 25.0, 0.50, 6.25),
+    ("claude-opus-4-5-20251101", 5.0, 25.0, 0.50, 6.25),
+    ("claude-opus-4-5", 5.0, 25.0, 0.50, 6.25),
+    ("claude-sonnet-4-5-20250929", 3.0, 15.0, 0.30, 3.75),
+    ("claude-sonnet-4-5", 3.0, 15.0, 0.30, 3.75),
+    ("claude-haiku-4-5-20251001", 1.0, 5.0, 0.10, 1.25),
+    ("claude-haiku-4-5", 1.0, 5.0, 0.10, 1.25),
+    ("claude-opus-4-1-20250805", 15.0, 75.0, 1.50, 18.75),
+    ("claude-opus-4-1", 15.0, 75.0, 1.50, 18.75),
+    ("claude-opus-4-20250514", 15.0, 75.0, 1.50, 18.75),
+    ("claude-opus-4-0", 15.0, 75.0, 1.50, 18.75),
+    ("claude-sonnet-4-20250514", 3.0, 15.0, 0.30, 3.75),
+    ("claude-sonnet-4-0", 3.0, 15.0, 0.30, 3.75),
 ];

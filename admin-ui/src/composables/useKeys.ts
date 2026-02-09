@@ -1,5 +1,11 @@
 import { ref } from 'vue'
-import type { ClientKey, KeyUsageResponse, UpdateLimitsRequest } from '../client'
+import type {
+  ClientKey,
+  KeyUsageResponse,
+  KeyModelsResponse,
+  KeyModelUsageResponse,
+  UpdateLimitsRequest,
+} from '../client'
 import {
   listKeys as listKeysApi,
   createKey as createKeyApi,
@@ -7,9 +13,15 @@ import {
   getKeyUsage,
   updateKeyLimits,
   resetKeyUsage as resetKeyUsageApi,
+  getKeyModels,
+  setKeyModels as setKeyModelsApi,
+  getKeyModelUsage,
+  setKeyModelLimits as setKeyModelLimitsApi,
+  removeKeyModelLimits as removeKeyModelLimitsApi,
+  resetKeyModelUsage as resetKeyModelUsageApi,
 } from '../client'
 
-export type { KeyUsageResponse }
+export type { KeyUsageResponse, KeyModelsResponse, KeyModelUsageResponse }
 
 export function useKeys() {
   const keys = ref<ClientKey[]>([])
@@ -70,6 +82,42 @@ export function useKeys() {
     await loadUsage(id)
   }
 
+  // Per-key model access
+  async function loadKeyModels(id: string): Promise<KeyModelsResponse> {
+    const { data } = await getKeyModels({ path: { id } })
+    return data ?? { allowAll: true, models: [] }
+  }
+
+  async function setKeyModels(id: string, models: string[]): Promise<void> {
+    await setKeyModelsApi({ path: { id }, body: { models } })
+  }
+
+  // Per-key per-model usage
+  async function loadKeyModelUsage(id: string): Promise<KeyModelUsageResponse> {
+    const { data } = await getKeyModelUsage({ path: { id } })
+    return data ?? { entries: [] }
+  }
+
+  async function setModelLimits(
+    keyId: string,
+    model: string,
+    limits: UpdateLimitsRequest,
+  ): Promise<void> {
+    await setKeyModelLimitsApi({ path: { id: keyId, model }, body: limits })
+  }
+
+  async function removeModelLimits(keyId: string, model: string): Promise<void> {
+    await removeKeyModelLimitsApi({ path: { id: keyId, model } })
+  }
+
+  async function resetModelUsage(
+    keyId: string,
+    model: string,
+    type: 'hourly' | 'weekly' | 'total' | 'all',
+  ): Promise<void> {
+    await resetKeyModelUsageApi({ path: { id: keyId, model }, body: { type } })
+  }
+
   return {
     keys,
     isLoading,
@@ -81,5 +129,11 @@ export function useKeys() {
     deleteKey,
     updateLimits,
     resetUsage,
+    loadKeyModels,
+    setKeyModels,
+    loadKeyModelUsage,
+    setModelLimits,
+    removeModelLimits,
+    resetModelUsage,
   }
 }

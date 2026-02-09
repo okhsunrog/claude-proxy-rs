@@ -17,7 +17,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::interval;
 
 use super::tool_names::strip_mcp_prefix;
-use crate::auth::{ClientKeysStore, StreamUsageData, TokenUsageReport};
+use crate::auth::{ClientKeysStore, ModelPricing, StreamUsageData, TokenUsageReport};
 
 /// Keep-alive interval for SSE streams (prevents proxy/load balancer timeouts).
 const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
@@ -88,6 +88,7 @@ pub fn stream_anthropic_to_openai_with_usage(
     model: String,
     client_keys: Arc<ClientKeysStore>,
     key_id: String,
+    model_pricing: ModelPricing,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
     stream! {
         use futures_util::StreamExt;
@@ -316,10 +317,12 @@ pub fn stream_anthropic_to_openai_with_usage(
         }
 
         // Record usage after stream ends
-        let weighted_total = usage_report.weighted_total();
-        if weighted_total > 0 {
-            let _ = client_keys.record_usage(&key_id, weighted_total).await;
+        let cost = usage_report.cost_microdollars(&model_pricing);
+        if cost > 0 {
+            let _ = client_keys.record_usage(&key_id, cost).await;
         }
+        // Per-model usage (raw tokens)
+        let _ = client_keys.record_model_usage(&key_id, &model, &usage_report).await;
     }
 }
 
@@ -334,6 +337,8 @@ pub fn stream_strip_mcp_prefix_with_usage(
     body: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
     client_keys: Arc<ClientKeysStore>,
     key_id: String,
+    model: String,
+    model_pricing: ModelPricing,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
     use futures_util::StreamExt;
 
@@ -444,9 +449,11 @@ pub fn stream_strip_mcp_prefix_with_usage(
         }
 
         // Record usage after stream ends
-        let weighted_total = usage_report.weighted_total();
-        if weighted_total > 0 {
-            let _ = client_keys.record_usage(&key_id, weighted_total).await;
+        let cost = usage_report.cost_microdollars(&model_pricing);
+        if cost > 0 {
+            let _ = client_keys.record_usage(&key_id, cost).await;
         }
+        // Per-model usage (raw tokens)
+        let _ = client_keys.record_model_usage(&key_id, &model, &usage_report).await;
     }
 }

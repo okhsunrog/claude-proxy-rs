@@ -3,7 +3,7 @@ use reqwest::{Client, RequestBuilder};
 use std::sync::Arc;
 
 use crate::AppState;
-use crate::auth::ClientKey;
+use crate::auth::{ClientKey, ModelPricing};
 use crate::constants::{ANTHROPIC_VERSION, OAUTH_BETA_HEADER, USER_AGENT};
 use crate::error::ProxyError;
 
@@ -11,6 +11,7 @@ use crate::error::ProxyError;
 pub struct AuthResult {
     pub client_key: ClientKey,
     pub token: String,
+    pub model_pricing: ModelPricing,
 }
 
 /// Extract API key from Authorization: Bearer header (OpenAI style)
@@ -45,6 +46,7 @@ async fn get_oauth_token(state: &AppState) -> Result<String, ProxyError> {
 pub async fn authenticate_openai(
     headers: &HeaderMap,
     state: &Arc<AppState>,
+    model: &str,
 ) -> Result<AuthResult, ProxyError> {
     let key = extract_bearer_token(headers)
         .ok_or_else(|| ProxyError::MissingHeader("Authorization".to_string()))?;
@@ -55,8 +57,43 @@ pub async fn authenticate_openai(
         .await
         .ok_or(ProxyError::InvalidApiKey)?;
 
-    // Check rate limits before proceeding
+    // Check global limits (cost-based)
     if let Err(msg) = state.client_keys.check_limits(&client_key.id).await {
+        return Err(ProxyError::RateLimitExceeded(msg));
+    }
+
+    // Check model exists and is enabled
+    if !state.models.is_valid(model).await {
+        return Err(ProxyError::InvalidModel(model.to_string()));
+    }
+
+    // Check model access whitelist
+    if !state
+        .client_keys
+        .is_model_allowed(&client_key.id, model)
+        .await
+    {
+        return Err(ProxyError::ModelNotAllowed(model.to_string()));
+    }
+
+    // Get model pricing (needed for cost calculation and per-model limit check)
+    let model_pricing = state
+        .models
+        .get_pricing(model)
+        .await
+        .unwrap_or(ModelPricing {
+            input_price: 0.0,
+            output_price: 0.0,
+            cache_read_price: 0.0,
+            cache_write_price: 0.0,
+        });
+
+    // Check per-model limits (cost-based)
+    if let Err(msg) = state
+        .client_keys
+        .check_model_limits(&client_key.id, model, &model_pricing)
+        .await
+    {
         return Err(ProxyError::RateLimitExceeded(msg));
     }
 
@@ -64,13 +101,18 @@ pub async fn authenticate_openai(
 
     let token = get_oauth_token(state).await?;
 
-    Ok(AuthResult { client_key, token })
+    Ok(AuthResult {
+        client_key,
+        token,
+        model_pricing,
+    })
 }
 
 /// Full authentication flow for Anthropic native endpoint
 pub async fn authenticate_anthropic(
     headers: &HeaderMap,
     state: &Arc<AppState>,
+    model: &str,
 ) -> Result<AuthResult, ProxyError> {
     let key = extract_api_key(headers)
         .ok_or_else(|| ProxyError::MissingHeader("x-api-key or Authorization".to_string()))?;
@@ -81,8 +123,43 @@ pub async fn authenticate_anthropic(
         .await
         .ok_or(ProxyError::InvalidApiKey)?;
 
-    // Check rate limits before proceeding
+    // Check global limits (cost-based)
     if let Err(msg) = state.client_keys.check_limits(&client_key.id).await {
+        return Err(ProxyError::RateLimitExceeded(msg));
+    }
+
+    // Check model exists and is enabled
+    if !state.models.is_valid(model).await {
+        return Err(ProxyError::InvalidModel(model.to_string()));
+    }
+
+    // Check model access whitelist
+    if !state
+        .client_keys
+        .is_model_allowed(&client_key.id, model)
+        .await
+    {
+        return Err(ProxyError::ModelNotAllowed(model.to_string()));
+    }
+
+    // Get model pricing
+    let model_pricing = state
+        .models
+        .get_pricing(model)
+        .await
+        .unwrap_or(ModelPricing {
+            input_price: 0.0,
+            output_price: 0.0,
+            cache_read_price: 0.0,
+            cache_write_price: 0.0,
+        });
+
+    // Check per-model limits (cost-based)
+    if let Err(msg) = state
+        .client_keys
+        .check_model_limits(&client_key.id, model, &model_pricing)
+        .await
+    {
         return Err(ProxyError::RateLimitExceeded(msg));
     }
 
@@ -90,7 +167,11 @@ pub async fn authenticate_anthropic(
 
     let token = get_oauth_token(state).await?;
 
-    Ok(AuthResult { client_key, token })
+    Ok(AuthResult {
+        client_key,
+        token,
+        model_pricing,
+    })
 }
 
 /// Build a request to the Anthropic API with OAuth headers

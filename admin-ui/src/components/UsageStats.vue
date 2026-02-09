@@ -6,10 +6,14 @@ const props = defineProps<{
   usage: KeyUsageResponse | undefined
 }>()
 
-function formatNumber(num: number): string {
-  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`
-  if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`
-  return num.toString()
+function formatCost(microdollars: number): string {
+  const dollars = microdollars / 1_000_000
+  if (dollars >= 1000) return `$${(dollars / 1000).toFixed(1)}K`
+  if (dollars >= 100) return `$${dollars.toFixed(0)}`
+  if (dollars >= 1) return `$${dollars.toFixed(2)}`
+  if (dollars >= 0.01) return `$${dollars.toFixed(3)}`
+  if (microdollars === 0) return '$0'
+  return `$${dollars.toFixed(4)}`
 }
 
 function formatDateTime(timestamp: number): string {
@@ -63,9 +67,9 @@ const items = computed<UsageItem[]>(() => {
       class="rounded-lg bg-elevated p-3"
     >
       <div class="text-xs text-muted uppercase">{{ item.label }}</div>
-      <div class="text-xl font-semibold mt-1">{{ formatNumber(item.used) }}</div>
+      <div class="text-xl font-semibold mt-1">{{ formatCost(item.used) }}</div>
       <div class="text-xs text-muted">
-        / {{ item.limit ? formatNumber(item.limit) : 'Unlimited' }}
+        / {{ item.limit ? formatCost(item.limit) : 'Unlimited' }}
       </div>
       <UProgress
         v-if="item.limit"

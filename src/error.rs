@@ -36,6 +36,12 @@ pub enum ProxyError {
 
     #[error("Database error: {0}")]
     DatabaseError(String),
+
+    #[error("Model not allowed: {0}")]
+    ModelNotAllowed(String),
+
+    #[error("Invalid model: {0}")]
+    InvalidModel(String),
 }
 
 impl ProxyError {
@@ -46,6 +52,8 @@ impl ProxyError {
             | ProxyError::MissingHeader(_)
             | ProxyError::NoAuthConfigured => (StatusCode::UNAUTHORIZED, self.to_string()),
             ProxyError::RateLimitExceeded(_) => (StatusCode::TOO_MANY_REQUESTS, self.to_string()),
+            ProxyError::ModelNotAllowed(_) => (StatusCode::FORBIDDEN, self.to_string()),
+            ProxyError::InvalidModel(_) => (StatusCode::BAD_REQUEST, self.to_string()),
             ProxyError::OAuthError(_) | ProxyError::IoError(_) | ProxyError::DatabaseError(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
             }
@@ -70,6 +78,14 @@ impl ProxyError {
             ProxyError::RateLimitExceeded(_) => (
                 StatusCode::TOO_MANY_REQUESTS,
                 "rate_limit_error",
+                self.to_string(),
+            ),
+            ProxyError::ModelNotAllowed(_) => {
+                (StatusCode::FORBIDDEN, "permission_error", self.to_string())
+            }
+            ProxyError::InvalidModel(_) => (
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
                 self.to_string(),
             ),
             ProxyError::OAuthError(_) | ProxyError::IoError(_) | ProxyError::DatabaseError(_) => (

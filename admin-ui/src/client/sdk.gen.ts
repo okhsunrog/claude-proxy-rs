@@ -2,7 +2,7 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { CreateKeyData, CreateKeyErrors, CreateKeyResponses, DeleteKeyData, DeleteKeyErrors, DeleteKeyResponses, DeleteOauthData, DeleteOauthErrors, DeleteOauthResponses, ExchangeOauthCodeData, ExchangeOauthCodeErrors, ExchangeOauthCodeResponses, GetKeyUsageData, GetKeyUsageErrors, GetKeyUsageResponses, GetOauthStatusData, GetOauthStatusResponses, ListKeysData, ListKeysResponses, ResetKeyUsageData, ResetKeyUsageErrors, ResetKeyUsageResponses, StartOauthFlowData, StartOauthFlowResponses, UpdateKeyLimitsData, UpdateKeyLimitsErrors, UpdateKeyLimitsResponses } from './types.gen';
+import type { AddModelData, AddModelErrors, AddModelResponses, CreateKeyData, CreateKeyErrors, CreateKeyResponses, DeleteKeyData, DeleteKeyErrors, DeleteKeyResponses, DeleteModelData, DeleteModelErrors, DeleteModelResponses, DeleteOauthData, DeleteOauthErrors, DeleteOauthResponses, ExchangeOauthCodeData, ExchangeOauthCodeErrors, ExchangeOauthCodeResponses, GetKeyModelsData, GetKeyModelsResponses, GetKeyModelUsageData, GetKeyModelUsageResponses, GetKeyUsageData, GetKeyUsageErrors, GetKeyUsageResponses, GetOauthStatusData, GetOauthStatusResponses, ListKeysData, ListKeysResponses, ListModelsAdminData, ListModelsAdminResponses, RemoveKeyModelLimitsData, RemoveKeyModelLimitsErrors, RemoveKeyModelLimitsResponses, ReorderModelsData, ReorderModelsErrors, ReorderModelsResponses, ResetKeyModelUsageData, ResetKeyModelUsageErrors, ResetKeyModelUsageResponses, ResetKeyUsageData, ResetKeyUsageErrors, ResetKeyUsageResponses, SetKeyModelLimitsData, SetKeyModelLimitsErrors, SetKeyModelLimitsResponses, SetKeyModelsData, SetKeyModelsErrors, SetKeyModelsResponses, StartOauthFlowData, StartOauthFlowResponses, UpdateKeyLimitsData, UpdateKeyLimitsErrors, UpdateKeyLimitsResponses, UpdateModelData, UpdateModelErrors, UpdateModelResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -53,6 +53,57 @@ export const updateKeyLimits = <ThrowOnError extends boolean = false>(options: O
 });
 
 /**
+ * Get per-model usage for a key
+ */
+export const getKeyModelUsage = <ThrowOnError extends boolean = false>(options: Options<GetKeyModelUsageData, ThrowOnError>) => (options.client ?? client).get<GetKeyModelUsageResponses, unknown, ThrowOnError>({ url: '/keys/{id}/model-usage', ...options });
+
+/**
+ * Remove per-model limits for a key
+ */
+export const removeKeyModelLimits = <ThrowOnError extends boolean = false>(options: Options<RemoveKeyModelLimitsData, ThrowOnError>) => (options.client ?? client).delete<RemoveKeyModelLimitsResponses, RemoveKeyModelLimitsErrors, ThrowOnError>({ url: '/keys/{id}/model-usage/{model}/limits', ...options });
+
+/**
+ * Set per-model limits for a key
+ */
+export const setKeyModelLimits = <ThrowOnError extends boolean = false>(options: Options<SetKeyModelLimitsData, ThrowOnError>) => (options.client ?? client).put<SetKeyModelLimitsResponses, SetKeyModelLimitsErrors, ThrowOnError>({
+    url: '/keys/{id}/model-usage/{model}/limits',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Reset per-model usage counters for a key
+ */
+export const resetKeyModelUsage = <ThrowOnError extends boolean = false>(options: Options<ResetKeyModelUsageData, ThrowOnError>) => (options.client ?? client).post<ResetKeyModelUsageResponses, ResetKeyModelUsageErrors, ThrowOnError>({
+    url: '/keys/{id}/model-usage/{model}/reset',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Get allowed models for a key
+ */
+export const getKeyModels = <ThrowOnError extends boolean = false>(options: Options<GetKeyModelsData, ThrowOnError>) => (options.client ?? client).get<GetKeyModelsResponses, unknown, ThrowOnError>({ url: '/keys/{id}/models', ...options });
+
+/**
+ * Set allowed models for a key (empty = allow all)
+ */
+export const setKeyModels = <ThrowOnError extends boolean = false>(options: Options<SetKeyModelsData, ThrowOnError>) => (options.client ?? client).put<SetKeyModelsResponses, SetKeyModelsErrors, ThrowOnError>({
+    url: '/keys/{id}/models',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
  * Get usage statistics for a key
  */
 export const getKeyUsage = <ThrowOnError extends boolean = false>(options: Options<GetKeyUsageData, ThrowOnError>) => (options.client ?? client).get<GetKeyUsageResponses, GetKeyUsageErrors, ThrowOnError>({ url: '/keys/{id}/usage', ...options });
@@ -62,6 +113,52 @@ export const getKeyUsage = <ThrowOnError extends boolean = false>(options: Optio
  */
 export const resetKeyUsage = <ThrowOnError extends boolean = false>(options: Options<ResetKeyUsageData, ThrowOnError>) => (options.client ?? client).post<ResetKeyUsageResponses, ResetKeyUsageErrors, ThrowOnError>({
     url: '/keys/{id}/usage/reset',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * List all models (admin sees enabled + disabled)
+ */
+export const listModelsAdmin = <ThrowOnError extends boolean = false>(options?: Options<ListModelsAdminData, ThrowOnError>) => (options?.client ?? client).get<ListModelsAdminResponses, unknown, ThrowOnError>({ url: '/models', ...options });
+
+/**
+ * Add a new model
+ */
+export const addModel = <ThrowOnError extends boolean = false>(options: Options<AddModelData, ThrowOnError>) => (options.client ?? client).post<AddModelResponses, AddModelErrors, ThrowOnError>({
+    url: '/models',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Reorder models
+ */
+export const reorderModels = <ThrowOnError extends boolean = false>(options: Options<ReorderModelsData, ThrowOnError>) => (options.client ?? client).put<ReorderModelsResponses, ReorderModelsErrors, ThrowOnError>({
+    url: '/models/reorder',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Delete a model
+ */
+export const deleteModel = <ThrowOnError extends boolean = false>(options: Options<DeleteModelData, ThrowOnError>) => (options.client ?? client).delete<DeleteModelResponses, DeleteModelErrors, ThrowOnError>({ url: '/models/{id}', ...options });
+
+/**
+ * Update a model (prices, enabled)
+ */
+export const updateModel = <ThrowOnError extends boolean = false>(options: Options<UpdateModelData, ThrowOnError>) => (options.client ?? client).put<UpdateModelResponses, UpdateModelErrors, ThrowOnError>({
+    url: '/models/{id}',
     ...options,
     headers: {
         'Content-Type': 'application/json',

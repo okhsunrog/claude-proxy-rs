@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use crate::AppState;
 use crate::auth::TokenUsageReport;
-use crate::constants::{ANTHROPIC_API_URL, MODELS};
+use crate::constants::ANTHROPIC_API_URL;
 use crate::error::ProxyError;
 use crate::transforms::{
     AnthropicResponse, OpenAIChatRequest, prepare_anthropic_request,
@@ -19,8 +19,9 @@ use crate::transforms::{
 
 use super::auth::{authenticate_openai, build_anthropic_request};
 
-pub async fn list_models() -> Json<Value> {
-    let models: Vec<Value> = MODELS
+pub async fn list_models(State(state): State<Arc<AppState>>) -> Json<Value> {
+    let model_ids = state.models.list_enabled_ids().await;
+    let models: Vec<Value> = model_ids
         .iter()
         .map(|id| {
             json!({
@@ -42,7 +43,20 @@ pub async fn chat_completions(
     headers: HeaderMap,
     Json(body): Json<OpenAIChatRequest>,
 ) -> Response {
-    let auth = match authenticate_openai(&headers, &state).await {
+    // Extract model before auth so we can validate it
+    let model_name = body
+        .model
+        .as_deref()
+        .unwrap_or("claude-sonnet-4-5")
+        .to_string();
+
+    // Parse model suffix (e.g., "claude-sonnet-4-5(high)" -> base model)
+    let base_model = model_name
+        .find('(')
+        .map(|i| &model_name[..i])
+        .unwrap_or(&model_name);
+
+    let auth = match authenticate_openai(&headers, &state, base_model).await {
         Ok(a) => a,
         Err(err) => return err.to_openai_response(),
     };
@@ -86,8 +100,13 @@ pub async fn chat_completions(
         let body_stream = response.bytes_stream();
         let client_keys = Arc::clone(&state.client_keys);
         let key_id = auth.client_key.id.clone();
-        let sse_stream =
-            stream_anthropic_to_openai_with_usage(body_stream, model, client_keys, key_id);
+        let sse_stream = stream_anthropic_to_openai_with_usage(
+            body_stream,
+            model,
+            client_keys,
+            key_id,
+            auth.model_pricing,
+        );
 
         Response::builder()
             .status(StatusCode::OK)
@@ -107,9 +126,18 @@ pub async fn chat_completions(
 
         // Record token usage
         let usage_report = TokenUsageReport::from_anthropic_usage(&anthropic_response.usage);
+
+        // Global usage (cost in microdollars)
+        let cost = usage_report.cost_microdollars(&auth.model_pricing);
         let _ = state
             .client_keys
-            .record_usage(&auth.client_key.id, usage_report.weighted_total())
+            .record_usage(&auth.client_key.id, cost)
+            .await;
+
+        // Per-model usage (raw tokens)
+        let _ = state
+            .client_keys
+            .record_model_usage(&auth.client_key.id, &model, &usage_report)
             .await;
 
         let openai_response = transform_openai_response(anthropic_response);

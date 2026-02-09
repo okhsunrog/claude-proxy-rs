@@ -6,7 +6,7 @@ mod error;
 mod routes;
 mod transforms;
 
-use auth::{AuthStore, ClientKeysStore, OAuthManager};
+use auth::{AuthStore, ClientKeysStore, ModelsStore, OAuthManager};
 use axum::ServiceExt;
 use axum::{
     Router,
@@ -38,6 +38,7 @@ const SESSION_TTL_SECS: u64 = 86400;
 pub struct AppState {
     pub auth_store: Arc<AuthStore>,
     pub client_keys: Arc<ClientKeysStore>,
+    pub models: Arc<ModelsStore>,
     pub oauth: OAuthManager,
     pub http_client: Client,
     pub admin_credentials: (String, String),
@@ -168,6 +169,7 @@ async fn main() {
 
     let auth_store = Arc::new(AuthStore::new());
     let client_keys = Arc::new(ClientKeysStore::new());
+    let models = Arc::new(ModelsStore::new());
     let oauth = OAuthManager::new(auth_store.clone());
 
     // Shared HTTP client with connection pooling
@@ -185,6 +187,7 @@ async fn main() {
     let state = Arc::new(AppState {
         auth_store,
         client_keys,
+        models,
         oauth,
         http_client,
         admin_credentials,
@@ -237,19 +240,42 @@ async fn main() {
 
     // Admin API routes with OpenAPI spec generation
     let (api_router, openapi) = OpenApiRouter::with_openapi(Default::default())
+        // OAuth
         .routes(routes!(routes::admin::get_oauth_status))
         .routes(routes!(routes::admin::start_oauth_flow))
         .routes(routes!(routes::admin::exchange_oauth_code))
         .routes(routes!(routes::admin::delete_oauth))
+        // Keys
         .routes(routes!(routes::admin::create_key))
         .routes(routes!(routes::admin::list_keys))
         .routes(routes!(routes::admin::delete_key))
         .routes(routes!(routes::admin::get_key_usage))
         .routes(routes!(routes::admin::update_key_limits))
         .routes(routes!(routes::admin::reset_key_usage))
+        // Models
+        .routes(routes!(routes::admin::list_models_admin))
+        .routes(routes!(routes::admin::add_model))
+        .routes(routes!(
+            routes::admin::delete_model,
+            routes::admin::update_model
+        ))
+        .routes(routes!(routes::admin::reorder_models))
+        // Per-key model access
+        .routes(routes!(
+            routes::admin::get_key_models,
+            routes::admin::set_key_models
+        ))
+        // Per-key per-model usage
+        .routes(routes!(routes::admin::get_key_model_usage))
+        .routes(routes!(
+            routes::admin::set_key_model_limits,
+            routes::admin::remove_key_model_limits
+        ))
+        .routes(routes!(routes::admin::reset_key_model_usage))
         .split_for_parts();
 
-    let api_router = api_router.merge(
+    // Swagger UI + OpenAPI spec (accessible without authentication)
+    let swagger_routes = Router::new().merge(
         utoipa_swagger_ui::SwaggerUi::new("/swagger").url("/api-docs/openapi.json", openapi),
     );
 
@@ -269,8 +295,11 @@ async fn main() {
                 admin_auth_middleware,
             ));
 
-    // Combine: auth routes (unprotected) + protected routes
-    let admin_routes = Router::new().merge(auth_routes).merge(protected_routes);
+    // Combine: swagger (unprotected) + auth routes (unprotected) + protected routes
+    let admin_routes = Router::new()
+        .merge(swagger_routes)
+        .merge(auth_routes)
+        .merge(protected_routes);
 
     // API routes
     let api_routes = Router::new()

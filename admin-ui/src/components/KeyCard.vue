@@ -1,16 +1,25 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import type { ClientKey, UpdateLimitsRequest } from '../client'
-import type { KeyUsageResponse } from '../composables/useKeys'
+import type { ClientKey, Model, UpdateLimitsRequest } from '../client'
+import type { KeyUsageResponse, KeyModelsResponse, KeyModelUsageResponse } from '../composables/useKeys'
 import UsageStats from './UsageStats.vue'
 import TokenLimitsForm from './TokenLimitsForm.vue'
+import KeyModelAccess from './KeyModelAccess.vue'
+import ModelUsageTable from './ModelUsageTable.vue'
 
 const props = defineProps<{
   keyData: ClientKey
   usage: KeyUsageResponse | undefined
+  availableModels: Model[]
   deleteKey: (id: string) => Promise<void>
   updateLimits: (id: string, limits: UpdateLimitsRequest) => Promise<void>
   resetUsage: (id: string, type: 'hourly' | 'weekly' | 'total' | 'all') => Promise<void>
+  loadKeyModels: (id: string) => Promise<KeyModelsResponse>
+  setKeyModels: (id: string, models: string[]) => Promise<void>
+  loadKeyModelUsage: (id: string) => Promise<KeyModelUsageResponse>
+  setModelLimits: (keyId: string, model: string, limits: UpdateLimitsRequest) => Promise<void>
+  removeModelLimits: (keyId: string, model: string) => Promise<void>
+  resetModelUsage: (keyId: string, model: string, type: 'hourly' | 'weekly' | 'total' | 'all') => Promise<void>
 }>()
 
 const emit = defineEmits<{
@@ -71,6 +80,21 @@ async function handleDelete() {
       :usage="usage"
       :update-limits="updateLimits"
       :reset-usage="resetUsage"
+    />
+
+    <KeyModelAccess
+      :key-id="keyData.id"
+      :available-models="availableModels"
+      :load-key-models="loadKeyModels"
+      :set-key-models="setKeyModels"
+    />
+
+    <ModelUsageTable
+      :key-id="keyData.id"
+      :load-key-model-usage="loadKeyModelUsage"
+      :set-model-limits="setModelLimits"
+      :remove-model-limits="removeModelLimits"
+      :reset-model-usage="resetModelUsage"
     />
 
     <UModal v-model:open="showDeleteModal" title="Confirm Delete" :ui="{ width: 'max-w-md' }">

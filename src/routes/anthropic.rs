@@ -24,10 +24,17 @@ pub async fn messages(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    let auth = match authenticate_anthropic(&headers, &state).await {
+    let model = body
+        .get("model")
+        .and_then(|m| m.as_str())
+        .unwrap_or("claude-sonnet-4-5");
+
+    let auth = match authenticate_anthropic(&headers, &state, model).await {
         Ok(a) => a,
         Err(err) => return err.to_anthropic_response(),
     };
+
+    let model = model.to_string();
 
     let stream = body
         .get("stream")
@@ -68,8 +75,13 @@ pub async fn messages(
         let client_keys = Arc::clone(&state.client_keys);
         let key_id = auth.client_key.id.clone();
         // Transform stream to strip mcp_ prefix from tool names and track usage
-        let transformed_stream =
-            stream_strip_mcp_prefix_with_usage(body_stream, client_keys, key_id);
+        let transformed_stream = stream_strip_mcp_prefix_with_usage(
+            body_stream,
+            client_keys,
+            key_id,
+            model,
+            auth.model_pricing,
+        );
 
         Response::builder()
             .status(StatusCode::OK)
@@ -90,9 +102,18 @@ pub async fn messages(
         // Record token usage
         if let Some(usage) = json_response.get("usage") {
             let usage_report = TokenUsageReport::from_json(usage);
+
+            // Global usage (cost in microdollars)
+            let cost = usage_report.cost_microdollars(&auth.model_pricing);
             let _ = state
                 .client_keys
-                .record_usage(&auth.client_key.id, usage_report.weighted_total())
+                .record_usage(&auth.client_key.id, cost)
+                .await;
+
+            // Per-model usage (raw tokens)
+            let _ = state
+                .client_keys
+                .record_model_usage(&auth.client_key.id, &model, &usage_report)
                 .await;
         }
 
@@ -107,7 +128,12 @@ pub async fn count_tokens(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    let auth = match authenticate_anthropic(&headers, &state).await {
+    let model = body
+        .get("model")
+        .and_then(|m| m.as_str())
+        .unwrap_or("claude-sonnet-4-5");
+
+    let auth = match authenticate_anthropic(&headers, &state, model).await {
         Ok(a) => a,
         Err(err) => return err.to_anthropic_response(),
     };

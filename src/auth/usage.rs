@@ -6,6 +6,7 @@
 use serde::Deserialize;
 use serde_json::Value;
 
+use super::models::ModelPricing;
 use crate::transforms::AnthropicUsage;
 
 /// Weight applied to cache read tokens (they cost 0.1x of regular input)
@@ -42,6 +43,19 @@ impl TokenUsageReport {
             + self.cache_creation_tokens as f64
             + (self.cache_read_tokens as f64 * CACHE_READ_WEIGHT);
         total.round() as u64
+    }
+
+    /// Calculate cost in microdollars using model pricing.
+    ///
+    /// Prices are in $/MTok. Since 1 microdollar = $0.000001 = 1/1,000,000 USD,
+    /// and price is $/MTok = $/1,000,000 tokens, the formula simplifies to:
+    /// cost_microdollars = tokens * price_per_MTok
+    pub fn cost_microdollars(&self, pricing: &ModelPricing) -> u64 {
+        let cost = self.input_tokens as f64 * pricing.input_price
+            + self.output_tokens as f64 * pricing.output_price
+            + self.cache_read_tokens as f64 * pricing.cache_read_price
+            + self.cache_creation_tokens as f64 * pricing.cache_write_price;
+        cost.round() as u64
     }
 
     /// Add another usage report to this one (useful for accumulating in streams).
