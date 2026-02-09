@@ -105,16 +105,25 @@ pub async fn messages(
 
             // Global usage (cost in microdollars)
             let cost = usage_report.cost_microdollars(&auth.model_pricing);
-            let _ = state
+            if let Err(e) = state
                 .client_keys
                 .record_usage(&auth.client_key.id, cost)
-                .await;
+                .await
+            {
+                tracing::warn!("Failed to record usage for key {}: {e}", auth.client_key.id);
+            }
 
             // Per-model usage (raw tokens)
-            let _ = state
+            if let Err(e) = state
                 .client_keys
                 .record_model_usage(&auth.client_key.id, &model, &usage_report)
-                .await;
+                .await
+            {
+                tracing::warn!(
+                    "Failed to record model usage for key {}/{model}: {e}",
+                    auth.client_key.id
+                );
+            }
         }
 
         // Strip mcp_ prefix from tool names in response

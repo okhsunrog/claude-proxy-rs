@@ -96,21 +96,25 @@ impl AuthStore {
                 .map_err(|e| ProxyError::DatabaseError(format!("Failed to save auth: {e}")))?;
 
                 // Set optional fields
-                if let Some(aid) = account_id {
-                    let _ = conn
+                if let Some(aid) = account_id
+                    && let Err(e) = conn
                         .execute(
                             "UPDATE auth SET account_id = ? WHERE provider = ?",
                             (aid.as_str(), provider),
                         )
-                        .await;
+                        .await
+                {
+                    tracing::warn!("Failed to save account_id for {provider}: {e}");
                 }
-                if let Some(eurl) = enterprise_url {
-                    let _ = conn
+                if let Some(eurl) = enterprise_url
+                    && let Err(e) = conn
                         .execute(
                             "UPDATE auth SET enterprise_url = ? WHERE provider = ?",
                             (eurl.as_str(), provider),
                         )
-                        .await;
+                        .await
+                {
+                    tracing::warn!("Failed to save enterprise_url for {provider}: {e}");
                 }
             }
             Auth::Api { key } => {

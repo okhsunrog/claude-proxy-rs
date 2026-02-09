@@ -94,7 +94,9 @@ async fn authenticate_key(
         return Err(ProxyError::RateLimitExceeded(msg));
     }
 
-    let _ = state.client_keys.update_last_used(&client_key.id).await;
+    if let Err(e) = state.client_keys.update_last_used(&client_key.id).await {
+        tracing::warn!("Failed to update last_used for key {}: {e}", client_key.id);
+    }
 
     let token = get_oauth_token(state).await?;
 

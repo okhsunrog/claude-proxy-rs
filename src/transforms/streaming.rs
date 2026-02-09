@@ -318,11 +318,15 @@ pub fn stream_anthropic_to_openai_with_usage(
 
         // Record usage after stream ends
         let cost = usage_report.cost_microdollars(&model_pricing);
-        if cost > 0 {
-            let _ = client_keys.record_usage(&key_id, cost).await;
+        if cost > 0
+            && let Err(e) = client_keys.record_usage(&key_id, cost).await
+        {
+            tracing::warn!("Failed to record streaming usage for key {key_id}: {e}");
         }
         // Per-model usage (raw tokens)
-        let _ = client_keys.record_model_usage(&key_id, &model, &usage_report).await;
+        if let Err(e) = client_keys.record_model_usage(&key_id, &model, &usage_report).await {
+            tracing::warn!("Failed to record streaming model usage for key {key_id}/{model}: {e}");
+        }
     }
 }
 
@@ -450,10 +454,14 @@ pub fn stream_strip_mcp_prefix_with_usage(
 
         // Record usage after stream ends
         let cost = usage_report.cost_microdollars(&model_pricing);
-        if cost > 0 {
-            let _ = client_keys.record_usage(&key_id, cost).await;
+        if cost > 0
+            && let Err(e) = client_keys.record_usage(&key_id, cost).await
+        {
+            tracing::warn!("Failed to record streaming usage for key {key_id}: {e}");
         }
         // Per-model usage (raw tokens)
-        let _ = client_keys.record_model_usage(&key_id, &model, &usage_report).await;
+        if let Err(e) = client_keys.record_model_usage(&key_id, &model, &usage_report).await {
+            tracing::warn!("Failed to record streaming model usage for key {key_id}/{model}: {e}");
+        }
     }
 }
