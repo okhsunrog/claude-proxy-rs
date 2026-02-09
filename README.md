@@ -183,10 +183,10 @@ These fields are additive — standard OpenAI clients will ignore them, while cl
 
 ## Data Storage
 
-Credentials stored with secure permissions (0600) in:
-- **Linux**: `~/.local/share/claude-proxy/`
-- **macOS**: `~/Library/Application Support/claude-proxy/`
-- **Windows**: `%APPDATA%\claude-proxy\`
+All data (OAuth credentials, API keys, usage counters) is stored in a [Turso](https://github.com/tursodatabase/turso) embedded database:
+- **Linux**: `~/.local/share/claude-proxy/proxy.db`
+- **macOS**: `~/Library/Application Support/claude-proxy/proxy.db`
+- **Windows**: `%APPDATA%\claude-proxy\proxy.db`
 
 ## Development
 

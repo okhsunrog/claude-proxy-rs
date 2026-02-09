@@ -2,14 +2,13 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use subtle::ConstantTimeEq;
-use tokio::fs;
-use tokio::io::AsyncWriteExt;
-use tokio::sync::RwLock;
 use utoipa::ToSchema;
 use uuid::Uuid;
+
+use crate::db;
+use crate::error::ProxyError;
 
 /// Token usage limits for a client key (all optional)
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
@@ -60,35 +59,13 @@ pub struct ClientKey {
     pub created_at: u64,
     pub last_used_at: Option<u64>,
     pub enabled: bool,
-    /// Token usage limits (optional)
-    #[serde(default, skip_serializing_if = "is_default_limits")]
+    #[serde(default)]
     pub limits: TokenLimits,
-    /// Current token usage
-    #[serde(default, skip_serializing_if = "is_default_usage")]
+    #[serde(default)]
     pub usage: TokenUsage,
 }
 
-fn is_default_limits(limits: &TokenLimits) -> bool {
-    limits.hourly_limit.is_none() && limits.weekly_limit.is_none() && limits.total_limit.is_none()
-}
-
-fn is_default_usage(usage: &TokenUsage) -> bool {
-    usage.hourly_tokens == 0
-        && usage.weekly_tokens == 0
-        && usage.total_tokens == 0
-        && usage.hourly_reset_at == 0
-        && usage.weekly_reset_at == 0
-}
-
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct KeysFile {
-    keys: Vec<ClientKey>,
-}
-
-pub struct ClientKeysStore {
-    path: PathBuf,
-    keys: RwLock<Vec<ClientKey>>,
-}
+pub struct ClientKeysStore;
 
 fn timestamp_millis() -> u64 {
     SystemTime::now()
@@ -97,32 +74,72 @@ fn timestamp_millis() -> u64 {
         .as_millis() as u64
 }
 
-impl ClientKeysStore {
-    pub async fn new(path: PathBuf) -> Self {
-        let keys = if path.exists() {
-            match fs::read_to_string(&path).await {
-                Ok(content) => {
-                    let file: KeysFile = serde_json::from_str(&content).unwrap_or_default();
-                    file.keys
-                }
-                Err(_) => Vec::new(),
-            }
-        } else {
-            Vec::new()
-        };
+/// Helper to read a nullable i64 column as Option<u64>
+fn opt_u64(row: &turso::Row, idx: usize) -> Option<u64> {
+    row.get::<Option<i64>>(idx).ok().flatten().map(|v| v as u64)
+}
 
-        Self {
-            path,
-            keys: RwLock::new(keys),
-        }
+/// Helper to read a non-null i64 column as u64
+fn get_u64(row: &turso::Row, idx: usize) -> u64 {
+    row.get::<i64>(idx).unwrap_or(0) as u64
+}
+
+/// Parse a ClientKey from a row with columns:
+/// id, key, name, enabled, created_at, last_used_at,
+/// hourly_limit, weekly_limit, total_limit,
+/// hourly_usage, weekly_usage, total_usage,
+/// hourly_reset_at, weekly_reset_at
+fn row_to_client_key(row: &turso::Row) -> Option<ClientKey> {
+    Some(ClientKey {
+        id: row.get(0).ok()?,
+        key: row.get(1).ok()?,
+        name: row.get(2).ok()?,
+        enabled: get_u64(row, 3) != 0,
+        created_at: get_u64(row, 4),
+        last_used_at: opt_u64(row, 5),
+        limits: TokenLimits {
+            hourly_limit: opt_u64(row, 6),
+            weekly_limit: opt_u64(row, 7),
+            total_limit: opt_u64(row, 8),
+        },
+        usage: TokenUsage {
+            hourly_tokens: get_u64(row, 9),
+            hourly_reset_at: get_u64(row, 12),
+            weekly_tokens: get_u64(row, 10),
+            weekly_reset_at: get_u64(row, 13),
+            total_tokens: get_u64(row, 11),
+        },
+    })
+}
+
+const SELECT_ALL_COLS: &str = "id, key, name, enabled, created_at, last_used_at, hourly_limit, weekly_limit, total_limit, hourly_usage, weekly_usage, total_usage, hourly_reset_at, weekly_reset_at";
+
+impl ClientKeysStore {
+    pub fn new() -> Self {
+        Self
     }
 
     pub async fn list(&self) -> Vec<ClientKey> {
-        self.keys.read().await.clone()
+        let Ok(conn) = db::get_conn() else {
+            return Vec::new();
+        };
+        let Ok(mut rows) = conn
+            .query(&format!("SELECT {SELECT_ALL_COLS} FROM client_keys"), ())
+            .await
+        else {
+            return Vec::new();
+        };
+
+        let mut keys = Vec::new();
+        while let Ok(Some(row)) = rows.next().await {
+            if let Some(key) = row_to_client_key(&row) {
+                keys.push(key);
+            }
+        }
+        keys
     }
 
-    pub async fn create(&self, name: String) -> Result<ClientKey, std::io::Error> {
-        // Generate random bytes before any await to avoid Send issues with ThreadRng
+    pub async fn create(&self, name: String) -> Result<ClientKey, ProxyError> {
         let key_suffix = {
             let mut rng = rand::rng();
             let mut bytes = [0u8; 32];
@@ -130,118 +147,167 @@ impl ClientKeysStore {
             URL_SAFE_NO_PAD.encode(bytes)
         };
         let key = format!("sk-proxy-{}", key_suffix);
+        let id = Uuid::new_v4().to_string();
+        let now = timestamp_millis();
 
-        let client_key = ClientKey {
-            id: Uuid::new_v4().to_string(),
+        let conn = db::get_conn()?;
+        conn.execute(
+            "INSERT INTO client_keys (id, key, name, enabled, created_at) VALUES (?, ?, ?, 1, ?)",
+            (id.as_str(), key.as_str(), name.as_str(), now as i64),
+        )
+        .await
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to create key: {e}")))?;
+
+        Ok(ClientKey {
+            id,
             key,
             name,
-            created_at: timestamp_millis(),
+            created_at: now,
             last_used_at: None,
             enabled: true,
             limits: TokenLimits::default(),
             usage: TokenUsage::default(),
-        };
-
-        {
-            let mut guard = self.keys.write().await;
-            guard.push(client_key.clone());
-        }
-
-        self.save().await?;
-        Ok(client_key)
+        })
     }
 
-    pub async fn delete(&self, id: &str) -> Result<bool, std::io::Error> {
-        let deleted = {
-            let mut guard = self.keys.write().await;
-            let len_before = guard.len();
-            guard.retain(|k| k.id != id);
-            guard.len() < len_before
-        };
-
-        if deleted {
-            self.save().await?;
-        }
-        Ok(deleted)
+    pub async fn delete(&self, id: &str) -> Result<bool, ProxyError> {
+        let conn = db::get_conn()?;
+        let affected = conn
+            .execute("DELETE FROM client_keys WHERE id = ?", [id])
+            .await
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to delete key: {e}")))?;
+        Ok(affected > 0)
     }
 
-    /// Validate an API key using constant-time comparison to prevent timing attacks
+    /// Validate an API key using constant-time comparison to prevent timing attacks.
+    /// Fetches all enabled keys and compares in constant time.
     pub async fn validate(&self, key: &str) -> Option<ClientKey> {
-        let guard = self.keys.read().await;
-        guard
-            .iter()
-            .find(|k| k.enabled && k.key.as_bytes().ct_eq(key.as_bytes()).into())
-            .cloned()
-    }
+        let Ok(conn) = db::get_conn() else {
+            return None;
+        };
+        let Ok(mut rows) = conn
+            .query(
+                &format!("SELECT {SELECT_ALL_COLS} FROM client_keys WHERE enabled = 1"),
+                (),
+            )
+            .await
+        else {
+            return None;
+        };
 
-    pub async fn update_last_used(&self, id: &str) -> Result<(), std::io::Error> {
-        {
-            let mut guard = self.keys.write().await;
-            if let Some(key) = guard.iter_mut().find(|k| k.id == id) {
-                key.last_used_at = Some(timestamp_millis());
+        let mut result = None;
+        while let Ok(Some(row)) = rows.next().await {
+            if let Some(ck) = row_to_client_key(&row)
+                && ck.key.as_bytes().ct_eq(key.as_bytes()).into()
+            {
+                result = Some(ck);
             }
+            // Continue iterating all rows to maintain constant time
         }
-
-        self.save().await
+        result
     }
 
-    /// Get a key by ID
+    pub async fn update_last_used(&self, id: &str) -> Result<(), ProxyError> {
+        let now = timestamp_millis();
+        let conn = db::get_conn()?;
+        conn.execute(
+            "UPDATE client_keys SET last_used_at = ? WHERE id = ?",
+            (now as i64, id),
+        )
+        .await
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to update last_used: {e}")))?;
+        Ok(())
+    }
+
     pub async fn get(&self, id: &str) -> Option<ClientKey> {
-        let guard = self.keys.read().await;
-        guard.iter().find(|k| k.id == id).cloned()
+        let conn = db::get_conn().ok()?;
+        let mut rows = conn
+            .query(
+                &format!("SELECT {SELECT_ALL_COLS} FROM client_keys WHERE id = ?"),
+                [id],
+            )
+            .await
+            .ok()?;
+        let row = rows.next().await.ok()??;
+        row_to_client_key(&row)
     }
 
     /// Check if a key's usage is within limits.
     /// Automatically resets hourly/weekly counters if time has passed.
-    /// Returns Ok(()) if within limits, Err with message if exceeded.
     pub async fn check_limits(&self, id: &str) -> Result<(), String> {
         let now = timestamp_millis();
+        let conn = db::get_conn().map_err(|e| e.to_string())?;
 
-        let mut guard = self.keys.write().await;
-        let key = guard
-            .iter_mut()
-            .find(|k| k.id == id)
+        // Read current state
+        let mut rows = conn
+            .query(
+                "SELECT hourly_limit, weekly_limit, total_limit, hourly_usage, weekly_usage, total_usage, hourly_reset_at, weekly_reset_at FROM client_keys WHERE id = ?",
+                [id],
+            )
+            .await
+            .map_err(|e| format!("DB error: {e}"))?;
+
+        let row = rows
+            .next()
+            .await
+            .map_err(|e| format!("DB error: {e}"))?
             .ok_or_else(|| "Key not found".to_string())?;
 
-        // Auto-reset hourly counter if hour has passed
-        if key.usage.hourly_reset_at > 0 && now >= key.usage.hourly_reset_at {
-            key.usage.hourly_tokens = 0;
-            key.usage.hourly_reset_at = 0;
+        let hourly_limit = opt_u64(&row, 0);
+        let weekly_limit = opt_u64(&row, 1);
+        let total_limit = opt_u64(&row, 2);
+        let mut hourly_usage = get_u64(&row, 3);
+        let mut weekly_usage = get_u64(&row, 4);
+        let total_usage = get_u64(&row, 5);
+        let mut hourly_reset_at = get_u64(&row, 6);
+        let mut weekly_reset_at = get_u64(&row, 7);
+
+        // Auto-reset expired counters
+        let mut needs_update = false;
+        if hourly_reset_at > 0 && now >= hourly_reset_at {
+            hourly_usage = 0;
+            hourly_reset_at = 0;
+            needs_update = true;
+        }
+        if weekly_reset_at > 0 && now >= weekly_reset_at {
+            weekly_usage = 0;
+            weekly_reset_at = 0;
+            needs_update = true;
         }
 
-        // Auto-reset weekly counter if week has passed
-        if key.usage.weekly_reset_at > 0 && now >= key.usage.weekly_reset_at {
-            key.usage.weekly_tokens = 0;
-            key.usage.weekly_reset_at = 0;
+        if needs_update {
+            let _ = conn
+                .execute(
+                    "UPDATE client_keys SET hourly_usage = ?, weekly_usage = ?, hourly_reset_at = ?, weekly_reset_at = ? WHERE id = ?",
+                    (hourly_usage as i64, weekly_usage as i64, hourly_reset_at as i64, weekly_reset_at as i64, id),
+                )
+                .await;
         }
 
-        // Check hourly limit
-        if let Some(limit) = key.limits.hourly_limit
-            && key.usage.hourly_tokens >= limit
+        if let Some(limit) = hourly_limit
+            && hourly_usage >= limit
         {
             return Err(format!(
                 "Hourly token limit exceeded ({}/{})",
-                key.usage.hourly_tokens, limit
+                hourly_usage, limit
             ));
         }
 
-        // Check weekly limit
-        if let Some(limit) = key.limits.weekly_limit
-            && key.usage.weekly_tokens >= limit
+        if let Some(limit) = weekly_limit
+            && weekly_usage >= limit
         {
             return Err(format!(
                 "Weekly token limit exceeded ({}/{})",
-                key.usage.weekly_tokens, limit
+                weekly_usage, limit
             ));
         }
 
-        // Check total limit
-        if let Some(limit) = key.limits.total_limit
-            && key.usage.total_tokens >= limit
+        if let Some(limit) = total_limit
+            && total_usage >= limit
         {
             return Err(format!(
                 "Total token limit exceeded ({}/{})",
-                key.usage.total_tokens, limit
+                total_usage, limit
             ));
         }
 
@@ -250,56 +316,92 @@ impl ClientKeysStore {
 
     /// Record token usage for a key.
     /// Initializes reset timestamps if not set.
-    pub async fn record_usage(&self, id: &str, tokens: u64) -> Result<(), std::io::Error> {
+    pub async fn record_usage(&self, id: &str, tokens: u64) -> Result<(), ProxyError> {
         let now = timestamp_millis();
-        let one_hour_ms = 60 * 60 * 1000;
-        let one_week_ms = 7 * 24 * 60 * 60 * 1000;
+        let one_hour_ms: u64 = 60 * 60 * 1000;
+        let one_week_ms: u64 = 7 * 24 * 60 * 60 * 1000;
 
-        {
-            let mut guard = self.keys.write().await;
-            if let Some(key) = guard.iter_mut().find(|k| k.id == id) {
-                // Auto-reset and initialize hourly counter
-                if key.usage.hourly_reset_at == 0 || now >= key.usage.hourly_reset_at {
-                    key.usage.hourly_tokens = 0;
-                    key.usage.hourly_reset_at = now + one_hour_ms;
-                }
+        let conn = db::get_conn()?;
 
-                // Auto-reset and initialize weekly counter
-                if key.usage.weekly_reset_at == 0 || now >= key.usage.weekly_reset_at {
-                    key.usage.weekly_tokens = 0;
-                    key.usage.weekly_reset_at = now + one_week_ms;
-                }
+        // Read current reset timestamps
+        let mut rows = conn
+            .query(
+                "SELECT hourly_reset_at, weekly_reset_at FROM client_keys WHERE id = ?",
+                [id],
+            )
+            .await
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to read usage: {e}")))?;
 
-                // Add tokens to all counters
-                key.usage.hourly_tokens += tokens;
-                key.usage.weekly_tokens += tokens;
-                key.usage.total_tokens += tokens;
-            }
+        let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to read usage row: {e}")))?
+        else {
+            return Ok(());
+        };
+
+        let hourly_reset_at = get_u64(&row, 0);
+        let weekly_reset_at = get_u64(&row, 1);
+
+        // Determine if counters need reset
+        let reset_hourly = hourly_reset_at == 0 || now >= hourly_reset_at;
+        let reset_weekly = weekly_reset_at == 0 || now >= weekly_reset_at;
+
+        let new_hourly_reset = if reset_hourly {
+            now + one_hour_ms
+        } else {
+            hourly_reset_at
+        };
+        let new_weekly_reset = if reset_weekly {
+            now + one_week_ms
+        } else {
+            weekly_reset_at
+        };
+
+        // Build update: reset counters if needed, then add tokens
+        if reset_hourly && reset_weekly {
+            conn.execute(
+                "UPDATE client_keys SET hourly_usage = ?, weekly_usage = ?, total_usage = total_usage + ?, hourly_reset_at = ?, weekly_reset_at = ? WHERE id = ?",
+                (tokens as i64, tokens as i64, tokens as i64, new_hourly_reset as i64, new_weekly_reset as i64, id),
+            ).await
+        } else if reset_hourly {
+            conn.execute(
+                "UPDATE client_keys SET hourly_usage = ?, weekly_usage = weekly_usage + ?, total_usage = total_usage + ?, hourly_reset_at = ?, weekly_reset_at = ? WHERE id = ?",
+                (tokens as i64, tokens as i64, tokens as i64, new_hourly_reset as i64, new_weekly_reset as i64, id),
+            ).await
+        } else if reset_weekly {
+            conn.execute(
+                "UPDATE client_keys SET hourly_usage = hourly_usage + ?, weekly_usage = ?, total_usage = total_usage + ?, hourly_reset_at = ?, weekly_reset_at = ? WHERE id = ?",
+                (tokens as i64, tokens as i64, tokens as i64, new_hourly_reset as i64, new_weekly_reset as i64, id),
+            ).await
+        } else {
+            conn.execute(
+                "UPDATE client_keys SET hourly_usage = hourly_usage + ?, weekly_usage = weekly_usage + ?, total_usage = total_usage + ? WHERE id = ?",
+                (tokens as i64, tokens as i64, tokens as i64, id),
+            ).await
         }
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to record usage: {e}")))?;
 
-        self.save().await
+        Ok(())
     }
 
     /// Get usage statistics for a key
     pub async fn get_usage(&self, id: &str) -> Option<(TokenLimits, TokenUsage)> {
         let now = timestamp_millis();
-        let guard = self.keys.read().await;
+        let key = self.get(id).await?;
 
-        guard.iter().find(|k| k.id == id).map(|key| {
-            let mut usage = key.usage.clone();
+        let mut usage = key.usage;
+        // Show 0 if counters have expired (read-only view)
+        if usage.hourly_reset_at > 0 && now >= usage.hourly_reset_at {
+            usage.hourly_tokens = 0;
+            usage.hourly_reset_at = 0;
+        }
+        if usage.weekly_reset_at > 0 && now >= usage.weekly_reset_at {
+            usage.weekly_tokens = 0;
+            usage.weekly_reset_at = 0;
+        }
 
-            // Show 0 if counters have expired (but don't modify stored data)
-            if usage.hourly_reset_at > 0 && now >= usage.hourly_reset_at {
-                usage.hourly_tokens = 0;
-                usage.hourly_reset_at = 0;
-            }
-            if usage.weekly_reset_at > 0 && now >= usage.weekly_reset_at {
-                usage.weekly_tokens = 0;
-                usage.weekly_reset_at = 0;
-            }
-
-            (key.limits.clone(), usage)
-        })
+        Some((key.limits, usage))
     }
 
     /// Reset usage counters for a key
@@ -307,82 +409,58 @@ impl ClientKeysStore {
         &self,
         id: &str,
         reset_type: UsageResetType,
-    ) -> Result<bool, std::io::Error> {
-        let modified = {
-            let mut guard = self.keys.write().await;
-            if let Some(key) = guard.iter_mut().find(|k| k.id == id) {
-                match reset_type {
-                    UsageResetType::Hourly => {
-                        key.usage.hourly_tokens = 0;
-                        key.usage.hourly_reset_at = 0;
-                    }
-                    UsageResetType::Weekly => {
-                        key.usage.weekly_tokens = 0;
-                        key.usage.weekly_reset_at = 0;
-                    }
-                    UsageResetType::Total => {
-                        key.usage.total_tokens = 0;
-                    }
-                    UsageResetType::All => {
-                        key.usage = TokenUsage::default();
-                    }
-                }
-                true
-            } else {
-                false
+    ) -> Result<bool, ProxyError> {
+        let conn = db::get_conn()?;
+
+        let sql = match reset_type {
+            UsageResetType::Hourly => {
+                "UPDATE client_keys SET hourly_usage = 0, hourly_reset_at = 0 WHERE id = ?"
+            }
+            UsageResetType::Weekly => {
+                "UPDATE client_keys SET weekly_usage = 0, weekly_reset_at = 0 WHERE id = ?"
+            }
+            UsageResetType::Total => "UPDATE client_keys SET total_usage = 0 WHERE id = ?",
+            UsageResetType::All => {
+                "UPDATE client_keys SET hourly_usage = 0, weekly_usage = 0, total_usage = 0, hourly_reset_at = 0, weekly_reset_at = 0 WHERE id = ?"
             }
         };
 
-        if modified {
-            self.save().await?;
-        }
-        Ok(modified)
+        let affected = conn
+            .execute(sql, [id])
+            .await
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to reset usage: {e}")))?;
+
+        Ok(affected > 0)
     }
 
     /// Update limits for a key
-    pub async fn set_limits(&self, id: &str, limits: TokenLimits) -> Result<bool, std::io::Error> {
-        let modified = {
-            let mut guard = self.keys.write().await;
-            if let Some(key) = guard.iter_mut().find(|k| k.id == id) {
-                key.limits = limits;
-                true
-            } else {
-                false
-            }
+    pub async fn set_limits(&self, id: &str, limits: TokenLimits) -> Result<bool, ProxyError> {
+        let conn = db::get_conn()?;
+
+        // Build SET clause dynamically to handle NULLs properly
+        let hourly_sql = match limits.hourly_limit {
+            Some(v) => format!("hourly_limit = {v}"),
+            None => "hourly_limit = NULL".to_string(),
+        };
+        let weekly_sql = match limits.weekly_limit {
+            Some(v) => format!("weekly_limit = {v}"),
+            None => "weekly_limit = NULL".to_string(),
+        };
+        let total_sql = match limits.total_limit {
+            Some(v) => format!("total_limit = {v}"),
+            None => "total_limit = NULL".to_string(),
         };
 
-        if modified {
-            self.save().await?;
-        }
-        Ok(modified)
-    }
+        let sql = format!(
+            "UPDATE client_keys SET {}, {}, {} WHERE id = ?",
+            hourly_sql, weekly_sql, total_sql
+        );
 
-    async fn save(&self) -> Result<(), std::io::Error> {
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent).await?;
-        }
+        let affected = conn
+            .execute(&sql, [id])
+            .await
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to set limits: {e}")))?;
 
-        let guard = self.keys.read().await;
-        let file = KeysFile {
-            keys: guard.clone(),
-        };
-        let content = serde_json::to_string_pretty(&file)?;
-
-        // Write to a temp file first, then rename for atomicity
-        let temp_path = self.path.with_extension("tmp");
-
-        let mut f = fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&temp_path)
-            .await?;
-
-        f.write_all(content.as_bytes()).await?;
-        f.sync_all().await?;
-
-        fs::rename(&temp_path, &self.path).await?;
-        Ok(())
+        Ok(affected > 0)
     }
 }

@@ -9,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
 use super::storage::{Auth, AuthStore};
+use crate::error::ProxyError;
 
 const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const AUTHORIZE_URL: &str = "https://claude.ai/oauth/authorize";
@@ -205,7 +206,7 @@ impl OAuthManager {
         Ok(Some(token.access_token))
     }
 
-    pub async fn logout(&self) -> Result<(), std::io::Error> {
+    pub async fn logout(&self) -> Result<(), ProxyError> {
         *self.verifier.write().await = None;
         self.auth_store.remove("anthropic").await
     }

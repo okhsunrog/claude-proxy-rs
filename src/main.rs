@@ -1,6 +1,7 @@
 mod auth;
 mod config;
 mod constants;
+mod db;
 mod error;
 mod routes;
 mod transforms;
@@ -157,13 +158,16 @@ async fn main() {
     let args = Args::parse();
     let config = Config::from_env();
 
-    let auth_path = config.auth_path();
-    let client_keys_path = config.client_keys_path();
+    // Initialize database (before moving fields out of config)
+    db::init_db(&config.db_path())
+        .await
+        .expect("Failed to initialize database");
+
     let host = args.host.unwrap_or(config.host);
     let port = args.port.unwrap_or(config.port);
 
-    let auth_store = Arc::new(AuthStore::new(auth_path).await);
-    let client_keys = Arc::new(ClientKeysStore::new(client_keys_path).await);
+    let auth_store = Arc::new(AuthStore::new());
+    let client_keys = Arc::new(ClientKeysStore::new());
     let oauth = OAuthManager::new(auth_store.clone());
 
     // Shared HTTP client with connection pooling

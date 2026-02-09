@@ -33,6 +33,9 @@ pub enum ProxyError {
 
     #[error("Missing required header: {0}")]
     MissingHeader(String),
+
+    #[error("Database error: {0}")]
+    DatabaseError(String),
 }
 
 impl ProxyError {
@@ -43,7 +46,7 @@ impl ProxyError {
             | ProxyError::MissingHeader(_)
             | ProxyError::NoAuthConfigured => (StatusCode::UNAUTHORIZED, self.to_string()),
             ProxyError::RateLimitExceeded(_) => (StatusCode::TOO_MANY_REQUESTS, self.to_string()),
-            ProxyError::OAuthError(_) | ProxyError::IoError(_) => {
+            ProxyError::OAuthError(_) | ProxyError::IoError(_) | ProxyError::DatabaseError(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
             }
             ProxyError::NetworkError(_)
@@ -69,7 +72,7 @@ impl ProxyError {
                 "rate_limit_error",
                 self.to_string(),
             ),
-            ProxyError::OAuthError(_) | ProxyError::IoError(_) => (
+            ProxyError::OAuthError(_) | ProxyError::IoError(_) | ProxyError::DatabaseError(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "api_error",
                 self.to_string(),

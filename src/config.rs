@@ -61,11 +61,7 @@ impl Config {
         }
     }
 
-    pub fn auth_path(&self) -> PathBuf {
-        self.data_dir.join("auth.json")
-    }
-
-    pub fn client_keys_path(&self) -> PathBuf {
-        self.data_dir.join("client-keys.json")
+    pub fn db_path(&self) -> PathBuf {
+        self.data_dir.join("proxy.db")
     }
 }
