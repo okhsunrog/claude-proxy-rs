@@ -6,7 +6,9 @@ Use your existing Claude Pro/Max subscription with AI coding assistants and tool
 
 ## Admin UI
 
-![API Keys](docs/admin-keys.png)
+![Admin Overview](docs/admin-overview.png)
+
+![Per-Model Usage](docs/admin-keys.png)
 
 ![Models](docs/admin-models.png)
 
