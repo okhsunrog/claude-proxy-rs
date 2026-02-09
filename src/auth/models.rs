@@ -35,7 +35,7 @@ impl ModelsStore {
 
     /// List all models ordered by sort_order
     pub async fn list(&self) -> Vec<Model> {
-        let Ok(conn) = db::get_conn() else {
+        let Ok(conn) = db::get_conn().await else {
             return Vec::new();
         };
         let Ok(mut rows) = conn
@@ -67,25 +67,63 @@ impl ModelsStore {
 
     /// List only enabled models (for API endpoints)
     pub async fn list_enabled(&self) -> Vec<Model> {
-        self.list()
+        let Ok(conn) = db::get_conn().await else {
+            return Vec::new();
+        };
+        let Ok(mut rows) = conn
+            .query(
+                "SELECT id, sort_order, enabled, input_price, output_price, cache_read_price, cache_write_price FROM models WHERE enabled = 1 ORDER BY sort_order",
+                (),
+            )
             .await
-            .into_iter()
-            .filter(|m| m.enabled)
-            .collect()
+        else {
+            return Vec::new();
+        };
+
+        let mut models = Vec::new();
+        while let Ok(Some(row)) = rows.next().await {
+            if let Ok(id) = row.get::<String>(0) {
+                models.push(Model {
+                    id,
+                    sort_order: row.get::<i64>(1).unwrap_or(0),
+                    enabled: true,
+                    input_price: row.get::<f64>(3).unwrap_or(0.0),
+                    output_price: row.get::<f64>(4).unwrap_or(0.0),
+                    cache_read_price: row.get::<f64>(5).unwrap_or(0.0),
+                    cache_write_price: row.get::<f64>(6).unwrap_or(0.0),
+                });
+            }
+        }
+        models
     }
 
     /// List only enabled model IDs (for /v1/models endpoint)
     pub async fn list_enabled_ids(&self) -> Vec<String> {
-        self.list_enabled()
+        let Ok(conn) = db::get_conn().await else {
+            return Vec::new();
+        };
+        let Ok(mut rows) = conn
+            .query(
+                "SELECT id FROM models WHERE enabled = 1 ORDER BY sort_order",
+                (),
+            )
             .await
-            .into_iter()
-            .map(|m| m.id)
-            .collect()
+        else {
+            return Vec::new();
+        };
+
+        let mut ids = Vec::new();
+        while let Ok(Some(row)) = rows.next().await {
+            if let Ok(id) = row.get::<String>(0) {
+                ids.push(id);
+            }
+        }
+        ids
     }
 
     /// Get pricing for a model (for cost calculation)
     pub async fn get_pricing(&self, model_id: &str) -> Option<ModelPricing> {
-        let conn = db::get_conn().ok()?;
+        let conn = db::get_conn().await.ok()?;
         let mut rows = conn
             .query(
                 "SELECT input_price, output_price, cache_read_price, cache_write_price FROM models WHERE id = ? AND enabled = 1",
@@ -111,7 +149,7 @@ impl ModelsStore {
         cache_read_price: f64,
         cache_write_price: f64,
     ) -> Result<(), ProxyError> {
-        let conn = db::get_conn()?;
+        let conn = db::get_conn().await?;
         // Set sort_order to max + 1
         let mut rows = conn
             .query("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM models", ())
@@ -136,7 +174,7 @@ impl ModelsStore {
 
     /// Remove a model (cascades to key_allowed_models and key_model_usage via FK)
     pub async fn remove(&self, id: &str) -> Result<bool, ProxyError> {
-        let conn = db::get_conn()?;
+        let conn = db::get_conn().await?;
         let affected = conn
             .execute("DELETE FROM models WHERE id = ?", [id])
             .await
@@ -146,7 +184,7 @@ impl ModelsStore {
 
     /// Reorder models (accepts list of model IDs in desired order)
     pub async fn reorder(&self, ids: Vec<String>) -> Result<(), ProxyError> {
-        let conn = db::get_conn()?;
+        let conn = db::get_conn().await?;
         for (i, id) in ids.iter().enumerate() {
             conn.execute(
                 "UPDATE models SET sort_order = ? WHERE id = ?",
@@ -160,7 +198,7 @@ impl ModelsStore {
 
     /// Toggle model enabled/disabled
     pub async fn set_enabled(&self, id: &str, enabled: bool) -> Result<bool, ProxyError> {
-        let conn = db::get_conn()?;
+        let conn = db::get_conn().await?;
         let affected = conn
             .execute(
                 "UPDATE models SET enabled = ? WHERE id = ?",
@@ -181,32 +219,27 @@ impl ModelsStore {
         cache_write_price: Option<f64>,
         enabled: Option<bool>,
     ) -> Result<bool, ProxyError> {
-        let conn = db::get_conn()?;
-        let mut sets = Vec::new();
+        let conn = db::get_conn().await?;
+        let enabled_i64 = enabled.map(|v| v as i64);
 
-        if let Some(v) = input_price {
-            sets.push(format!("input_price = {v}"));
-        }
-        if let Some(v) = output_price {
-            sets.push(format!("output_price = {v}"));
-        }
-        if let Some(v) = cache_read_price {
-            sets.push(format!("cache_read_price = {v}"));
-        }
-        if let Some(v) = cache_write_price {
-            sets.push(format!("cache_write_price = {v}"));
-        }
-        if let Some(v) = enabled {
-            sets.push(format!("enabled = {}", v as i64));
-        }
-
-        if sets.is_empty() {
-            return Ok(false);
-        }
-
-        let sql = format!("UPDATE models SET {} WHERE id = ?", sets.join(", "));
         let affected = conn
-            .execute(&sql, [id])
+            .execute(
+                "UPDATE models SET \
+                 input_price = COALESCE(?, input_price), \
+                 output_price = COALESCE(?, output_price), \
+                 cache_read_price = COALESCE(?, cache_read_price), \
+                 cache_write_price = COALESCE(?, cache_write_price), \
+                 enabled = COALESCE(?, enabled) \
+                 WHERE id = ?",
+                (
+                    input_price,
+                    output_price,
+                    cache_read_price,
+                    cache_write_price,
+                    enabled_i64,
+                    id,
+                ),
+            )
             .await
             .map_err(|e| ProxyError::DatabaseError(format!("Failed to update model: {e}")))?;
         Ok(affected > 0)
@@ -214,7 +247,7 @@ impl ModelsStore {
 
     /// Check if a model exists and is enabled
     pub async fn is_valid(&self, model_id: &str) -> bool {
-        let Ok(conn) = db::get_conn() else {
+        let Ok(conn) = db::get_conn().await else {
             return false;
         };
         let Ok(mut rows) = conn

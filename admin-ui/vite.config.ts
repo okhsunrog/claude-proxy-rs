@@ -32,6 +32,10 @@ export default defineConfig({
         target: 'http://localhost:4096',
         changeOrigin: true,
       },
+      '/admin/models': {
+        target: 'http://localhost:4096',
+        changeOrigin: true,
+      },
       '/admin/swagger': {
         target: 'http://localhost:4096',
         changeOrigin: true,

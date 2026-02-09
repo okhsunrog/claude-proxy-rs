@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { errorMessage } from '../utils/format'
 import type { Model } from '../client'
 
 const props = defineProps<{
@@ -51,7 +52,7 @@ async function handleToggleAllowAll() {
   } catch (e: unknown) {
     toast.add({
       title: 'Failed to update model access',
-      description: (e as Error).message,
+      description: errorMessage(e),
       color: 'error',
     })
   } finally {
@@ -79,7 +80,7 @@ async function toggleModel(modelId: string) {
   } catch (e: unknown) {
     toast.add({
       title: 'Failed to update model access',
-      description: (e as Error).message,
+      description: errorMessage(e),
       color: 'error',
     })
   } finally {

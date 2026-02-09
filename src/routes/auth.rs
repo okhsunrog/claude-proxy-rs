@@ -42,15 +42,12 @@ async fn get_oauth_token(state: &AppState) -> Result<String, ProxyError> {
     }
 }
 
-/// Full authentication flow for OpenAI-compatible endpoint
-pub async fn authenticate_openai(
-    headers: &HeaderMap,
+/// Shared authentication logic: validate key, check limits, get OAuth token
+async fn authenticate_key(
+    key: &str,
     state: &Arc<AppState>,
     model: &str,
 ) -> Result<AuthResult, ProxyError> {
-    let key = extract_bearer_token(headers)
-        .ok_or_else(|| ProxyError::MissingHeader("Authorization".to_string()))?;
-
     let client_key = state
         .client_keys
         .validate(key)
@@ -108,6 +105,17 @@ pub async fn authenticate_openai(
     })
 }
 
+/// Full authentication flow for OpenAI-compatible endpoint
+pub async fn authenticate_openai(
+    headers: &HeaderMap,
+    state: &Arc<AppState>,
+    model: &str,
+) -> Result<AuthResult, ProxyError> {
+    let key = extract_bearer_token(headers)
+        .ok_or_else(|| ProxyError::MissingHeader("Authorization".to_string()))?;
+    authenticate_key(key, state, model).await
+}
+
 /// Full authentication flow for Anthropic native endpoint
 pub async fn authenticate_anthropic(
     headers: &HeaderMap,
@@ -116,62 +124,7 @@ pub async fn authenticate_anthropic(
 ) -> Result<AuthResult, ProxyError> {
     let key = extract_api_key(headers)
         .ok_or_else(|| ProxyError::MissingHeader("x-api-key or Authorization".to_string()))?;
-
-    let client_key = state
-        .client_keys
-        .validate(key)
-        .await
-        .ok_or(ProxyError::InvalidApiKey)?;
-
-    // Check global limits (cost-based)
-    if let Err(msg) = state.client_keys.check_limits(&client_key.id).await {
-        return Err(ProxyError::RateLimitExceeded(msg));
-    }
-
-    // Check model exists and is enabled
-    if !state.models.is_valid(model).await {
-        return Err(ProxyError::InvalidModel(model.to_string()));
-    }
-
-    // Check model access whitelist
-    if !state
-        .client_keys
-        .is_model_allowed(&client_key.id, model)
-        .await
-    {
-        return Err(ProxyError::ModelNotAllowed(model.to_string()));
-    }
-
-    // Get model pricing
-    let model_pricing = state
-        .models
-        .get_pricing(model)
-        .await
-        .unwrap_or(ModelPricing {
-            input_price: 0.0,
-            output_price: 0.0,
-            cache_read_price: 0.0,
-            cache_write_price: 0.0,
-        });
-
-    // Check per-model limits (cost-based)
-    if let Err(msg) = state
-        .client_keys
-        .check_model_limits(&client_key.id, model, &model_pricing)
-        .await
-    {
-        return Err(ProxyError::RateLimitExceeded(msg));
-    }
-
-    let _ = state.client_keys.update_last_used(&client_key.id).await;
-
-    let token = get_oauth_token(state).await?;
-
-    Ok(AuthResult {
-        client_key,
-        token,
-        model_pricing,
-    })
+    authenticate_key(key, state, model).await
 }
 
 /// Build a request to the Anthropic API with OAuth headers

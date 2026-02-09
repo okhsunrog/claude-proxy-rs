@@ -122,7 +122,7 @@ impl ClientKeysStore {
     }
 
     pub async fn list(&self) -> Vec<ClientKey> {
-        let Ok(conn) = db::get_conn() else {
+        let Ok(conn) = db::get_conn().await else {
             return Vec::new();
         };
         let Ok(mut rows) = conn
@@ -152,7 +152,7 @@ impl ClientKeysStore {
         let id = Uuid::new_v4().to_string();
         let now = timestamp_millis();
 
-        let conn = db::get_conn()?;
+        let conn = db::get_conn().await?;
         conn.execute(
             "INSERT INTO client_keys (id, key, name, enabled, created_at) VALUES (?, ?, ?, 1, ?)",
             (id.as_str(), key.as_str(), name.as_str(), now as i64),
@@ -173,7 +173,7 @@ impl ClientKeysStore {
     }
 
     pub async fn delete(&self, id: &str) -> Result<bool, ProxyError> {
-        let conn = db::get_conn()?;
+        let conn = db::get_conn().await?;
         let affected = conn
             .execute("DELETE FROM client_keys WHERE id = ?", [id])
             .await
@@ -184,7 +184,7 @@ impl ClientKeysStore {
     /// Validate an API key using constant-time comparison to prevent timing attacks.
     /// Fetches all enabled keys and compares in constant time.
     pub async fn validate(&self, key: &str) -> Option<ClientKey> {
-        let Ok(conn) = db::get_conn() else {
+        let Ok(conn) = db::get_conn().await else {
             return None;
         };
         let Ok(mut rows) = conn
@@ -211,7 +211,7 @@ impl ClientKeysStore {
 
     pub async fn update_last_used(&self, id: &str) -> Result<(), ProxyError> {
         let now = timestamp_millis();
-        let conn = db::get_conn()?;
+        let conn = db::get_conn().await?;
         conn.execute(
             "UPDATE client_keys SET last_used_at = ? WHERE id = ?",
             (now as i64, id),
@@ -222,7 +222,7 @@ impl ClientKeysStore {
     }
 
     pub async fn get(&self, id: &str) -> Option<ClientKey> {
-        let conn = db::get_conn().ok()?;
+        let conn = db::get_conn().await.ok()?;
         let mut rows = conn
             .query(
                 &format!("SELECT {SELECT_ALL_COLS} FROM client_keys WHERE id = ?"),
@@ -238,7 +238,7 @@ impl ClientKeysStore {
     /// Automatically resets hourly/weekly counters if time has passed.
     pub async fn check_limits(&self, id: &str) -> Result<(), String> {
         let now = timestamp_millis();
-        let conn = db::get_conn().map_err(|e| e.to_string())?;
+        let conn = db::get_conn().await.map_err(|e| e.to_string())?;
 
         // Read current state
         let mut rows = conn
@@ -277,13 +277,15 @@ impl ClientKeysStore {
             needs_update = true;
         }
 
-        if needs_update {
-            let _ = conn
+        if needs_update
+            && let Err(e) = conn
                 .execute(
                     "UPDATE client_keys SET hourly_usage = ?, weekly_usage = ?, hourly_reset_at = ?, weekly_reset_at = ? WHERE id = ?",
                     (hourly_usage as i64, weekly_usage as i64, hourly_reset_at as i64, weekly_reset_at as i64, id),
                 )
-                .await;
+                .await
+        {
+            tracing::warn!("Failed to reset expired usage counters for key {id}: {e}");
         }
 
         if let Some(limit) = hourly_limit
@@ -323,7 +325,7 @@ impl ClientKeysStore {
         let one_hour_ms: u64 = 60 * 60 * 1000;
         let one_week_ms: u64 = 7 * 24 * 60 * 60 * 1000;
 
-        let conn = db::get_conn()?;
+        let conn = db::get_conn().await?;
 
         // Read current reset timestamps
         let mut rows = conn
@@ -412,7 +414,7 @@ impl ClientKeysStore {
         id: &str,
         reset_type: UsageResetType,
     ) -> Result<bool, ProxyError> {
-        let conn = db::get_conn()?;
+        let conn = db::get_conn().await?;
 
         let sql = match reset_type {
             UsageResetType::Hourly => {
@@ -437,29 +439,17 @@ impl ClientKeysStore {
 
     /// Update limits for a key
     pub async fn set_limits(&self, id: &str, limits: TokenLimits) -> Result<bool, ProxyError> {
-        let conn = db::get_conn()?;
+        let conn = db::get_conn().await?;
 
-        // Build SET clause dynamically to handle NULLs properly
-        let hourly_sql = match limits.hourly_limit {
-            Some(v) => format!("hourly_limit = {v}"),
-            None => "hourly_limit = NULL".to_string(),
-        };
-        let weekly_sql = match limits.weekly_limit {
-            Some(v) => format!("weekly_limit = {v}"),
-            None => "weekly_limit = NULL".to_string(),
-        };
-        let total_sql = match limits.total_limit {
-            Some(v) => format!("total_limit = {v}"),
-            None => "total_limit = NULL".to_string(),
-        };
-
-        let sql = format!(
-            "UPDATE client_keys SET {}, {}, {} WHERE id = ?",
-            hourly_sql, weekly_sql, total_sql
-        );
+        let h = limits.hourly_limit.map(|v| v as i64);
+        let w = limits.weekly_limit.map(|v| v as i64);
+        let t = limits.total_limit.map(|v| v as i64);
 
         let affected = conn
-            .execute(&sql, [id])
+            .execute(
+                "UPDATE client_keys SET hourly_limit = ?, weekly_limit = ?, total_limit = ? WHERE id = ?",
+                (h, w, t, id),
+            )
             .await
             .map_err(|e| ProxyError::DatabaseError(format!("Failed to set limits: {e}")))?;
 
@@ -472,7 +462,7 @@ impl ClientKeysStore {
 
     /// Get allowed models for a key. Empty vec means "all models allowed".
     pub async fn get_allowed_models(&self, key_id: &str) -> Vec<String> {
-        let Ok(conn) = db::get_conn() else {
+        let Ok(conn) = db::get_conn().await else {
             return Vec::new();
         };
         let Ok(mut rows) = conn
@@ -499,7 +489,7 @@ impl ClientKeysStore {
         key_id: &str,
         models: Vec<String>,
     ) -> Result<(), ProxyError> {
-        let conn = db::get_conn()?;
+        let conn = db::get_conn().await?;
         conn.execute("DELETE FROM key_allowed_models WHERE key_id = ?", [key_id])
             .await
             .map_err(|e| {
@@ -522,7 +512,7 @@ impl ClientKeysStore {
     /// Check if a specific model is allowed for a key.
     /// If no rows exist in key_allowed_models for this key, all models are allowed.
     pub async fn is_model_allowed(&self, key_id: &str, model: &str) -> bool {
-        let Ok(conn) = db::get_conn() else {
+        let Ok(conn) = db::get_conn().await else {
             return false;
         };
         // Count total allowed models for this key
@@ -579,7 +569,7 @@ impl ClientKeysStore {
         pricing: &ModelPricing,
     ) -> Result<(), String> {
         let now = timestamp_millis();
-        let conn = db::get_conn().map_err(|e| e.to_string())?;
+        let conn = db::get_conn().await.map_err(|e| e.to_string())?;
 
         let mut rows = conn
             .query(
@@ -636,8 +626,8 @@ impl ClientKeysStore {
             needs_update = true;
         }
 
-        if needs_update {
-            let _ = conn
+        if needs_update
+            && let Err(e) = conn
                 .execute(
                     "UPDATE key_model_usage SET \
                      hourly_input = ?, hourly_output = ?, hourly_cache_read = ?, hourly_cache_write = ?, \
@@ -651,7 +641,9 @@ impl ClientKeysStore {
                         key_id, model,
                     ),
                 )
-                .await;
+                .await
+        {
+            tracing::warn!("Failed to reset expired model usage counters for {key_id}/{model}: {e}");
         }
 
         // Compute costs using model prices
@@ -709,7 +701,7 @@ impl ClientKeysStore {
         let now = timestamp_millis();
         let one_hour_ms: u64 = 60 * 60 * 1000;
         let one_week_ms: u64 = 7 * 24 * 60 * 60 * 1000;
-        let conn = db::get_conn()?;
+        let conn = db::get_conn().await?;
 
         // Check if row exists
         let mut rows = conn
@@ -845,7 +837,7 @@ impl ClientKeysStore {
     /// Get per-model usage entries for a key
     pub async fn get_model_usage(&self, key_id: &str) -> Vec<ModelUsageEntry> {
         let now = timestamp_millis();
-        let Ok(conn) = db::get_conn() else {
+        let Ok(conn) = db::get_conn().await else {
             return Vec::new();
         };
         let Ok(mut rows) = conn
@@ -923,7 +915,7 @@ impl ClientKeysStore {
         model: &str,
         limits: TokenLimits,
     ) -> Result<(), ProxyError> {
-        let conn = db::get_conn()?;
+        let conn = db::get_conn().await?;
 
         // Check if row exists
         let mut rows = conn
@@ -943,22 +935,15 @@ impl ClientKeysStore {
             .unwrap_or(0);
 
         if exists > 0 {
-            let hourly_sql = match limits.hourly_limit {
-                Some(v) => format!("hourly_limit = {v}"),
-                None => "hourly_limit = NULL".to_string(),
-            };
-            let weekly_sql = match limits.weekly_limit {
-                Some(v) => format!("weekly_limit = {v}"),
-                None => "weekly_limit = NULL".to_string(),
-            };
-            let total_sql = match limits.total_limit {
-                Some(v) => format!("total_limit = {v}"),
-                None => "total_limit = NULL".to_string(),
-            };
-            let sql = format!(
-                "UPDATE key_model_usage SET {hourly_sql}, {weekly_sql}, {total_sql} WHERE key_id = ? AND model = ?"
-            );
-            conn.execute(&sql, (key_id, model)).await.map_err(|e| {
+            let h = limits.hourly_limit.map(|v| v as i64);
+            let w = limits.weekly_limit.map(|v| v as i64);
+            let t = limits.total_limit.map(|v| v as i64);
+            conn.execute(
+                "UPDATE key_model_usage SET hourly_limit = ?, weekly_limit = ?, total_limit = ? WHERE key_id = ? AND model = ?",
+                (h, w, t, key_id, model),
+            )
+            .await
+            .map_err(|e| {
                 ProxyError::DatabaseError(format!("Failed to update model limits: {e}"))
             })?;
         } else {
@@ -980,7 +965,7 @@ impl ClientKeysStore {
 
     /// Remove per-model limits (and usage) for a key
     pub async fn remove_model_limits(&self, key_id: &str, model: &str) -> Result<bool, ProxyError> {
-        let conn = db::get_conn()?;
+        let conn = db::get_conn().await?;
         let affected = conn
             .execute(
                 "DELETE FROM key_model_usage WHERE key_id = ? AND model = ?",
@@ -1000,7 +985,7 @@ impl ClientKeysStore {
         model: &str,
         reset_type: UsageResetType,
     ) -> Result<bool, ProxyError> {
-        let conn = db::get_conn()?;
+        let conn = db::get_conn().await?;
 
         let sql = match reset_type {
             UsageResetType::Hourly => {

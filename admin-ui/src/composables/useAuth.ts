@@ -43,8 +43,12 @@ export function useAuth() {
         isAuthenticated.value = true
         return { success: true }
       } else {
-        const data = await res.json()
-        return { success: false, error: data.error || 'Invalid credentials' }
+        try {
+          const data = await res.json()
+          return { success: false, error: data.error || 'Invalid credentials' }
+        } catch {
+          return { success: false, error: `Server error (${res.status})` }
+        }
       }
     } catch {
       return { success: false, error: 'Network error' }

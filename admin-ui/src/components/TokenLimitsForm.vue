@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { errorMessage } from '../utils/format'
 import type { UpdateLimitsRequest } from '../client'
 import type { KeyUsageResponse } from '../composables/useKeys'
 
@@ -10,22 +11,14 @@ const props = defineProps<{
   resetUsage: (id: string, type: 'hourly' | 'weekly' | 'total' | 'all') => Promise<void>
 }>()
 
+import { microToDollars, dollarsToMicro } from '../utils/format'
+
 const toast = useToast()
 // Display/edit in dollars, store in microdollars
 const hourlyDollars = ref<number | null>(null)
 const weeklyDollars = ref<number | null>(null)
 const totalDollars = ref<number | null>(null)
 const isSaving = ref(false)
-
-function microToDollars(micro: number | null | undefined): number | null {
-  if (micro == null) return null
-  return micro / 1_000_000
-}
-
-function dollarsToMicro(dollars: number | null): number | null {
-  if (dollars == null) return null
-  return Math.round(dollars * 1_000_000)
-}
 
 watch(
   () => props.usage,
@@ -49,7 +42,7 @@ async function handleSave() {
     })
     toast.add({ title: 'Limits saved', color: 'success' })
   } catch (e: unknown) {
-    toast.add({ title: 'Failed to save limits', description: (e as Error).message, color: 'error' })
+    toast.add({ title: 'Failed to save limits', description: errorMessage(e), color: 'error' })
   } finally {
     isSaving.value = false
   }
@@ -81,7 +74,7 @@ async function handleReset(type: 'hourly' | 'weekly' | 'total' | 'all') {
     await props.resetUsage(props.keyId, type)
     toast.add({ title: `${type.charAt(0).toUpperCase() + type.slice(1)} usage reset`, color: 'success' })
   } catch (e: unknown) {
-    toast.add({ title: 'Failed to reset usage', description: (e as Error).message, color: 'error' })
+    toast.add({ title: 'Failed to reset usage', description: errorMessage(e), color: 'error' })
   }
 }
 </script>
@@ -134,15 +127,3 @@ async function handleReset(type: 'hourly' | 'weekly' | 'total' | 'all') {
     </div>
   </div>
 </template>
-
-<style scoped>
-/* Hide number input spinner arrows */
-.no-spinners :deep(input[type="number"]::-webkit-inner-spin-button),
-.no-spinners :deep(input[type="number"]::-webkit-outer-spin-button) {
-  -webkit-appearance: none;
-  margin: 0;
-}
-.no-spinners :deep(input[type="number"]) {
-  -moz-appearance: textfield;
-}
-</style>

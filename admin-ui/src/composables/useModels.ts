@@ -8,10 +8,11 @@ import {
   reorderModels as reorderModelsApi,
 } from '../client'
 
-export function useModels() {
-  const models = ref<Model[]>([])
-  const isLoading = ref(false)
+// Module-scope state: shared across all useModels() callers
+const models = ref<Model[]>([])
+const isLoading = ref(false)
 
+export function useModels() {
   async function loadModels() {
     isLoading.value = true
     try {

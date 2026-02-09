@@ -330,6 +330,11 @@ pub async fn init_db(path: &Path) -> Result<(), ProxyError> {
         .connect()
         .map_err(|e| ProxyError::DatabaseError(format!("Failed to connect: {e}")))?;
 
+    // Enable foreign key enforcement (required for ON DELETE CASCADE)
+    conn.execute("PRAGMA foreign_keys = ON", ())
+        .await
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to enable foreign keys: {e}")))?;
+
     run_migrations(&conn).await?;
 
     DATABASE
@@ -340,11 +345,16 @@ pub async fn init_db(path: &Path) -> Result<(), ProxyError> {
     Ok(())
 }
 
-/// Get a database connection.
-pub fn get_conn() -> Result<Connection, ProxyError> {
+/// Get a database connection with foreign keys enabled.
+pub async fn get_conn() -> Result<Connection, ProxyError> {
     let db = DATABASE
         .get()
         .ok_or_else(|| ProxyError::DatabaseError("Database not initialized".into()))?;
-    db.connect()
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to get connection: {e}")))
+    let conn = db
+        .connect()
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to get connection: {e}")))?;
+    conn.execute("PRAGMA foreign_keys = ON", ())
+        .await
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to enable foreign keys: {e}")))?;
+    Ok(conn)
 }

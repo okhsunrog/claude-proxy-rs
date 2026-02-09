@@ -1,2 +1,12 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
+
+/* Hide number input spinner arrows globally */
+.no-spinners input[type="number"]::-webkit-inner-spin-button,
+.no-spinners input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.no-spinners input[type="number"] {
+  -moz-appearance: textfield;
+}

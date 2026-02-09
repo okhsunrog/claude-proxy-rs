@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { errorMessage } from '../utils/format'
 import type { ClientKey, Model, UpdateLimitsRequest } from '../client'
 import type { KeyUsageResponse, KeyModelsResponse, KeyModelUsageResponse } from '../composables/useKeys'
 import UsageStats from './UsageStats.vue'
@@ -31,7 +32,12 @@ const showDeleteModal = ref(false)
 const isDeleting = ref(false)
 
 function formatDate(timestamp: number): string {
-  return new Date(timestamp).toLocaleDateString()
+  return new Date(timestamp).toLocaleString()
+}
+
+function maskedKey(key: string): string {
+  if (key.length <= 12) return key
+  return key.slice(0, 10) + '...' + key.slice(-4)
 }
 
 function copyKey() {
@@ -49,7 +55,7 @@ async function handleDelete() {
     toast.add({ title: 'Key deleted', color: 'success' })
     emit('deleted')
   } catch (e: unknown) {
-    toast.add({ title: 'Failed to delete key', description: (e as Error).message, color: 'error' })
+    toast.add({ title: 'Failed to delete key', description: errorMessage(e), color: 'error' })
   } finally {
     isDeleting.value = false
   }
@@ -66,7 +72,7 @@ async function handleDelete() {
       </div>
     </div>
 
-    <div class="font-mono text-xs text-muted mb-2 break-all">{{ keyData.key }}</div>
+    <div class="font-mono text-xs text-muted mb-2 break-all">{{ maskedKey(keyData.key) }}</div>
 
     <div class="text-xs text-muted mb-3">
       Created: {{ formatDate(keyData.createdAt) }} |

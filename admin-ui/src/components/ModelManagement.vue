@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { errorMessage } from '../utils/format'
 import type { Model, UpdateModelRequest } from '../client'
 import { useModels } from '../composables/useModels'
 
@@ -35,7 +36,7 @@ onMounted(() => {
 
 function formatPrice(price: number): string {
   if (price >= 1) return `$${price}`
-  return `$${price}`
+  return `$${price.toFixed(2)}`
 }
 
 async function handleAdd() {
@@ -57,7 +58,7 @@ async function handleAdd() {
     newModelId.value = ''
     toast.add({ title: 'Model added', color: 'success' })
   } catch (e: unknown) {
-    toast.add({ title: 'Failed to add model', description: (e as Error).message, color: 'error' })
+    toast.add({ title: 'Failed to add model', description: errorMessage(e), color: 'error' })
   } finally {
     isAdding.value = false
   }
@@ -85,7 +86,7 @@ async function handleSaveEdit() {
     showEditModal.value = false
     toast.add({ title: 'Model updated', color: 'success' })
   } catch (e: unknown) {
-    toast.add({ title: 'Failed to update model', description: (e as Error).message, color: 'error' })
+    toast.add({ title: 'Failed to update model', description: errorMessage(e), color: 'error' })
   } finally {
     isSavingEdit.value = false
   }
@@ -96,7 +97,7 @@ async function handleToggleEnabled(model: Model) {
     const req: UpdateModelRequest = { enabled: !model.enabled }
     await updateModel(model.id, req)
   } catch (e: unknown) {
-    toast.add({ title: 'Failed to toggle model', description: (e as Error).message, color: 'error' })
+    toast.add({ title: 'Failed to toggle model', description: errorMessage(e), color: 'error' })
   }
 }
 
@@ -113,7 +114,7 @@ async function handleDelete() {
     showDeleteModal.value = false
     toast.add({ title: 'Model deleted', color: 'success' })
   } catch (e: unknown) {
-    toast.add({ title: 'Failed to delete model', description: (e as Error).message, color: 'error' })
+    toast.add({ title: 'Failed to delete model', description: errorMessage(e), color: 'error' })
   } finally {
     isDeleting.value = false
   }
@@ -237,14 +238,3 @@ async function handleDelete() {
     </UModal>
   </div>
 </template>
-
-<style scoped>
-.no-spinners :deep(input[type="number"]::-webkit-inner-spin-button),
-.no-spinners :deep(input[type="number"]::-webkit-outer-spin-button) {
-  -webkit-appearance: none;
-  margin: 0;
-}
-.no-spinners :deep(input[type="number"]) {
-  -moz-appearance: textfield;
-}
-</style>

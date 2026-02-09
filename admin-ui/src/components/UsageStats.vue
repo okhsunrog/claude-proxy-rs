@@ -1,20 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { formatCost } from '../utils/format'
 import type { KeyUsageResponse } from '../composables/useKeys'
 
 const props = defineProps<{
   usage: KeyUsageResponse | undefined
 }>()
-
-function formatCost(microdollars: number): string {
-  const dollars = microdollars / 1_000_000
-  if (dollars >= 1000) return `$${(dollars / 1000).toFixed(1)}K`
-  if (dollars >= 100) return `$${dollars.toFixed(0)}`
-  if (dollars >= 1) return `$${dollars.toFixed(2)}`
-  if (dollars >= 0.01) return `$${dollars.toFixed(3)}`
-  if (microdollars === 0) return '$0'
-  return `$${dollars.toFixed(4)}`
-}
 
 function formatDateTime(timestamp: number): string {
   return new Date(timestamp).toLocaleString()

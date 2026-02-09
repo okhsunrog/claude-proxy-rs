@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { errorMessage } from '../utils/format'
 import type { CreateKeyResponse } from '../client'
 
 const emit = defineEmits<{
@@ -29,7 +30,7 @@ async function handleCreate() {
     toast.add({ title: 'API key created successfully', color: 'success' })
     emit('created')
   } catch (e: unknown) {
-    toast.add({ title: 'Failed to create key', description: (e as Error).message, color: 'error' })
+    toast.add({ title: 'Failed to create key', description: errorMessage(e), color: 'error' })
   } finally {
     isCreating.value = false
   }

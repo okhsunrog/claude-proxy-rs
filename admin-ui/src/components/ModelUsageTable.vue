@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { errorMessage, formatCost, microToDollars, dollarsToMicro } from '../utils/format'
 import type { Model, ModelUsageEntry, UpdateLimitsRequest } from '../client'
 import type { KeyModelUsageResponse } from '../composables/useKeys'
 
@@ -59,15 +60,6 @@ function formatTokens(n: number): string {
   return n.toString()
 }
 
-function formatCost(microdollars: number): string {
-  const dollars = microdollars / 1_000_000
-  if (dollars >= 100) return `$${dollars.toFixed(0)}`
-  if (dollars >= 1) return `$${dollars.toFixed(2)}`
-  if (dollars >= 0.01) return `$${dollars.toFixed(3)}`
-  if (microdollars === 0) return '$0'
-  return `$${dollars.toFixed(4)}`
-}
-
 // Calculate cost in dollars for tokens at a given $/MTok price
 function tokenCost(tokens: number, pricePerMTok: number): number {
   return (tokens * pricePerMTok) / 1_000_000
@@ -103,16 +95,6 @@ function lineCost(tokens: number, pricePerMTok: number): string {
   return formatDollars(tokenCost(tokens, pricePerMTok))
 }
 
-function microToDollars(micro: number | null | undefined): number | null {
-  if (micro == null) return null
-  return micro / 1_000_000
-}
-
-function dollarsToMicro(dollars: number | null): number | null {
-  if (dollars == null) return null
-  return Math.round(dollars * 1_000_000)
-}
-
 function startEdit(entry: ModelUsageEntry) {
   editingModel.value = entry.model
   editHourly.value = microToDollars(entry.limits.hourlyLimit)
@@ -144,7 +126,7 @@ async function saveEdit(model: string) {
   } catch (e: unknown) {
     toast.add({
       title: 'Failed to update limits',
-      description: (e as Error).message,
+      description: errorMessage(e),
       color: 'error',
     })
   } finally {
@@ -163,7 +145,7 @@ async function handleReset(model: string, type: 'hourly' | 'weekly' | 'total' | 
   } catch (e: unknown) {
     toast.add({
       title: 'Failed to reset usage',
-      description: (e as Error).message,
+      description: errorMessage(e),
       color: 'error',
     })
   }
@@ -290,14 +272,3 @@ function resetItems(model: string) {
     </div>
   </div>
 </template>
-
-<style scoped>
-.no-spinners :deep(input[type="number"]::-webkit-inner-spin-button),
-.no-spinners :deep(input[type="number"]::-webkit-outer-spin-button) {
-  -webkit-appearance: none;
-  margin: 0;
-}
-.no-spinners :deep(input[type="number"]) {
-  -moz-appearance: textfield;
-}
-</style>

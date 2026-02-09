@@ -96,8 +96,15 @@ async fn admin_auth_middleware(
         && let Some(token) = parse_cookie(cookie_header, "admin_session")
     {
         let mut sessions = state.admin_sessions.lock().await;
+        let now = now_secs();
+
+        // Periodically clean up expired sessions (when map has > 10 entries)
+        if sessions.len() > 10 {
+            sessions.retain(|_, &mut expires_at| now < expires_at);
+        }
+
         if let Some(&expires_at) = sessions.get(&token) {
-            if now_secs() < expires_at {
+            if now < expires_at {
                 return next.run(request).await;
             }
             // Expired — remove it
@@ -181,7 +188,7 @@ async fn main() {
 
     let admin_credentials = (config.admin_username, config.admin_password);
 
-    let is_localhost = matches!(host.as_str(), "127.0.0.1" | "localhost" | "::1" | "0.0.0.0");
+    let is_localhost = matches!(host.as_str(), "127.0.0.1" | "localhost" | "::1");
     let secure_cookies = !is_localhost;
 
     let state = Arc::new(AppState {

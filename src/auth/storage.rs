@@ -36,7 +36,7 @@ impl AuthStore {
     }
 
     pub async fn get(&self, provider: &str) -> Option<Auth> {
-        let conn = db::get_conn().ok()?;
+        let conn = db::get_conn().await.ok()?;
         let mut rows = conn
             .query(
                 "SELECT auth_type, access_token, refresh_token, expires_at, account_id, enterprise_url FROM auth WHERE provider = ?",
@@ -76,7 +76,7 @@ impl AuthStore {
     }
 
     pub async fn set(&self, provider: &str, auth: Auth) -> Result<(), ProxyError> {
-        let conn = db::get_conn()?;
+        let conn = db::get_conn().await?;
 
         match &auth {
             Auth::OAuth {
@@ -137,7 +137,7 @@ impl AuthStore {
     }
 
     pub async fn remove(&self, provider: &str) -> Result<(), ProxyError> {
-        let conn = db::get_conn()?;
+        let conn = db::get_conn().await?;
         conn.execute("DELETE FROM auth WHERE provider = ?", [provider])
             .await
             .map_err(|e| ProxyError::DatabaseError(format!("Failed to remove auth: {e}")))?;
@@ -145,7 +145,7 @@ impl AuthStore {
     }
 
     pub async fn has(&self, provider: &str) -> bool {
-        let Ok(conn) = db::get_conn() else {
+        let Ok(conn) = db::get_conn().await else {
             return false;
         };
         let Ok(mut rows) = conn
@@ -164,7 +164,7 @@ impl AuthStore {
         refresh: String,
         expires: u64,
     ) -> Result<(), ProxyError> {
-        let conn = db::get_conn()?;
+        let conn = db::get_conn().await?;
         conn.execute(
             "UPDATE auth SET access_token = ?, refresh_token = ?, expires_at = ? WHERE provider = ? AND auth_type = 'oauth'",
             (access.as_str(), refresh.as_str(), expires as i64, provider),

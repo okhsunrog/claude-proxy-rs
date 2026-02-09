@@ -16,13 +16,13 @@
     "openapi-ts": "openapi-ts"
   },
   "dependencies": {
+    "@hey-api/client-fetch": "^0.13.1",
     "@nuxt/ui": "^4.4.0",
     "tailwindcss": "^4.1.18",
     "vue": "^3.5.27",
     "vue-router": "^5.0.1"
   },
   "devDependencies": {
-    "@hey-api/client-fetch": "^0.13.1",
     "@hey-api/openapi-ts": "^0.92.3",
     "@tsconfig/node24": "^24.0.4",
     "@types/node": "^24.10.9",
