@@ -7,10 +7,6 @@ use serde_json::json;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProxyError {
-    #[error("Authentication failed: {0}")]
-    #[allow(dead_code)]
-    AuthenticationFailed(String),
-
     #[error("Invalid API key")]
     InvalidApiKey,
 
@@ -47,14 +43,12 @@ impl ProxyError {
             | ProxyError::MissingHeader(_)
             | ProxyError::NoAuthConfigured => (StatusCode::UNAUTHORIZED, self.to_string()),
             ProxyError::RateLimitExceeded(_) => (StatusCode::TOO_MANY_REQUESTS, self.to_string()),
-            ProxyError::AuthenticationFailed(_) | ProxyError::OAuthError(_) => {
+            ProxyError::OAuthError(_) | ProxyError::IoError(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
             }
-            ProxyError::NetworkError(_) | ProxyError::AnthropicApiError(_) => {
-                (StatusCode::BAD_GATEWAY, self.to_string())
-            }
-            ProxyError::ParseError(_) => (StatusCode::BAD_GATEWAY, self.to_string()),
-            ProxyError::IoError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
+            ProxyError::NetworkError(_)
+            | ProxyError::AnthropicApiError(_)
+            | ProxyError::ParseError(_) => (StatusCode::BAD_GATEWAY, self.to_string()),
         };
 
         (status, Json(json!({ "error": message }))).into_response()
@@ -75,20 +69,14 @@ impl ProxyError {
                 "rate_limit_error",
                 self.to_string(),
             ),
-            ProxyError::AuthenticationFailed(_) | ProxyError::OAuthError(_) => (
+            ProxyError::OAuthError(_) | ProxyError::IoError(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "api_error",
                 self.to_string(),
             ),
-            ProxyError::NetworkError(_) | ProxyError::AnthropicApiError(_) => {
-                (StatusCode::BAD_GATEWAY, "api_error", self.to_string())
-            }
-            ProxyError::ParseError(_) => (StatusCode::BAD_GATEWAY, "api_error", self.to_string()),
-            ProxyError::IoError(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "api_error",
-                self.to_string(),
-            ),
+            ProxyError::NetworkError(_)
+            | ProxyError::AnthropicApiError(_)
+            | ProxyError::ParseError(_) => (StatusCode::BAD_GATEWAY, "api_error", self.to_string()),
         };
 
         (

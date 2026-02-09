@@ -9,7 +9,6 @@ use crate::error::ProxyError;
 
 /// Result of successful authentication containing the client key and OAuth token
 pub struct AuthResult {
-    #[allow(dead_code)]
     pub client_key: ClientKey,
     pub token: String,
 }

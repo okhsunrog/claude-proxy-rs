@@ -19,10 +19,10 @@ use base64::Engine;
 use clap::Parser;
 use config::{Config, CorsMode};
 use reqwest::Client;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
 use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -31,13 +31,26 @@ use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
+/// Session TTL: 24 hours (matches cookie Max-Age)
+const SESSION_TTL_SECS: u64 = 86400;
+
 pub struct AppState {
     pub auth_store: Arc<AuthStore>,
     pub client_keys: Arc<ClientKeysStore>,
     pub oauth: OAuthManager,
     pub http_client: Client,
     pub admin_credentials: (String, String),
-    pub admin_sessions: Mutex<HashSet<String>>,
+    /// Maps session token -> expiry timestamp (epoch seconds)
+    pub admin_sessions: Mutex<HashMap<String, u64>>,
+    /// Whether to set Secure flag on cookies (true when not binding to localhost)
+    pub secure_cookies: bool,
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
 }
 
 #[derive(Parser)]
@@ -80,9 +93,13 @@ async fn admin_auth_middleware(
         .and_then(|v| v.to_str().ok())
         && let Some(token) = parse_cookie(cookie_header, "admin_session")
     {
-        let sessions = state.admin_sessions.lock().await;
-        if sessions.contains(&token) {
-            return next.run(request).await;
+        let mut sessions = state.admin_sessions.lock().await;
+        if let Some(&expires_at) = sessions.get(&token) {
+            if now_secs() < expires_at {
+                return next.run(request).await;
+            }
+            // Expired — remove it
+            sessions.remove(&token);
         }
     }
 
@@ -158,13 +175,17 @@ async fn main() {
 
     let admin_credentials = (config.admin_username, config.admin_password);
 
+    let is_localhost = matches!(host.as_str(), "127.0.0.1" | "localhost" | "::1" | "0.0.0.0");
+    let secure_cookies = !is_localhost;
+
     let state = Arc::new(AppState {
         auth_store,
         client_keys,
         oauth,
         http_client,
         admin_credentials,
-        admin_sessions: Mutex::new(HashSet::new()),
+        admin_sessions: Mutex::new(HashMap::new()),
+        secure_cookies,
     });
 
     // CORS configuration based on environment

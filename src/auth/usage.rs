@@ -44,12 +44,6 @@ impl TokenUsageReport {
         total.round() as u64
     }
 
-    /// Get the raw total without any weighting.
-    #[allow(dead_code)]
-    pub fn raw_total(&self) -> u64 {
-        self.input_tokens + self.output_tokens + self.cache_creation_tokens + self.cache_read_tokens
-    }
-
     /// Add another usage report to this one (useful for accumulating in streams).
     pub fn add(&mut self, other: &TokenUsageReport) {
         self.input_tokens += other.input_tokens;

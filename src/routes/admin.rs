@@ -9,9 +9,9 @@ use std::sync::Arc;
 use subtle::ConstantTimeEq;
 use utoipa::ToSchema;
 
-use crate::AppState;
 use crate::auth::{ClientKey, TokenLimits, TokenUsage, UsageResetType};
 use crate::parse_cookie;
+use crate::{AppState, SESSION_TTL_SECS, now_secs};
 
 // --- Response types ---
 
@@ -118,11 +118,17 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(body): Json<LoginReq
             rand::random::<u128>(),
             rand::random::<u128>()
         );
-        state.admin_sessions.lock().await.insert(token.clone());
+        let expires_at = now_secs() + SESSION_TTL_SECS;
+        state
+            .admin_sessions
+            .lock()
+            .await
+            .insert(token.clone(), expires_at);
 
+        let secure_flag = if state.secure_cookies { "; Secure" } else { "" };
         let cookie = format!(
-            "admin_session={}; HttpOnly; SameSite=Strict; Path=/admin; Max-Age=86400",
-            token
+            "admin_session={}; HttpOnly; SameSite=Strict; Path=/admin; Max-Age={}{}",
+            token, SESSION_TTL_SECS, secure_flag
         );
 
         (
@@ -153,7 +159,11 @@ pub async fn logout(
         state.admin_sessions.lock().await.remove(&token);
     }
 
-    let clear_cookie = "admin_session=; HttpOnly; SameSite=Strict; Path=/admin; Max-Age=0";
+    let secure_flag = if state.secure_cookies { "; Secure" } else { "" };
+    let clear_cookie = format!(
+        "admin_session=; HttpOnly; SameSite=Strict; Path=/admin; Max-Age=0{}",
+        secure_flag
+    );
 
     (
         StatusCode::OK,
@@ -171,7 +181,15 @@ pub async fn auth_check(
     let authenticated =
         if let Some(cookie_header) = headers.get(header::COOKIE).and_then(|v| v.to_str().ok()) {
             if let Some(token) = parse_cookie(cookie_header, "admin_session") {
-                state.admin_sessions.lock().await.contains(&token)
+                let mut sessions = state.admin_sessions.lock().await;
+                match sessions.get(&token) {
+                    Some(&expires_at) if now_secs() < expires_at => true,
+                    Some(_) => {
+                        sessions.remove(&token);
+                        false
+                    }
+                    None => false,
+                }
             } else {
                 false
             }
