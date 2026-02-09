@@ -91,6 +91,7 @@ async function handleDelete() {
 
     <ModelUsageTable
       :key-id="keyData.id"
+      :available-models="availableModels"
       :load-key-model-usage="loadKeyModelUsage"
       :set-model-limits="setModelLimits"
       :remove-model-limits="removeModelLimits"

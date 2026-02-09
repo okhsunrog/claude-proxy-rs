@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import type { ModelUsageEntry, UpdateLimitsRequest } from '../client'
+import { ref, computed, onMounted } from 'vue'
+import type { Model, ModelUsageEntry, UpdateLimitsRequest } from '../client'
 import type { KeyModelUsageResponse } from '../composables/useKeys'
 
 const props = defineProps<{
   keyId: string
+  availableModels: Model[]
   loadKeyModelUsage: (id: string) => Promise<KeyModelUsageResponse>
   setModelLimits: (keyId: string, model: string, limits: UpdateLimitsRequest) => Promise<void>
   removeModelLimits: (keyId: string, model: string) => Promise<void>
@@ -14,6 +15,15 @@ const props = defineProps<{
     type: 'hourly' | 'weekly' | 'total' | 'all',
   ) => Promise<void>
 }>()
+
+// Build a lookup map from model id to pricing
+const priceMap = computed(() => {
+  const map: Record<string, Model> = {}
+  for (const m of props.availableModels) {
+    map[m.id] = m
+  }
+  return map
+})
 
 const toast = useToast()
 const entries = ref<ModelUsageEntry[]>([])
@@ -56,6 +66,41 @@ function formatCost(microdollars: number): string {
   if (dollars >= 0.01) return `$${dollars.toFixed(3)}`
   if (microdollars === 0) return '$0'
   return `$${dollars.toFixed(4)}`
+}
+
+// Calculate cost in dollars for tokens at a given $/MTok price
+function tokenCost(tokens: number, pricePerMTok: number): number {
+  return (tokens * pricePerMTok) / 1_000_000
+}
+
+function formatDollars(dollars: number): string {
+  if (dollars === 0) return ''
+  if (dollars >= 100) return `$${dollars.toFixed(0)}`
+  if (dollars >= 1) return `$${dollars.toFixed(2)}`
+  if (dollars >= 0.01) return `$${dollars.toFixed(3)}`
+  return `$${dollars.toFixed(4)}`
+}
+
+// Total cost for a window period
+function windowCost(
+  entry: ModelUsageEntry,
+  window: 'hourly' | 'weekly' | 'total',
+): string {
+  const model = priceMap.value[entry.model]
+  if (!model) return ''
+  const w = entry[window]
+  const total =
+    tokenCost(w.input, model.inputPrice) +
+    tokenCost(w.output, model.outputPrice) +
+    tokenCost(w.cacheRead, model.cacheReadPrice) +
+    tokenCost(w.cacheWrite, model.cacheWritePrice)
+  return formatDollars(total)
+}
+
+// Cost string for a single token type
+function lineCost(tokens: number, pricePerMTok: number): string {
+  if (tokens === 0) return ''
+  return formatDollars(tokenCost(tokens, pricePerMTok))
 }
 
 function microToDollars(micro: number | null | undefined): number | null {
@@ -179,12 +224,15 @@ function resetItems(model: string) {
         <!-- Token breakdown -->
         <div class="grid grid-cols-3 gap-2 text-xs">
           <div v-for="window in ['hourly', 'weekly', 'total'] as const" :key="window" class="rounded bg-elevated p-2">
-            <div class="text-muted uppercase mb-1">{{ window }}</div>
+            <div class="flex items-baseline justify-between mb-1">
+              <span class="text-muted uppercase">{{ window }}</span>
+              <span v-if="windowCost(entry, window)" class="font-mono font-semibold text-primary">{{ windowCost(entry, window) }}</span>
+            </div>
             <div class="space-y-0.5">
-              <div>In: <span class="font-mono">{{ formatTokens(entry[window].input) }}</span></div>
-              <div>Out: <span class="font-mono">{{ formatTokens(entry[window].output) }}</span></div>
-              <div>Cache R: <span class="font-mono">{{ formatTokens(entry[window].cacheRead) }}</span></div>
-              <div>Cache W: <span class="font-mono">{{ formatTokens(entry[window].cacheWrite) }}</span></div>
+              <div>In: <span class="font-mono">{{ formatTokens(entry[window].input) }}</span><span v-if="lineCost(entry[window].input, priceMap[entry.model]?.inputPrice ?? 0)" class="text-muted ml-1">({{ lineCost(entry[window].input, priceMap[entry.model]?.inputPrice ?? 0) }})</span></div>
+              <div>Out: <span class="font-mono">{{ formatTokens(entry[window].output) }}</span><span v-if="lineCost(entry[window].output, priceMap[entry.model]?.outputPrice ?? 0)" class="text-muted ml-1">({{ lineCost(entry[window].output, priceMap[entry.model]?.outputPrice ?? 0) }})</span></div>
+              <div>Cache R: <span class="font-mono">{{ formatTokens(entry[window].cacheRead) }}</span><span v-if="lineCost(entry[window].cacheRead, priceMap[entry.model]?.cacheReadPrice ?? 0)" class="text-muted ml-1">({{ lineCost(entry[window].cacheRead, priceMap[entry.model]?.cacheReadPrice ?? 0) }})</span></div>
+              <div>Cache W: <span class="font-mono">{{ formatTokens(entry[window].cacheWrite) }}</span><span v-if="lineCost(entry[window].cacheWrite, priceMap[entry.model]?.cacheWritePrice ?? 0)" class="text-muted ml-1">({{ lineCost(entry[window].cacheWrite, priceMap[entry.model]?.cacheWritePrice ?? 0) }})</span></div>
             </div>
             <div v-if="entry.limits[`${window}Limit` as keyof typeof entry.limits]" class="mt-1 pt-1 border-t border-default">
               Limit: <span class="font-semibold">{{ formatCost(entry.limits[`${window}Limit` as keyof typeof entry.limits] as number) }}</span>

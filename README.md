@@ -4,6 +4,12 @@ Unified API proxy for Claude Pro/Max subscription.
 
 Use your existing Claude Pro/Max subscription with AI coding assistants and tools that support either **OpenAI-compatible** or **Anthropic native** APIs, including [Cline](https://cline.bot/), [Roo Code](https://roocode.com/), [Kilo Code](https://kilo.ai/), and more.
 
+## Admin UI
+
+![API Keys](docs/admin-keys.png)
+
+![Models](docs/admin-models.png)
+
 ## Features
 
 - **Dual API support:**

@@ -68,8 +68,11 @@ const items = computed<UsageItem[]>(() => {
     >
       <div class="text-xs text-muted uppercase">{{ item.label }}</div>
       <div class="text-xl font-semibold mt-1">{{ formatCost(item.used) }}</div>
-      <div class="text-xs text-muted">
-        / {{ item.limit ? formatCost(item.limit) : 'Unlimited' }}
+      <div class="text-xs text-muted flex items-baseline gap-1">
+        <span>/ {{ item.limit ? formatCost(item.limit) : 'Unlimited' }}</span>
+        <span v-if="item.limit" class="font-semibold" :class="(item.used / item.limit) * 100 >= 90 ? 'text-red-500' : (item.used / item.limit) * 100 >= 70 ? 'text-yellow-500' : 'text-green-500'">
+          ({{ ((item.used / item.limit) * 100).toFixed(1) }}%)
+        </span>
       </div>
       <UProgress
         v-if="item.limit"
