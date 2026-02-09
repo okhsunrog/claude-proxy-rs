@@ -287,19 +287,17 @@ async fn main() {
         .with_state(state.clone());
 
     // Protected admin routes (session cookie or Basic Auth)
-    let protected_routes =
-        api_router
-            .merge(routes::admin::static_routes())
-            .layer(middleware::from_fn_with_state(
-                state.clone(),
-                admin_auth_middleware,
-            ));
+    let protected_routes = api_router.layer(middleware::from_fn_with_state(
+        state.clone(),
+        admin_auth_middleware,
+    ));
 
-    // Combine: swagger (unprotected) + auth routes (unprotected) + protected routes
+    // Combine: swagger (unprotected) + auth routes (unprotected) + protected API + static SPA
     let admin_routes = Router::new()
         .merge(swagger_routes)
         .merge(auth_routes)
-        .merge(protected_routes);
+        .merge(protected_routes)
+        .merge(routes::admin::static_routes());
 
     // API routes
     let api_routes = Router::new()

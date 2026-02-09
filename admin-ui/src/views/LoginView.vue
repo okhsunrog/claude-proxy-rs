@@ -40,11 +40,11 @@ async function handleLogin() {
 
       <form class="space-y-4" @submit.prevent="handleLogin">
         <UFormField label="Username">
-          <UInput v-model="username" autocomplete="username" />
+          <UInput v-model="username" autocomplete="username" class="w-full" />
         </UFormField>
 
         <UFormField label="Password">
-          <UInput v-model="password" type="password" autocomplete="current-password" />
+          <UInput v-model="password" type="password" autocomplete="current-password" class="w-full" />
         </UFormField>
 
         <UAlert v-if="error" color="error" :title="error" />
