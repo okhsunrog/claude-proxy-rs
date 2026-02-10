@@ -21,6 +21,7 @@ pub struct Config {
     pub admin_username: String,
     pub admin_password: String,
     pub cors_mode: CorsMode,
+    pub disable_auth: bool,
 }
 
 impl Config {
@@ -37,10 +38,22 @@ impl Config {
             .unwrap_or_else(|| PathBuf::from("."))
             .join("claude-proxy");
 
-        let admin_username = env::var("CLAUDE_PROXY_ADMIN_USERNAME")
-            .expect("CLAUDE_PROXY_ADMIN_USERNAME must be set");
-        let admin_password = env::var("CLAUDE_PROXY_ADMIN_PASSWORD")
-            .expect("CLAUDE_PROXY_ADMIN_PASSWORD must be set");
+        let disable_auth = env::var("CLAUDE_PROXY_DISABLE_AUTH")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+
+        let admin_username = if disable_auth {
+            env::var("CLAUDE_PROXY_ADMIN_USERNAME").unwrap_or_default()
+        } else {
+            env::var("CLAUDE_PROXY_ADMIN_USERNAME")
+                .expect("CLAUDE_PROXY_ADMIN_USERNAME must be set")
+        };
+        let admin_password = if disable_auth {
+            env::var("CLAUDE_PROXY_ADMIN_PASSWORD").unwrap_or_default()
+        } else {
+            env::var("CLAUDE_PROXY_ADMIN_PASSWORD")
+                .expect("CLAUDE_PROXY_ADMIN_PASSWORD must be set")
+        };
 
         // CORS configuration: "localhost" (default), "*" (allow all), or comma-separated origins
         let cors_mode = match env::var("CLAUDE_PROXY_CORS_ORIGINS").as_deref() {
@@ -58,6 +71,7 @@ impl Config {
             admin_username,
             admin_password,
             cors_mode,
+            disable_auth,
         }
     }
 

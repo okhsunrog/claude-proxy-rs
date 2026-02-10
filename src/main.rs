@@ -46,6 +46,8 @@ pub struct AppState {
     pub admin_credentials: (String, String),
     /// Whether to set Secure flag on cookies (true when not binding to localhost)
     pub secure_cookies: bool,
+    /// When true, admin auth middleware is bypassed (for local development)
+    pub disable_auth: bool,
 }
 
 /// Save a session token to the database
@@ -140,6 +142,10 @@ async fn admin_auth_middleware(
     request: axum::extract::Request,
     next: Next,
 ) -> Response {
+    if state.disable_auth {
+        return next.run(request).await;
+    }
+
     let (username, password) = &state.admin_credentials;
 
     // Check for session cookie first
@@ -232,6 +238,11 @@ async fn main() {
     let is_localhost = matches!(host.as_str(), "127.0.0.1" | "localhost" | "::1");
     let secure_cookies = !is_localhost;
 
+    let disable_auth = config.disable_auth;
+    if disable_auth {
+        tracing::warn!("Admin authentication is DISABLED (CLAUDE_PROXY_DISABLE_AUTH=1)");
+    }
+
     let state = Arc::new(AppState {
         auth_store,
         client_keys,
@@ -240,6 +251,7 @@ async fn main() {
         http_client,
         admin_credentials,
         secure_cookies,
+        disable_auth,
     });
 
     // CORS configuration based on environment

@@ -33,9 +33,11 @@ export function useOAuth() {
   async function loadUsage() {
     isLoadingUsage.value = true
     try {
-      const { data } = await getSubscriptionUsage()
+      const { data, error: apiError } = await getSubscriptionUsage()
       if (data) {
         subscriptionUsage.value = data
+      } else if (apiError) {
+        console.error('Usage API error:', apiError)
       }
     } catch (e) {
       console.error('Failed to load subscription usage:', e)

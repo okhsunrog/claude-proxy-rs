@@ -10,7 +10,7 @@ use subtle::ConstantTimeEq;
 use utoipa::ToSchema;
 
 use crate::auth::{ClientKey, Model, ModelUsageEntry, TokenLimits, TokenUsage, UsageResetType};
-use crate::constants::{ANTHROPIC_USAGE_URL, ANTHROPIC_VERSION, USER_AGENT};
+use crate::constants::{ANTHROPIC_USAGE_URL, ANTHROPIC_VERSION, OAUTH_BETA_HEADER, USER_AGENT};
 use crate::parse_cookie;
 use crate::{AppState, SESSION_TTL_SECS, now_secs};
 
@@ -47,8 +47,8 @@ pub struct UsageLimit {
 #[serde(rename_all = "snake_case")]
 pub struct ExtraUsage {
     pub is_enabled: bool,
-    pub monthly_limit: Option<i64>,
-    pub used_credits: Option<i64>,
+    pub monthly_limit: Option<f64>,
+    pub used_credits: Option<f64>,
     pub utilization: Option<f64>,
 }
 
@@ -57,6 +57,7 @@ pub struct ExtraUsage {
 pub struct SubscriptionUsageResponse {
     pub five_hour: Option<UsageLimit>,
     pub seven_day: Option<UsageLimit>,
+    pub seven_day_opus: Option<UsageLimit>,
     pub seven_day_sonnet: Option<UsageLimit>,
     pub extra_usage: Option<ExtraUsage>,
 }
@@ -382,12 +383,15 @@ pub async fn get_subscription_usage(
         .get(ANTHROPIC_USAGE_URL)
         .header("authorization", format!("Bearer {token}"))
         .header("anthropic-version", ANTHROPIC_VERSION)
+        .header("anthropic-beta", OAUTH_BETA_HEADER)
         .header("content-type", "application/json")
         .header("user-agent", USER_AGENT)
-        .timeout(std::time::Duration::from_secs(5))
+        .header("accept", "application/json")
+        .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
         .map_err(|e| {
+            tracing::warn!("Failed to contact Anthropic usage API: {e}");
             (
                 StatusCode::BAD_GATEWAY,
                 Json(ErrorResponse {
@@ -396,9 +400,11 @@ pub async fn get_subscription_usage(
             )
         })?;
 
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+
+    if !status.is_success() {
+        tracing::warn!("Anthropic usage API returned {status}: {body}");
         return Err((
             StatusCode::BAD_GATEWAY,
             Json(ErrorResponse {
@@ -407,7 +413,8 @@ pub async fn get_subscription_usage(
         ));
     }
 
-    let usage: SubscriptionUsageResponse = resp.json().await.map_err(|e| {
+    let usage: SubscriptionUsageResponse = serde_json::from_str(&body).map_err(|e| {
+        tracing::warn!("Failed to parse usage response: {e}");
         (
             StatusCode::BAD_GATEWAY,
             Json(ErrorResponse {

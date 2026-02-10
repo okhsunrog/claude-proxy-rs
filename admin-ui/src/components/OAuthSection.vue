@@ -86,6 +86,13 @@ function getUsageItems(): UsageDisplayItem[] {
       resetsAt: u.seven_day.resets_at,
     })
   }
+  if (u.seven_day_opus?.utilization != null) {
+    items.push({
+      label: 'Weekly (Opus)',
+      utilization: u.seven_day_opus.utilization,
+      resetsAt: u.seven_day_opus.resets_at,
+    })
+  }
   if (u.seven_day_sonnet?.utilization != null) {
     items.push({
       label: 'Weekly (Sonnet)',
