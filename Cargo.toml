@@ -34,4 +34,5 @@ utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 uuid = { version = "1.20.0", features = ["v4", "serde"] }
 
 [build-dependencies]
+chrono = "0.4.43"
 memory-serve = "2.0.0-beta.0"

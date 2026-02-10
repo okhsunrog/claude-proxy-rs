@@ -2,7 +2,19 @@
 import { onMounted, ref } from 'vue'
 import { useOAuth } from '../composables/useOAuth'
 
-const { isConnected, isLoading, error, showCodeInput, checkStatus, connect, exchangeCode, disconnect } = useOAuth()
+const {
+  isConnected,
+  isLoading,
+  isLoadingUsage,
+  error,
+  showCodeInput,
+  subscriptionUsage,
+  checkStatus,
+  connect,
+  exchangeCode,
+  disconnect,
+  loadUsage,
+} = useOAuth()
 const toast = useToast()
 const oauthCode = ref('')
 const showDisconnectModal = ref(false)
@@ -26,12 +38,91 @@ async function handleDisconnect() {
     toast.add({ title: 'Disconnected successfully', color: 'success' })
   }
 }
+
+function barColor(pct: number): string {
+  if (pct >= 90) return 'error'
+  if (pct >= 70) return 'warning'
+  return 'success'
+}
+
+function formatResetTime(isoString: string): string {
+  const reset = new Date(isoString)
+  const now = new Date()
+  const diffMs = reset.getTime() - now.getTime()
+  if (diffMs <= 0) return 'Resetting...'
+  const hours = Math.floor(diffMs / 3600000)
+  const minutes = Math.floor((diffMs % 3600000) / 60000)
+  if (hours > 24) {
+    const days = Math.floor(hours / 24)
+    const remainingHours = hours % 24
+    return `Resets in ${days}d ${remainingHours}h`
+  }
+  return `Resets in ${hours}h ${minutes}m`
+}
+
+interface UsageDisplayItem {
+  label: string
+  utilization: number
+  resetsAt?: string | null
+  subtitle?: string
+}
+
+function getUsageItems(): UsageDisplayItem[] {
+  if (!subscriptionUsage.value) return []
+  const items: UsageDisplayItem[] = []
+  const u = subscriptionUsage.value
+
+  if (u.five_hour?.utilization != null) {
+    items.push({
+      label: 'Session (5h)',
+      utilization: u.five_hour.utilization,
+      resetsAt: u.five_hour.resets_at,
+    })
+  }
+  if (u.seven_day?.utilization != null) {
+    items.push({
+      label: 'Weekly (all)',
+      utilization: u.seven_day.utilization,
+      resetsAt: u.seven_day.resets_at,
+    })
+  }
+  if (u.seven_day_sonnet?.utilization != null) {
+    items.push({
+      label: 'Weekly (Sonnet)',
+      utilization: u.seven_day_sonnet.utilization,
+      resetsAt: u.seven_day_sonnet.resets_at,
+    })
+  }
+  if (u.extra_usage) {
+    const e = u.extra_usage
+    if (e.is_enabled && e.utilization != null) {
+      const spent = e.used_credits != null ? `$${(e.used_credits / 100).toFixed(2)}` : null
+      const limit = e.monthly_limit != null ? `$${(e.monthly_limit / 100).toFixed(2)}` : null
+      items.push({
+        label: 'Extra usage',
+        utilization: e.utilization,
+        subtitle: spent && limit ? `${spent} / ${limit} spent` : undefined,
+      })
+    }
+  }
+  return items
+}
 </script>
 
 <template>
   <UCard>
     <template #header>
-      <h2 class="text-xl font-semibold">OAuth Connection</h2>
+      <div class="flex items-center justify-between">
+        <h2 class="text-xl font-semibold">OAuth Connection</h2>
+        <UButton
+          v-if="isConnected && subscriptionUsage"
+          size="xs"
+          variant="ghost"
+          icon="i-lucide-refresh-cw"
+          :loading="isLoadingUsage"
+          @click="loadUsage"
+        />
+      </div>
     </template>
 
     <div class="space-y-4">
@@ -39,6 +130,34 @@ async function handleDisconnect() {
         <span class="text-sm">Status:</span>
         <UBadge v-if="isConnected" color="success" variant="subtle">Connected</UBadge>
         <UBadge v-else color="error" variant="subtle">Not connected</UBadge>
+      </div>
+
+      <!-- Subscription Usage -->
+      <div v-if="isConnected && subscriptionUsage && getUsageItems().length > 0" class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div
+          v-for="item in getUsageItems()"
+          :key="item.label"
+          class="rounded-lg bg-elevated p-3"
+        >
+          <div class="text-xs text-muted uppercase">{{ item.label }}</div>
+          <div class="text-lg font-semibold mt-1">{{ Math.floor(item.utilization) }}%</div>
+          <UProgress
+            :model-value="Math.min(item.utilization, 100)"
+            :color="barColor(item.utilization)"
+            size="xs"
+            class="mt-1.5"
+          />
+          <div v-if="item.resetsAt" class="text-xs text-muted mt-1">
+            {{ formatResetTime(item.resetsAt) }}
+          </div>
+          <div v-if="item.subtitle" class="text-xs text-muted mt-1">
+            {{ item.subtitle }}
+          </div>
+        </div>
+      </div>
+
+      <div v-if="isConnected && isLoadingUsage && !subscriptionUsage" class="text-sm text-muted">
+        Loading usage...
       </div>
 
       <div class="flex gap-2">

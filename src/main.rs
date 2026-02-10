@@ -20,12 +20,10 @@ use base64::Engine;
 use clap::Parser;
 use config::{Config, CorsMode};
 use reqwest::Client;
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use subtle::ConstantTimeEq;
-use tokio::sync::Mutex;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::normalize_path::NormalizePath;
 use tracing::info;
@@ -35,6 +33,10 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 /// Session TTL: 24 hours (matches cookie Max-Age)
 const SESSION_TTL_SECS: u64 = 86400;
 
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const GIT_HASH: &str = env!("GIT_HASH");
+pub const BUILD_TIME: &str = env!("BUILD_TIME");
+
 pub struct AppState {
     pub auth_store: Arc<AuthStore>,
     pub client_keys: Arc<ClientKeysStore>,
@@ -42,10 +44,62 @@ pub struct AppState {
     pub oauth: OAuthManager,
     pub http_client: Client,
     pub admin_credentials: (String, String),
-    /// Maps session token -> expiry timestamp (epoch seconds)
-    pub admin_sessions: Mutex<HashMap<String, u64>>,
     /// Whether to set Secure flag on cookies (true when not binding to localhost)
     pub secure_cookies: bool,
+}
+
+/// Save a session token to the database
+pub async fn save_session(token: &str, expires_at: u64) {
+    if let Ok(conn) = db::get_conn().await
+        && let Err(e) = conn
+            .execute(
+                "INSERT OR REPLACE INTO admin_sessions (token, expires_at) VALUES (?, ?)",
+                (token, expires_at as i64),
+            )
+            .await
+    {
+        tracing::warn!("Failed to save session: {e}");
+    }
+}
+
+/// Validate a session token, returns true if valid and not expired
+pub async fn validate_session(token: &str) -> bool {
+    let Ok(conn) = db::get_conn().await else {
+        return false;
+    };
+    let Ok(mut rows) = conn
+        .query(
+            "SELECT expires_at FROM admin_sessions WHERE token = ?",
+            [token],
+        )
+        .await
+    else {
+        return false;
+    };
+    let Some(row) = rows.next().await.ok().flatten() else {
+        return false;
+    };
+    let Ok(expires_at) = row.get::<i64>(0) else {
+        return false;
+    };
+    let now = now_secs() as i64;
+    if now < expires_at {
+        return true;
+    }
+    // Expired — clean it up
+    let _ = conn
+        .execute("DELETE FROM admin_sessions WHERE token = ?", [token])
+        .await;
+    false
+}
+
+/// Remove a session token from the database
+pub async fn remove_session(token: &str) {
+    if let Ok(conn) = db::get_conn().await {
+        let _ = conn
+            .execute("DELETE FROM admin_sessions WHERE token = ?", [token])
+            .await;
+    }
 }
 
 fn now_secs() -> u64 {
@@ -94,22 +148,9 @@ async fn admin_auth_middleware(
         .get(header::COOKIE)
         .and_then(|v| v.to_str().ok())
         && let Some(token) = parse_cookie(cookie_header, "admin_session")
+        && validate_session(&token).await
     {
-        let mut sessions = state.admin_sessions.lock().await;
-        let now = now_secs();
-
-        // Periodically clean up expired sessions (when map has > 10 entries)
-        if sessions.len() > 10 {
-            sessions.retain(|_, &mut expires_at| now < expires_at);
-        }
-
-        if let Some(&expires_at) = sessions.get(&token) {
-            if now < expires_at {
-                return next.run(request).await;
-            }
-            // Expired — remove it
-            sessions.remove(&token);
-        }
+        return next.run(request).await;
     }
 
     // Fall through to Basic Auth check
@@ -198,7 +239,6 @@ async fn main() {
         oauth,
         http_client,
         admin_credentials,
-        admin_sessions: Mutex::new(HashMap::new()),
         secure_cookies,
     });
 
@@ -252,6 +292,7 @@ async fn main() {
         .routes(routes!(routes::admin::start_oauth_flow))
         .routes(routes!(routes::admin::exchange_oauth_code))
         .routes(routes!(routes::admin::delete_oauth))
+        .routes(routes!(routes::admin::get_subscription_usage))
         // Keys
         .routes(routes!(routes::admin::create_key))
         .routes(routes!(routes::admin::list_keys))
@@ -319,6 +360,7 @@ async fn main() {
     let app = NormalizePath::trim_trailing_slash(
         Router::new()
             .route("/health", get(routes::health::health))
+            .route("/version", get(routes::health::version))
             .nest("/admin", admin_routes)
             .nest("/v1", api_routes)
             .layer(cors)
@@ -328,7 +370,11 @@ async fn main() {
     let addr: SocketAddr = format!("{}:{}", host, port)
         .parse()
         .expect("Invalid address");
-    info!("Starting claude-proxy on http://{}", addr);
+    info!(
+        "Starting claude-proxy v{}-{} (built {})",
+        VERSION, GIT_HASH, BUILD_TIME
+    );
+    info!("Listening on http://{}", addr);
     info!("Admin UI: http://{}/admin", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();

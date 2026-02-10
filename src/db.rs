@@ -39,6 +39,11 @@ static MIGRATIONS: &[Migration] = &[
         description: "add models, key_allowed_models, key_model_usage tables",
         migrate: migrate_v2,
     },
+    Migration {
+        version: 3,
+        description: "add admin_sessions table for persistent sessions",
+        migrate: migrate_v3,
+    },
 ];
 
 /// Read the current schema version (0 if table is empty or doesn't exist yet).
@@ -301,6 +306,32 @@ fn migrate_v2(
         .await
         .map_err(|e| {
             ProxyError::DatabaseError(format!("Failed to create key_model_usage table: {e}"))
+        })?;
+
+        Ok(())
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Migration v3 — persistent admin sessions
+// ---------------------------------------------------------------------------
+
+fn migrate_v3(
+    conn: &Connection,
+) -> Pin<Box<dyn Future<Output = Result<(), ProxyError>> + Send + '_>> {
+    Box::pin(async move {
+        conn.execute(
+            r#"
+            CREATE TABLE IF NOT EXISTS admin_sessions (
+                token TEXT PRIMARY KEY,
+                expires_at INTEGER NOT NULL
+            )
+            "#,
+            (),
+        )
+        .await
+        .map_err(|e| {
+            ProxyError::DatabaseError(format!("Failed to create admin_sessions table: {e}"))
         })?;
 
         Ok(())

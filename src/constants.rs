@@ -5,6 +5,9 @@ pub const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages?beta=
 pub const ANTHROPIC_COUNT_TOKENS_URL: &str =
     "https://api.anthropic.com/v1/messages/count_tokens?beta=true";
 
+/// Anthropic API URL for subscription usage (OAuth)
+pub const ANTHROPIC_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+
 /// Anthropic API version header value
 pub const ANTHROPIC_VERSION: &str = "2023-06-01";
 

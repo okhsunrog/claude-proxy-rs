@@ -10,6 +10,7 @@ use subtle::ConstantTimeEq;
 use utoipa::ToSchema;
 
 use crate::auth::{ClientKey, Model, ModelUsageEntry, TokenLimits, TokenUsage, UsageResetType};
+use crate::constants::{ANTHROPIC_USAGE_URL, ANTHROPIC_VERSION, USER_AGENT};
 use crate::parse_cookie;
 use crate::{AppState, SESSION_TTL_SECS, now_secs};
 
@@ -33,6 +34,31 @@ pub struct ErrorResponse {
 #[derive(Serialize, ToSchema)]
 pub struct OAuthStatusResponse {
     pub authenticated: bool,
+}
+
+#[derive(Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct UsageLimit {
+    pub utilization: Option<f64>,
+    pub resets_at: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct ExtraUsage {
+    pub is_enabled: bool,
+    pub monthly_limit: Option<i64>,
+    pub used_credits: Option<i64>,
+    pub utilization: Option<f64>,
+}
+
+#[derive(Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct SubscriptionUsageResponse {
+    pub five_hour: Option<UsageLimit>,
+    pub seven_day: Option<UsageLimit>,
+    pub seven_day_sonnet: Option<UsageLimit>,
+    pub extra_usage: Option<ExtraUsage>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -174,11 +200,7 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(body): Json<LoginReq
             rand::random::<u128>()
         );
         let expires_at = now_secs() + SESSION_TTL_SECS;
-        state
-            .admin_sessions
-            .lock()
-            .await
-            .insert(token.clone(), expires_at);
+        crate::save_session(&token, expires_at).await;
 
         let secure_flag = if state.secure_cookies { "; Secure" } else { "" };
         let cookie = format!(
@@ -211,7 +233,7 @@ pub async fn logout(
     if let Some(cookie_header) = headers.get(header::COOKIE).and_then(|v| v.to_str().ok())
         && let Some(token) = parse_cookie(cookie_header, "admin_session")
     {
-        state.admin_sessions.lock().await.remove(&token);
+        crate::remove_session(&token).await;
     }
 
     let secure_flag = if state.secure_cookies { "; Secure" } else { "" };
@@ -229,28 +251,15 @@ pub async fn logout(
 }
 
 /// Check if the current request is authenticated
-pub async fn auth_check(
-    State(state): State<Arc<AppState>>,
-    headers: axum::http::HeaderMap,
-) -> Json<AuthCheckResponse> {
-    let authenticated =
-        if let Some(cookie_header) = headers.get(header::COOKIE).and_then(|v| v.to_str().ok()) {
-            if let Some(token) = parse_cookie(cookie_header, "admin_session") {
-                let mut sessions = state.admin_sessions.lock().await;
-                match sessions.get(&token) {
-                    Some(&expires_at) if now_secs() < expires_at => true,
-                    Some(_) => {
-                        sessions.remove(&token);
-                        false
-                    }
-                    None => false,
-                }
-            } else {
-                false
-            }
-        } else {
-            false
-        };
+pub async fn auth_check(headers: axum::http::HeaderMap) -> Json<AuthCheckResponse> {
+    let authenticated = if let Some(cookie_header) =
+        headers.get(header::COOKIE).and_then(|v| v.to_str().ok())
+        && let Some(token) = parse_cookie(cookie_header, "admin_session")
+    {
+        crate::validate_session(&token).await
+    } else {
+        false
+    };
 
     Json(AuthCheckResponse {
         authenticated,
@@ -331,6 +340,83 @@ pub async fn delete_oauth(
             }),
         )),
     }
+}
+
+/// Get Claude subscription usage from Anthropic API
+#[utoipa::path(
+    get,
+    path = "/oauth/usage",
+    tag = "oauth",
+    responses(
+        (status = 200, body = SubscriptionUsageResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 502, body = ErrorResponse),
+    )
+)]
+pub async fn get_subscription_usage(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<SubscriptionUsageResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let token = state
+        .oauth
+        .refresh_if_needed()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(ErrorResponse {
+                    error: format!("OAuth error: {e}"),
+                }),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(ErrorResponse {
+                    error: "Not authenticated".into(),
+                }),
+            )
+        })?;
+
+    let resp = state
+        .http_client
+        .get(ANTHROPIC_USAGE_URL)
+        .header("authorization", format!("Bearer {token}"))
+        .header("anthropic-version", ANTHROPIC_VERSION)
+        .header("content-type", "application/json")
+        .header("user-agent", USER_AGENT)
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(ErrorResponse {
+                    error: format!("Failed to contact Anthropic: {e}"),
+                }),
+            )
+        })?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            Json(ErrorResponse {
+                error: format!("Anthropic returned {status}: {body}"),
+            }),
+        ));
+    }
+
+    let usage: SubscriptionUsageResponse = resp.json().await.map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(ErrorResponse {
+                error: format!("Failed to parse usage response: {e}"),
+            }),
+        )
+    })?;
+
+    Ok(Json(usage))
 }
 
 /// Maximum allowed length for key names

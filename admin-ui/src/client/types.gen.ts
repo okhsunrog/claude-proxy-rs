@@ -40,6 +40,13 @@ export type ExchangeCodeRequest = {
     code: string;
 };
 
+export type ExtraUsage = {
+    is_enabled: boolean;
+    monthly_limit?: number | null;
+    used_credits?: number | null;
+    utilization?: number | null;
+};
+
 export type KeyModelUsageResponse = {
     entries: Array<ModelUsageEntry>;
 };
@@ -109,6 +116,13 @@ export type ResetUsageRequest = {
 
 export type SetKeyModelsRequest = {
     models: Array<string>;
+};
+
+export type SubscriptionUsageResponse = {
+    extra_usage?: null | ExtraUsage;
+    five_hour?: null | UsageLimit;
+    seven_day?: null | UsageLimit;
+    seven_day_sonnet?: null | UsageLimit;
 };
 
 export type SuccessResponse = {
@@ -181,6 +195,11 @@ export type UpdateModelRequest = {
     enabled?: boolean | null;
     inputPrice?: number | null;
     outputPrice?: number | null;
+};
+
+export type UsageLimit = {
+    resets_at?: string | null;
+    utilization?: number | null;
 };
 
 export type CreateKeyData = {
@@ -628,3 +647,23 @@ export type GetOauthStatusResponses = {
 };
 
 export type GetOauthStatusResponse = GetOauthStatusResponses[keyof GetOauthStatusResponses];
+
+export type GetSubscriptionUsageData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/oauth/usage';
+};
+
+export type GetSubscriptionUsageErrors = {
+    401: ErrorResponse;
+    502: ErrorResponse;
+};
+
+export type GetSubscriptionUsageError = GetSubscriptionUsageErrors[keyof GetSubscriptionUsageErrors];
+
+export type GetSubscriptionUsageResponses = {
+    200: SubscriptionUsageResponse;
+};
+
+export type GetSubscriptionUsageResponse = GetSubscriptionUsageResponses[keyof GetSubscriptionUsageResponses];
