@@ -179,6 +179,18 @@ impl ClientKeysStore {
         })
     }
 
+    pub async fn set_enabled(&self, id: &str, enabled: bool) -> Result<bool, ProxyError> {
+        let conn = db::get_conn().await?;
+        let affected = conn
+            .execute(
+                "UPDATE client_keys SET enabled = ? WHERE id = ?",
+                (enabled as i64, id),
+            )
+            .await
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to update key: {e}")))?;
+        Ok(affected > 0)
+    }
+
     pub async fn delete(&self, id: &str) -> Result<bool, ProxyError> {
         let conn = db::get_conn().await?;
         let affected = conn

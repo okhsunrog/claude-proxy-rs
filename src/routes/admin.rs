@@ -120,6 +120,11 @@ pub struct UpdateLimitsRequest {
 }
 
 #[derive(Deserialize, Serialize, ToSchema)]
+pub struct SetKeyEnabledRequest {
+    enabled: bool,
+}
+
+#[derive(Deserialize, Serialize, ToSchema)]
 pub struct ResetUsageRequest {
     /// Which counter to reset: "hourly", "weekly", "total", or "all"
     #[serde(rename = "type")]
@@ -650,6 +655,41 @@ pub async fn delete_key(
     Path(id): Path<String>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
     match state.client_keys.delete(&id).await {
+        Ok(true) => Ok(Json(SuccessResponse { success: true })),
+        Ok(false) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "Key not found".into(),
+            }),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+/// Toggle a key enabled/disabled
+#[utoipa::path(
+    put,
+    path = "/keys/{id}/enabled",
+    tag = "keys",
+    params(("id" = String, Path, description = "Key ID")),
+    request_body = SetKeyEnabledRequest,
+    responses(
+        (status = 200, body = SuccessResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+pub async fn set_key_enabled(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<SetKeyEnabledRequest>,
+) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    match state.client_keys.set_enabled(&id, body.enabled).await {
         Ok(true) => Ok(Json(SuccessResponse { success: true })),
         Ok(false) => Err((
             StatusCode::NOT_FOUND,

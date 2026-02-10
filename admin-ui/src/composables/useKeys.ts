@@ -10,6 +10,7 @@ import {
   listKeys as listKeysApi,
   createKey as createKeyApi,
   deleteKey as deleteKeyApi,
+  setKeyEnabled as setKeyEnabledApi,
   getKeyUsage,
   updateKeyLimits,
   resetKeyUsage as resetKeyUsageApi,
@@ -66,6 +67,11 @@ export function useKeys() {
 
   async function deleteKey(id: string): Promise<void> {
     await deleteKeyApi({ path: { id } })
+    await loadKeys()
+  }
+
+  async function toggleKey(id: string, enabled: boolean): Promise<void> {
+    await setKeyEnabledApi({ path: { id }, body: { enabled } })
     await loadKeys()
   }
 
@@ -127,6 +133,7 @@ export function useKeys() {
     loadUsage,
     createKey,
     deleteKey,
+    toggleKey,
     updateLimits,
     resetUsage,
     loadKeyModels,

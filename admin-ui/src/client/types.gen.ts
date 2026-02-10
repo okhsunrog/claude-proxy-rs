@@ -47,14 +47,6 @@ export type ExtraUsage = {
     utilization?: number | null;
 };
 
-export type SubscriptionUsageResponse = {
-    extra_usage?: null | ExtraUsage;
-    five_hour?: null | UsageLimit;
-    seven_day?: null | UsageLimit;
-    seven_day_opus?: null | UsageLimit;
-    seven_day_sonnet?: null | UsageLimit;
-};
-
 export type KeyModelUsageResponse = {
     entries: Array<ModelUsageEntry>;
 };
@@ -123,8 +115,20 @@ export type ResetUsageRequest = {
     type: string;
 };
 
+export type SetKeyEnabledRequest = {
+    enabled: boolean;
+};
+
 export type SetKeyModelsRequest = {
     models: Array<string>;
+};
+
+export type SubscriptionUsageResponse = {
+    extra_usage?: null | ExtraUsage;
+    five_hour?: null | UsageLimit;
+    seven_day?: null | UsageLimit;
+    seven_day_opus?: null | UsageLimit;
+    seven_day_sonnet?: null | UsageLimit;
 };
 
 export type SuccessResponse = {
@@ -261,6 +265,31 @@ export type DeleteKeyResponses = {
 };
 
 export type DeleteKeyResponse = DeleteKeyResponses[keyof DeleteKeyResponses];
+
+export type SetKeyEnabledData = {
+    body: SetKeyEnabledRequest;
+    path: {
+        /**
+         * Key ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/keys/{id}/enabled';
+};
+
+export type SetKeyEnabledErrors = {
+    404: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type SetKeyEnabledError = SetKeyEnabledErrors[keyof SetKeyEnabledErrors];
+
+export type SetKeyEnabledResponses = {
+    200: SuccessResponse;
+};
+
+export type SetKeyEnabledResponse = SetKeyEnabledResponses[keyof SetKeyEnabledResponses];
 
 export type UpdateKeyLimitsData = {
     body: UpdateLimitsRequest;

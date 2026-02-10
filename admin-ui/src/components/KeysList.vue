@@ -13,6 +13,7 @@ const {
   loadKeys,
   createKey,
   deleteKey,
+  toggleKey,
   updateLimits,
   resetUsage,
   loadKeyModels,
@@ -54,6 +55,7 @@ onMounted(() => {
         :usage="usageMap[key.id]"
         :available-models="models"
         :delete-key="deleteKey"
+        :toggle-key="toggleKey"
         :update-limits="updateLimits"
         :reset-usage="resetUsage"
         :load-key-models="loadKeyModels"

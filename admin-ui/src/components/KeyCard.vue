@@ -13,6 +13,7 @@ const props = defineProps<{
   usage: KeyUsageResponse | undefined
   availableModels: Model[]
   deleteKey: (id: string) => Promise<void>
+  toggleKey: (id: string, enabled: boolean) => Promise<void>
   updateLimits: (id: string, limits: UpdateLimitsRequest) => Promise<void>
   resetUsage: (id: string, type: 'fiveHour' | 'weekly' | 'total' | 'all') => Promise<void>
   loadKeyModels: (id: string) => Promise<KeyModelsResponse>
@@ -31,6 +32,7 @@ const toast = useToast()
 const isExpanded = ref(false)
 const showDeleteModal = ref(false)
 const isDeleting = ref(false)
+const isToggling = ref(false)
 
 function formatDate(timestamp: number): string {
   return new Date(timestamp).toLocaleString()
@@ -46,6 +48,18 @@ function copyKey() {
     () => toast.add({ title: 'Key copied to clipboard', color: 'success' }),
     () => toast.add({ title: 'Failed to copy key. Please copy manually.', color: 'error' }),
   )
+}
+
+async function handleToggle() {
+  isToggling.value = true
+  try {
+    await props.toggleKey(props.keyData.id, !props.keyData.enabled)
+    toast.add({ title: `Key ${props.keyData.enabled ? 'disabled' : 'enabled'}`, color: 'success' })
+  } catch (e: unknown) {
+    toast.add({ title: 'Failed to toggle key', description: errorMessage(e), color: 'error' })
+  } finally {
+    isToggling.value = false
+  }
 }
 
 async function handleDelete() {
@@ -98,7 +112,7 @@ const usageSummary = computed<UsageSummaryItem[]>(() => {
         :name="isExpanded ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
         class="w-4 h-4 shrink-0 text-muted"
       />
-      <span class="font-semibold truncate">{{ keyData.name }}</span>
+      <span class="font-semibold truncate" :class="{ 'text-muted line-through': !keyData.enabled }">{{ keyData.name }}</span>
       <span class="font-mono text-xs text-muted hidden sm:inline">{{ maskedKey(keyData.key) }}</span>
 
       <!-- Inline usage summary -->
@@ -112,6 +126,13 @@ const usageSummary = computed<UsageSummaryItem[]>(() => {
 
       <!-- Action buttons (stop propagation to prevent toggle) -->
       <div class="flex gap-1.5 shrink-0" @click.stop>
+        <UButton
+          size="xs"
+          :variant="keyData.enabled ? 'soft' : 'solid'"
+          :color="keyData.enabled ? 'warning' : 'success'"
+          :loading="isToggling"
+          @click="handleToggle"
+        >{{ keyData.enabled ? 'Disable' : 'Enable' }}</UButton>
         <UButton size="xs" variant="soft" @click="copyKey">Copy Key</UButton>
         <UButton size="xs" color="error" variant="soft" @click="showDeleteModal = true">Delete</UButton>
       </div>

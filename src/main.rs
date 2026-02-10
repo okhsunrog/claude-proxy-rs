@@ -321,6 +321,7 @@ async fn main() {
         .routes(routes!(routes::admin::create_key))
         .routes(routes!(routes::admin::list_keys))
         .routes(routes!(routes::admin::delete_key))
+        .routes(routes!(routes::admin::set_key_enabled))
         .routes(routes!(routes::admin::get_key_usage))
         .routes(routes!(routes::admin::update_key_limits))
         .routes(routes!(routes::admin::reset_key_usage))

@@ -2,7 +2,7 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AddModelData, AddModelErrors, AddModelResponses, CreateKeyData, CreateKeyErrors, CreateKeyResponses, DeleteKeyData, DeleteKeyErrors, DeleteKeyResponses, DeleteModelData, DeleteModelErrors, DeleteModelResponses, DeleteOauthData, DeleteOauthErrors, DeleteOauthResponses, ExchangeOauthCodeData, ExchangeOauthCodeErrors, ExchangeOauthCodeResponses, GetKeyModelsData, GetKeyModelsResponses, GetKeyModelUsageData, GetKeyModelUsageResponses, GetKeyUsageData, GetKeyUsageErrors, GetKeyUsageResponses, GetOauthStatusData, GetOauthStatusResponses, GetSubscriptionUsageData, GetSubscriptionUsageErrors, GetSubscriptionUsageResponses, ListKeysData, ListKeysResponses, ListModelsAdminData, ListModelsAdminResponses, RemoveKeyModelLimitsData, RemoveKeyModelLimitsErrors, RemoveKeyModelLimitsResponses, ReorderModelsData, ReorderModelsErrors, ReorderModelsResponses, ResetKeyModelUsageData, ResetKeyModelUsageErrors, ResetKeyModelUsageResponses, ResetKeyUsageData, ResetKeyUsageErrors, ResetKeyUsageResponses, SetKeyModelLimitsData, SetKeyModelLimitsErrors, SetKeyModelLimitsResponses, SetKeyModelsData, SetKeyModelsErrors, SetKeyModelsResponses, StartOauthFlowData, StartOauthFlowResponses, UpdateKeyLimitsData, UpdateKeyLimitsErrors, UpdateKeyLimitsResponses, UpdateModelData, UpdateModelErrors, UpdateModelResponses } from './types.gen';
+import type { AddModelData, AddModelErrors, AddModelResponses, CreateKeyData, CreateKeyErrors, CreateKeyResponses, DeleteKeyData, DeleteKeyErrors, DeleteKeyResponses, DeleteModelData, DeleteModelErrors, DeleteModelResponses, DeleteOauthData, DeleteOauthErrors, DeleteOauthResponses, ExchangeOauthCodeData, ExchangeOauthCodeErrors, ExchangeOauthCodeResponses, GetKeyModelsData, GetKeyModelsResponses, GetKeyModelUsageData, GetKeyModelUsageResponses, GetKeyUsageData, GetKeyUsageErrors, GetKeyUsageResponses, GetOauthStatusData, GetOauthStatusResponses, GetSubscriptionUsageData, GetSubscriptionUsageErrors, GetSubscriptionUsageResponses, ListKeysData, ListKeysResponses, ListModelsAdminData, ListModelsAdminResponses, RemoveKeyModelLimitsData, RemoveKeyModelLimitsErrors, RemoveKeyModelLimitsResponses, ReorderModelsData, ReorderModelsErrors, ReorderModelsResponses, ResetKeyModelUsageData, ResetKeyModelUsageErrors, ResetKeyModelUsageResponses, ResetKeyUsageData, ResetKeyUsageErrors, ResetKeyUsageResponses, SetKeyEnabledData, SetKeyEnabledErrors, SetKeyEnabledResponses, SetKeyModelLimitsData, SetKeyModelLimitsErrors, SetKeyModelLimitsResponses, SetKeyModelsData, SetKeyModelsErrors, SetKeyModelsResponses, StartOauthFlowData, StartOauthFlowResponses, UpdateKeyLimitsData, UpdateKeyLimitsErrors, UpdateKeyLimitsResponses, UpdateModelData, UpdateModelErrors, UpdateModelResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -39,6 +39,18 @@ export const listKeys = <ThrowOnError extends boolean = false>(options?: Options
  * Delete an API key
  */
 export const deleteKey = <ThrowOnError extends boolean = false>(options: Options<DeleteKeyData, ThrowOnError>) => (options.client ?? client).delete<DeleteKeyResponses, DeleteKeyErrors, ThrowOnError>({ url: '/keys/{id}', ...options });
+
+/**
+ * Toggle a key enabled/disabled
+ */
+export const setKeyEnabled = <ThrowOnError extends boolean = false>(options: Options<SetKeyEnabledData, ThrowOnError>) => (options.client ?? client).put<SetKeyEnabledResponses, SetKeyEnabledErrors, ThrowOnError>({
+    url: '/keys/{id}/enabled',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
 
 /**
  * Update limits for a key
