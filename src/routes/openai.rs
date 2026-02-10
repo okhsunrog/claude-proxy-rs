@@ -61,6 +61,8 @@ pub async fn chat_completions(
         Err(err) => return err.to_openai_response(),
     };
 
+    let cloak = state.should_cloak(headers.get("user-agent").and_then(|v| v.to_str().ok()));
+
     let stream = body.stream.unwrap_or(false);
     let anthropic_value = transform_openai_request(body);
     let model = anthropic_value
@@ -68,7 +70,7 @@ pub async fn chat_completions(
         .and_then(|m| m.as_str())
         .unwrap_or("")
         .to_string();
-    let prepared = prepare_anthropic_request(anthropic_value);
+    let prepared = prepare_anthropic_request(anthropic_value, cloak);
 
     let req_builder = build_anthropic_request(
         &state.http_client,

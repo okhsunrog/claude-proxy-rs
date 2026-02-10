@@ -18,7 +18,7 @@ use axum::{
 };
 use base64::Engine;
 use clap::Parser;
-use config::{Config, CorsMode};
+use config::{CloakMode, Config, CorsMode};
 use reqwest::Client;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -57,8 +57,24 @@ pub struct AppState {
     pub secure_cookies: bool,
     /// When true, admin auth middleware is bypassed (for local development)
     pub disable_auth: bool,
+    /// Cloaking mode (always / never / auto)
+    pub cloak_mode: CloakMode,
     /// Cached subscription window reset times for syncing rate-limit windows
     pub window_resets: RwLock<WindowResets>,
+}
+
+impl AppState {
+    /// Determine whether to apply cloaking based on mode and client User-Agent.
+    pub fn should_cloak(&self, user_agent: Option<&str>) -> bool {
+        match self.cloak_mode {
+            CloakMode::Always => true,
+            CloakMode::Never => false,
+            CloakMode::Auto => {
+                // Skip cloaking if client is already Claude Code
+                !user_agent.is_some_and(|ua| ua.starts_with("claude-cli"))
+            }
+        }
+    }
 }
 
 /// Save a session token to the database
@@ -254,6 +270,9 @@ async fn main() {
         tracing::warn!("Admin authentication is DISABLED (CLAUDE_PROXY_DISABLE_AUTH=1)");
     }
 
+    let cloak_mode = config.cloak_mode;
+    info!("Cloaking mode: {:?}", cloak_mode);
+
     let state = Arc::new(AppState {
         auth_store,
         client_keys,
@@ -263,6 +282,7 @@ async fn main() {
         admin_credentials,
         secure_cookies,
         disable_auth,
+        cloak_mode,
         window_resets: RwLock::new(WindowResets::default()),
     });
 

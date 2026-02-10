@@ -34,6 +34,7 @@ pub async fn messages(
         Err(err) => return err.to_anthropic_response(),
     };
 
+    let cloak = state.should_cloak(headers.get("user-agent").and_then(|v| v.to_str().ok()));
     let model = model.to_string();
 
     let stream = body
@@ -42,7 +43,7 @@ pub async fn messages(
         .unwrap_or(false);
 
     // Apply all transformations via unified pipeline
-    let prepared = prepare_anthropic_request(body);
+    let prepared = prepare_anthropic_request(body, cloak);
 
     let req_builder = build_anthropic_request(
         &state.http_client,
@@ -147,8 +148,10 @@ pub async fn count_tokens(
         Err(err) => return err.to_anthropic_response(),
     };
 
+    let cloak = state.should_cloak(headers.get("user-agent").and_then(|v| v.to_str().ok()));
+
     // Apply lighter transformations for count_tokens (no metadata/tools support)
-    let prepared = prepare_count_tokens_request(body);
+    let prepared = prepare_count_tokens_request(body, cloak);
 
     let req_builder = build_anthropic_request(
         &state.http_client,

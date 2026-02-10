@@ -3,6 +3,17 @@ use std::path::PathBuf;
 
 use dotenvy::dotenv;
 
+/// Cloaking mode — controls when Claude Code identity spoofing is applied
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloakMode {
+    /// Always apply cloaking (fake user ID, system prefix)
+    Always,
+    /// Never apply cloaking
+    Never,
+    /// Auto-detect: skip cloaking when client is already Claude Code (User-Agent: claude-cli/*)
+    Auto,
+}
+
 /// CORS configuration mode
 #[derive(Debug, Clone)]
 pub enum CorsMode {
@@ -22,6 +33,7 @@ pub struct Config {
     pub admin_password: String,
     pub cors_mode: CorsMode,
     pub disable_auth: bool,
+    pub cloak_mode: CloakMode,
 }
 
 impl Config {
@@ -55,6 +67,16 @@ impl Config {
                 .expect("CLAUDE_PROXY_ADMIN_PASSWORD must be set")
         };
 
+        let cloak_mode = match env::var("CLAUDE_PROXY_CLOAK_MODE")
+            .as_deref()
+            .map(str::to_lowercase)
+            .as_deref()
+        {
+            Ok("always") => CloakMode::Always,
+            Ok("never") => CloakMode::Never,
+            _ => CloakMode::Auto,
+        };
+
         // CORS configuration: "localhost" (default), "*" (allow all), or comma-separated origins
         let cors_mode = match env::var("CLAUDE_PROXY_CORS_ORIGINS").as_deref() {
             Ok("*") => CorsMode::AllowAll,
@@ -72,6 +94,7 @@ impl Config {
             admin_password,
             cors_mode,
             disable_auth,
+            cloak_mode,
         }
     }
 

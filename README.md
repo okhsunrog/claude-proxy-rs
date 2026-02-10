@@ -152,6 +152,7 @@ Environment variables are loaded from `.env` file (via [dotenvy](https://crates.
 | `CLAUDE_PROXY_HOST` | `127.0.0.1` | Bind address |
 | `CLAUDE_PROXY_PORT` | `4096` | Port |
 | `CLAUDE_PROXY_CORS_ORIGINS` | `localhost` | CORS: `localhost`, `*`, or comma-separated origins |
+| `CLAUDE_PROXY_CLOAK_MODE` | `auto` | Cloaking mode: `always`, `never`, or `auto` (skip for Claude Code clients) |
 
 Sessions are stored as HttpOnly cookies (24h expiry). Basic Auth is also accepted for programmatic access.
 
@@ -233,8 +234,4 @@ just restart                 # Restart server
 just test-api                # Run integration tests against running proxy
 ```
 
-## TODO
 
-- [ ] **Cloaking mode configuration** - Add configurable cloaking mode (`always`/`never`/`auto`) to control when Claude Code identity spoofing is applied. In `auto` mode, skip cloaking when the client is already Claude Code (detected via `User-Agent: claude-cli/*`). This prevents double-cloaking when using the proxy as a pass-through for actual Claude Code.
-
-- [ ] **Preserve valid user IDs** - Currently the proxy validates existing user IDs but still generates fake ones. Consider an option to preserve valid Claude Code-formatted user IDs from the client instead of always overwriting them.

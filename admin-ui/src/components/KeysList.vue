@@ -8,7 +8,6 @@ import KeyCard from './KeyCard.vue'
 const {
   keys,
   isLoading,
-  newKeyData,
   usageMap,
   loadKeys,
   createKey,
@@ -34,10 +33,7 @@ onMounted(() => {
 
 <template>
   <div class="space-y-4">
-    <CreateKeyForm
-      :create-key="createKey"
-      :new-key-data="newKeyData"
-    />
+    <CreateKeyForm :create-key="createKey" />
 
     <div v-if="isLoading && keys.length === 0" class="text-center py-8 text-muted">
       Loading...

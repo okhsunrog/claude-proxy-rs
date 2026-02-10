@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { errorMessage } from '../utils/format'
-import type { CreateKeyResponse } from '../client'
 
 const emit = defineEmits<{
   created: []
@@ -9,7 +8,6 @@ const emit = defineEmits<{
 
 const props = defineProps<{
   createKey: (name: string) => Promise<boolean>
-  newKeyData: CreateKeyResponse | null
 }>()
 
 const toast = useToast()
@@ -35,14 +33,6 @@ async function handleCreate() {
     isCreating.value = false
   }
 }
-
-function copyNewKey() {
-  if (!props.newKeyData?.key) return
-  navigator.clipboard.writeText(props.newKeyData.key).then(
-    () => toast.add({ title: 'Key copied to clipboard', color: 'success' }),
-    () => toast.add({ title: 'Failed to copy key', color: 'error' }),
-  )
-}
 </script>
 
 <template>
@@ -59,16 +49,5 @@ function copyNewKey() {
         Generate Key
       </UButton>
     </div>
-
-    <UAlert
-      v-if="newKeyData"
-      color="success"
-      title="API Key Created"
-    >
-      <div class="flex items-center gap-2 mt-2">
-        <code class="flex-1 break-all text-sm font-mono">{{ newKeyData.key }}</code>
-        <UButton size="xs" variant="soft" @click="copyNewKey">Copy</UButton>
-      </div>
-    </UAlert>
   </div>
 </template>

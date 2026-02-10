@@ -27,7 +27,6 @@ export type { KeyUsageResponse, KeyModelsResponse, KeyModelUsageResponse }
 export function useKeys() {
   const keys = ref<ClientKey[]>([])
   const isLoading = ref(false)
-  const newKeyData = ref<{ key: string; id: string } | null>(null)
   const usageMap = ref<Record<string, KeyUsageResponse>>({})
 
   async function loadKeys() {
@@ -56,11 +55,10 @@ export function useKeys() {
   }
 
   async function createKey(name: string): Promise<boolean> {
-    const { data, error } = await createKeyApi({ body: { name } })
+    const { error } = await createKeyApi({ body: { name } })
     if (error) {
       throw error
     }
-    newKeyData.value = data ?? null
     await loadKeys()
     return true
   }
@@ -127,7 +125,6 @@ export function useKeys() {
   return {
     keys,
     isLoading,
-    newKeyData,
     usageMap,
     loadKeys,
     loadUsage,
