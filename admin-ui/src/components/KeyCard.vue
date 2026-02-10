@@ -14,13 +14,13 @@ const props = defineProps<{
   availableModels: Model[]
   deleteKey: (id: string) => Promise<void>
   updateLimits: (id: string, limits: UpdateLimitsRequest) => Promise<void>
-  resetUsage: (id: string, type: 'hourly' | 'weekly' | 'total' | 'all') => Promise<void>
+  resetUsage: (id: string, type: 'fiveHour' | 'weekly' | 'total' | 'all') => Promise<void>
   loadKeyModels: (id: string) => Promise<KeyModelsResponse>
   setKeyModels: (id: string, models: string[]) => Promise<void>
   loadKeyModelUsage: (id: string) => Promise<KeyModelUsageResponse>
   setModelLimits: (keyId: string, model: string, limits: UpdateLimitsRequest) => Promise<void>
   removeModelLimits: (keyId: string, model: string) => Promise<void>
-  resetModelUsage: (keyId: string, model: string, type: 'hourly' | 'weekly' | 'total' | 'all') => Promise<void>
+  resetModelUsage: (keyId: string, model: string, type: 'fiveHour' | 'weekly' | 'total' | 'all') => Promise<void>
 }>()
 
 const emit = defineEmits<{
@@ -80,7 +80,7 @@ const usageSummary = computed<UsageSummaryItem[]>(() => {
   if (!props.usage) return []
   const { usage, limits } = props.usage
   return [
-    { label: 'H', used: usage.hourlyTokens ?? 0, limit: limits.hourlyLimit },
+    { label: '5H', used: usage.fiveHourTokens ?? 0, limit: limits.fiveHourLimit },
     { label: 'W', used: usage.weeklyTokens ?? 0, limit: limits.weeklyLimit },
     { label: 'T', used: usage.totalTokens ?? 0, limit: limits.totalLimit },
   ]

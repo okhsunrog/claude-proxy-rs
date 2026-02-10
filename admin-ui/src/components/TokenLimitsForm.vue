@@ -8,14 +8,14 @@ const props = defineProps<{
   keyId: string
   usage: KeyUsageResponse | undefined
   updateLimits: (id: string, limits: UpdateLimitsRequest) => Promise<void>
-  resetUsage: (id: string, type: 'hourly' | 'weekly' | 'total' | 'all') => Promise<void>
+  resetUsage: (id: string, type: 'fiveHour' | 'weekly' | 'total' | 'all') => Promise<void>
 }>()
 
 import { microToDollars, dollarsToMicro } from '../utils/format'
 
 const toast = useToast()
 // Display/edit in dollars, store in microdollars
-const hourlyDollars = ref<number | null>(null)
+const fiveHourDollars = ref<number | null>(null)
 const weeklyDollars = ref<number | null>(null)
 const totalDollars = ref<number | null>(null)
 const isSaving = ref(false)
@@ -24,7 +24,7 @@ watch(
   () => props.usage,
   (u) => {
     if (u) {
-      hourlyDollars.value = microToDollars(u.limits.hourlyLimit)
+      fiveHourDollars.value = microToDollars(u.limits.fiveHourLimit)
       weeklyDollars.value = microToDollars(u.limits.weeklyLimit)
       totalDollars.value = microToDollars(u.limits.totalLimit)
     }
@@ -36,7 +36,7 @@ async function handleSave() {
   isSaving.value = true
   try {
     await props.updateLimits(props.keyId, {
-      hourlyLimit: dollarsToMicro(hourlyDollars.value),
+      fiveHourLimit: dollarsToMicro(fiveHourDollars.value),
       weeklyLimit: dollarsToMicro(weeklyDollars.value),
       totalLimit: dollarsToMicro(totalDollars.value),
     })
@@ -51,8 +51,8 @@ async function handleSave() {
 const resetItems = [
   [
     {
-      label: 'Reset Hourly',
-      onSelect: () => handleReset('hourly'),
+      label: 'Reset 5-Hour',
+      onSelect: () => handleReset('fiveHour'),
     },
     {
       label: 'Reset Weekly',
@@ -69,7 +69,7 @@ const resetItems = [
   ],
 ]
 
-async function handleReset(type: 'hourly' | 'weekly' | 'total' | 'all') {
+async function handleReset(type: 'fiveHour' | 'weekly' | 'total' | 'all') {
   try {
     await props.resetUsage(props.keyId, type)
     toast.add({ title: `${type.charAt(0).toUpperCase() + type.slice(1)} usage reset`, color: 'success' })
@@ -83,10 +83,10 @@ async function handleReset(type: 'hourly' | 'weekly' | 'total' | 'all') {
   <div class="border-t border-default pt-3 mt-3">
     <h3 class="text-sm font-semibold text-muted mb-2">Cost Limits (USD)</h3>
     <div class="flex flex-wrap gap-3 items-end">
-      <UFormField label="Hourly ($)" class="w-32">
+      <UFormField label="5-Hour ($)" class="w-32">
         <UInput
-          :model-value="hourlyDollars ?? undefined"
-          @update:model-value="(v: string | number) => hourlyDollars = v == null || v === '' ? null : Number(v)"
+          :model-value="fiveHourDollars ?? undefined"
+          @update:model-value="(v: string | number) => fiveHourDollars = v == null || v === '' ? null : Number(v)"
           type="number"
           placeholder="Unlimited"
           step="0.01"

@@ -24,6 +24,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use subtle::ConstantTimeEq;
+use tokio::sync::RwLock;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::normalize_path::NormalizePath;
 use tracing::info;
@@ -37,6 +38,14 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const GIT_HASH: &str = env!("GIT_HASH");
 pub const BUILD_TIME: &str = env!("BUILD_TIME");
 
+/// Cached subscription window reset times (epoch ms).
+/// Used to sync per-key rate-limit windows with Claude's actual subscription windows.
+#[derive(Debug, Clone, Default)]
+pub struct WindowResets {
+    pub five_hour_reset_at: Option<u64>,
+    pub seven_day_reset_at: Option<u64>,
+}
+
 pub struct AppState {
     pub auth_store: Arc<AuthStore>,
     pub client_keys: Arc<ClientKeysStore>,
@@ -48,6 +57,8 @@ pub struct AppState {
     pub secure_cookies: bool,
     /// When true, admin auth middleware is bypassed (for local development)
     pub disable_auth: bool,
+    /// Cached subscription window reset times for syncing rate-limit windows
+    pub window_resets: RwLock<WindowResets>,
 }
 
 /// Save a session token to the database
@@ -252,6 +263,7 @@ async fn main() {
         admin_credentials,
         secure_cookies,
         disable_auth,
+        window_resets: RwLock::new(WindowResets::default()),
     });
 
     // CORS configuration based on environment

@@ -98,12 +98,11 @@ pub async fn chat_completions(
 
     if stream {
         let body_stream = response.bytes_stream();
-        let client_keys = Arc::clone(&state.client_keys);
         let key_id = auth.client_key.id.clone();
         let sse_stream = stream_anthropic_to_openai_with_usage(
             body_stream,
             model,
-            client_keys,
+            state.clone(),
             key_id,
             auth.model_pricing,
         );
@@ -126,12 +125,13 @@ pub async fn chat_completions(
 
         // Record token usage
         let usage_report = TokenUsageReport::from_anthropic_usage(&anthropic_response.usage);
+        let window_resets = crate::routes::admin::get_or_refresh_window_resets(&state).await;
 
         // Global usage (cost in microdollars)
         let cost = usage_report.cost_microdollars(&auth.model_pricing);
         if let Err(e) = state
             .client_keys
-            .record_usage(&auth.client_key.id, cost)
+            .record_usage(&auth.client_key.id, cost, &window_resets)
             .await
         {
             tracing::warn!("Failed to record usage for key {}: {e}", auth.client_key.id);
@@ -140,7 +140,7 @@ pub async fn chat_completions(
         // Per-model usage (raw tokens)
         if let Err(e) = state
             .client_keys
-            .record_model_usage(&auth.client_key.id, &model, &usage_report)
+            .record_model_usage(&auth.client_key.id, &model, &usage_report, &window_resets)
             .await
         {
             tracing::warn!(

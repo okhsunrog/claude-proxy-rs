@@ -94,8 +94,8 @@ export type Model = {
  * Per-model usage entry with limits and token breakdowns
  */
 export type ModelUsageEntry = {
-    hourly: TokenBreakdown;
-    hourlyResetAt: number;
+    fiveHour: TokenBreakdown;
+    fiveHourResetAt: number;
     limits: TokenLimits;
     model: string;
     total: TokenBreakdown;
@@ -146,9 +146,9 @@ export type TokenBreakdown = {
  */
 export type TokenLimits = {
     /**
-     * Maximum tokens per hour (None = unlimited)
+     * Maximum tokens per 5-hour window (None = unlimited)
      */
-    hourlyLimit?: number | null;
+    fiveHourLimit?: number | null;
     /**
      * Maximum total tokens ever (None = unlimited)
      */
@@ -164,13 +164,13 @@ export type TokenLimits = {
  */
 export type TokenUsage = {
     /**
-     * Timestamp when hourly counter resets (epoch ms)
+     * Timestamp when 5-hour counter resets (epoch ms)
      */
-    hourlyResetAt?: number;
+    fiveHourResetAt?: number;
     /**
-     * Tokens used in current hour
+     * Tokens used in current 5-hour window
      */
-    hourlyTokens?: number;
+    fiveHourTokens?: number;
     /**
      * Total tokens used (lifetime)
      */
@@ -186,7 +186,7 @@ export type TokenUsage = {
 };
 
 export type UpdateLimitsRequest = {
-    hourlyLimit?: number | null;
+    fiveHourLimit?: number | null;
     totalLimit?: number | null;
     weeklyLimit?: number | null;
 };

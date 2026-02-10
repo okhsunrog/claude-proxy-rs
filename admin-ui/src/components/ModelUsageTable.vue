@@ -13,7 +13,7 @@ const props = defineProps<{
   resetModelUsage: (
     keyId: string,
     model: string,
-    type: 'hourly' | 'weekly' | 'total' | 'all',
+    type: 'fiveHour' | 'weekly' | 'total' | 'all',
   ) => Promise<void>
 }>()
 
@@ -33,7 +33,7 @@ const isExpanded = ref(false)
 
 // Editing state
 const editingModel = ref<string | null>(null)
-const editHourly = ref<number | null>(null)
+const editFiveHour = ref<number | null>(null)
 const editWeekly = ref<number | null>(null)
 const editTotal = ref<number | null>(null)
 const isSaving = ref(false)
@@ -76,7 +76,7 @@ function formatDollars(dollars: number): string {
 // Total cost for a window period
 function windowCost(
   entry: ModelUsageEntry,
-  window: 'hourly' | 'weekly' | 'total',
+  window: 'fiveHour' | 'weekly' | 'total',
 ): string {
   const model = priceMap.value[entry.model]
   if (!model) return ''
@@ -97,7 +97,7 @@ function lineCost(tokens: number, pricePerMTok: number): string {
 
 function startEdit(entry: ModelUsageEntry) {
   editingModel.value = entry.model
-  editHourly.value = microToDollars(entry.limits.hourlyLimit)
+  editFiveHour.value = microToDollars(entry.limits.fiveHourLimit)
   editWeekly.value = microToDollars(entry.limits.weeklyLimit)
   editTotal.value = microToDollars(entry.limits.totalLimit)
 }
@@ -110,10 +110,10 @@ async function saveEdit(model: string) {
   isSaving.value = true
   try {
     const hasAnyLimit =
-      editHourly.value != null || editWeekly.value != null || editTotal.value != null
+      editFiveHour.value != null || editWeekly.value != null || editTotal.value != null
     if (hasAnyLimit) {
       await props.setModelLimits(props.keyId, model, {
-        hourlyLimit: dollarsToMicro(editHourly.value),
+        fiveHourLimit: dollarsToMicro(editFiveHour.value),
         weeklyLimit: dollarsToMicro(editWeekly.value),
         totalLimit: dollarsToMicro(editTotal.value),
       })
@@ -134,7 +134,7 @@ async function saveEdit(model: string) {
   }
 }
 
-async function handleReset(model: string, type: 'hourly' | 'weekly' | 'total' | 'all') {
+async function handleReset(model: string, type: 'fiveHour' | 'weekly' | 'total' | 'all') {
   try {
     await props.resetModelUsage(props.keyId, model, type)
     await loadData()
@@ -154,7 +154,7 @@ async function handleReset(model: string, type: 'hourly' | 'weekly' | 'total' | 
 function resetItems(model: string) {
   return [
     [
-      { label: 'Reset Hourly', onSelect: () => handleReset(model, 'hourly') },
+      { label: 'Reset 5-Hour', onSelect: () => handleReset(model, 'fiveHour') },
       { label: 'Reset Weekly', onSelect: () => handleReset(model, 'weekly') },
       { label: 'Reset Total', onSelect: () => handleReset(model, 'total') },
       { label: 'Reset All', onSelect: () => handleReset(model, 'all') },
@@ -205,9 +205,9 @@ function resetItems(model: string) {
 
         <!-- Token breakdown -->
         <div class="grid grid-cols-3 gap-2 text-xs">
-          <div v-for="window in ['hourly', 'weekly', 'total'] as const" :key="window" class="rounded bg-elevated p-2">
+          <div v-for="window in ['fiveHour', 'weekly', 'total'] as const" :key="window" class="rounded bg-elevated p-2">
             <div class="flex items-baseline justify-between mb-1">
-              <span class="text-muted uppercase">{{ window }}</span>
+              <span class="text-muted uppercase">{{ window === 'fiveHour' ? '5-HOUR' : window }}</span>
               <span v-if="windowCost(entry, window)" class="font-mono font-semibold text-primary">{{ windowCost(entry, window) }}</span>
             </div>
             <div class="space-y-0.5">
@@ -226,10 +226,10 @@ function resetItems(model: string) {
         <div v-if="editingModel === entry.model" class="mt-3 pt-3 border-t border-default">
           <div class="text-xs font-semibold text-muted mb-2">Cost Limits (USD)</div>
           <div class="flex flex-wrap gap-3 items-end">
-            <UFormField label="Hourly ($)" class="w-28">
+            <UFormField label="5-Hour ($)" class="w-28">
               <UInput
-                :model-value="editHourly ?? undefined"
-                @update:model-value="(v: string | number) => editHourly = v == null || v === '' ? null : Number(v)"
+                :model-value="editFiveHour ?? undefined"
+                @update:model-value="(v: string | number) => editFiveHour = v == null || v === '' ? null : Number(v)"
                 type="number"
                 placeholder="None"
                 step="0.01"

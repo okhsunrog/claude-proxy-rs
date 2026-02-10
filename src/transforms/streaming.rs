@@ -17,7 +17,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::interval;
 
 use super::tool_names::strip_mcp_prefix;
-use crate::auth::{ClientKeysStore, ModelPricing, StreamUsageData, TokenUsageReport};
+use crate::AppState;
+use crate::auth::{ModelPricing, StreamUsageData, TokenUsageReport};
 
 /// Keep-alive interval for SSE streams (prevents proxy/load balancer timeouts).
 const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
@@ -86,7 +87,7 @@ type StreamUsage = StreamUsageData;
 pub fn stream_anthropic_to_openai_with_usage(
     body: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
     model: String,
-    client_keys: Arc<ClientKeysStore>,
+    state: Arc<AppState>,
     key_id: String,
     model_pricing: ModelPricing,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
@@ -317,14 +318,15 @@ pub fn stream_anthropic_to_openai_with_usage(
         }
 
         // Record usage after stream ends
+        let window_resets = crate::routes::admin::get_or_refresh_window_resets(&state).await;
         let cost = usage_report.cost_microdollars(&model_pricing);
         if cost > 0
-            && let Err(e) = client_keys.record_usage(&key_id, cost).await
+            && let Err(e) = state.client_keys.record_usage(&key_id, cost, &window_resets).await
         {
             tracing::warn!("Failed to record streaming usage for key {key_id}: {e}");
         }
         // Per-model usage (raw tokens)
-        if let Err(e) = client_keys.record_model_usage(&key_id, &model, &usage_report).await {
+        if let Err(e) = state.client_keys.record_model_usage(&key_id, &model, &usage_report, &window_resets).await {
             tracing::warn!("Failed to record streaming model usage for key {key_id}/{model}: {e}");
         }
     }
@@ -339,7 +341,7 @@ pub fn stream_anthropic_to_openai_with_usage(
 /// Includes keep-alive pings every 15 seconds to prevent connection timeouts.
 pub fn stream_strip_mcp_prefix_with_usage(
     body: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
-    client_keys: Arc<ClientKeysStore>,
+    state: Arc<AppState>,
     key_id: String,
     model: String,
     model_pricing: ModelPricing,
@@ -453,14 +455,15 @@ pub fn stream_strip_mcp_prefix_with_usage(
         }
 
         // Record usage after stream ends
+        let window_resets = crate::routes::admin::get_or_refresh_window_resets(&state).await;
         let cost = usage_report.cost_microdollars(&model_pricing);
         if cost > 0
-            && let Err(e) = client_keys.record_usage(&key_id, cost).await
+            && let Err(e) = state.client_keys.record_usage(&key_id, cost, &window_resets).await
         {
             tracing::warn!("Failed to record streaming usage for key {key_id}: {e}");
         }
         // Per-model usage (raw tokens)
-        if let Err(e) = client_keys.record_model_usage(&key_id, &model, &usage_report).await {
+        if let Err(e) = state.client_keys.record_model_usage(&key_id, &model, &usage_report, &window_resets).await {
             tracing::warn!("Failed to record streaming model usage for key {key_id}/{model}: {e}");
         }
     }

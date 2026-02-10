@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use super::models::ModelPricing;
 use super::usage::TokenUsageReport;
+use crate::WindowResets;
 use crate::db;
 use crate::error::ProxyError;
 
@@ -16,8 +17,12 @@ use crate::error::ProxyError;
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TokenLimits {
-    /// Maximum tokens per hour (None = unlimited)
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Maximum tokens per 5-hour window (None = unlimited)
+    #[serde(
+        rename = "fiveHourLimit",
+        alias = "hourlyLimit",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub hourly_limit: Option<u64>,
     /// Maximum tokens per week (None = unlimited)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -31,9 +36,11 @@ pub struct TokenLimits {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
 #[serde(default, rename_all = "camelCase")]
 pub struct TokenUsage {
-    /// Tokens used in current hour
+    /// Tokens used in current 5-hour window
+    #[serde(rename = "fiveHourTokens")]
     pub hourly_tokens: u64,
-    /// Timestamp when hourly counter resets (epoch ms)
+    /// Timestamp when 5-hour counter resets (epoch ms)
+    #[serde(rename = "fiveHourResetAt")]
     pub hourly_reset_at: u64,
     /// Tokens used in current week
     pub weekly_tokens: u64,
@@ -46,7 +53,7 @@ pub struct TokenUsage {
 /// Which usage counter to reset
 #[derive(Debug, Clone, Copy)]
 pub enum UsageResetType {
-    Hourly,
+    FiveHour,
     Weekly,
     Total,
     All,
@@ -292,7 +299,7 @@ impl ClientKeysStore {
             && hourly_usage >= limit
         {
             return Err(format!(
-                "Hourly token limit exceeded ({}/{})",
+                "5-hour token limit exceeded ({}/{})",
                 hourly_usage, limit
             ));
         }
@@ -319,10 +326,15 @@ impl ClientKeysStore {
     }
 
     /// Record token usage for a key.
-    /// Initializes reset timestamps if not set.
-    pub async fn record_usage(&self, id: &str, tokens: u64) -> Result<(), ProxyError> {
+    /// Initializes reset timestamps if not set, using subscription window resets when available.
+    pub async fn record_usage(
+        &self,
+        id: &str,
+        tokens: u64,
+        window_resets: &WindowResets,
+    ) -> Result<(), ProxyError> {
         let now = timestamp_millis();
-        let one_hour_ms: u64 = 60 * 60 * 1000;
+        let five_hour_ms: u64 = 5 * 60 * 60 * 1000;
         let one_week_ms: u64 = 7 * 24 * 60 * 60 * 1000;
 
         let conn = db::get_conn().await?;
@@ -352,12 +364,18 @@ impl ClientKeysStore {
         let reset_weekly = weekly_reset_at == 0 || now >= weekly_reset_at;
 
         let new_hourly_reset = if reset_hourly {
-            now + one_hour_ms
+            window_resets
+                .five_hour_reset_at
+                .filter(|&t| t > now)
+                .unwrap_or(now + five_hour_ms)
         } else {
             hourly_reset_at
         };
         let new_weekly_reset = if reset_weekly {
-            now + one_week_ms
+            window_resets
+                .seven_day_reset_at
+                .filter(|&t| t > now)
+                .unwrap_or(now + one_week_ms)
         } else {
             weekly_reset_at
         };
@@ -417,7 +435,7 @@ impl ClientKeysStore {
         let conn = db::get_conn().await?;
 
         let sql = match reset_type {
-            UsageResetType::Hourly => {
+            UsageResetType::FiveHour => {
                 "UPDATE client_keys SET hourly_usage = 0, hourly_reset_at = 0 WHERE id = ?"
             }
             UsageResetType::Weekly => {
@@ -659,7 +677,7 @@ impl ClientKeysStore {
             let cost = compute_cost(h_in, h_out, h_cr, h_cw);
             if cost >= limit {
                 return Err(format!(
-                    "Hourly model limit exceeded for {model} (${:.2}/${:.2})",
+                    "5-hour model limit exceeded for {model} (${:.2}/${:.2})",
                     cost as f64 / 1_000_000.0,
                     limit as f64 / 1_000_000.0
                 ));
@@ -697,9 +715,10 @@ impl ClientKeysStore {
         key_id: &str,
         model: &str,
         report: &TokenUsageReport,
+        window_resets: &WindowResets,
     ) -> Result<(), ProxyError> {
         let now = timestamp_millis();
-        let one_hour_ms: u64 = 60 * 60 * 1000;
+        let five_hour_ms: u64 = 5 * 60 * 60 * 1000;
         let one_week_ms: u64 = 7 * 24 * 60 * 60 * 1000;
         let conn = db::get_conn().await?;
 
@@ -728,12 +747,18 @@ impl ClientKeysStore {
             let reset_weekly = weekly_reset_at == 0 || now >= weekly_reset_at;
 
             let new_hourly_reset = if reset_hourly {
-                now + one_hour_ms
+                window_resets
+                    .five_hour_reset_at
+                    .filter(|&t| t > now)
+                    .unwrap_or(now + five_hour_ms)
             } else {
                 hourly_reset_at
             } as i64;
             let new_weekly_reset = if reset_weekly {
-                now + one_week_ms
+                window_resets
+                    .seven_day_reset_at
+                    .filter(|&t| t > now)
+                    .unwrap_or(now + one_week_ms)
             } else {
                 weekly_reset_at
             } as i64;
@@ -798,8 +823,14 @@ impl ClientKeysStore {
             .map_err(|e| ProxyError::DatabaseError(format!("Failed to update model usage: {e}")))?;
         } else {
             // No row - insert new
-            let new_hourly_reset = (now + one_hour_ms) as i64;
-            let new_weekly_reset = (now + one_week_ms) as i64;
+            let new_hourly_reset = window_resets
+                .five_hour_reset_at
+                .filter(|&t| t > now)
+                .unwrap_or(now + five_hour_ms) as i64;
+            let new_weekly_reset = window_resets
+                .seven_day_reset_at
+                .filter(|&t| t > now)
+                .unwrap_or(now + one_week_ms) as i64;
 
             conn.execute(
                 "INSERT INTO key_model_usage (key_id, model, \
@@ -988,7 +1019,7 @@ impl ClientKeysStore {
         let conn = db::get_conn().await?;
 
         let sql = match reset_type {
-            UsageResetType::Hourly => {
+            UsageResetType::FiveHour => {
                 "UPDATE key_model_usage SET hourly_input = 0, hourly_output = 0, hourly_cache_read = 0, hourly_cache_write = 0, hourly_reset_at = 0 WHERE key_id = ? AND model = ?"
             }
             UsageResetType::Weekly => {
@@ -1026,9 +1057,11 @@ pub struct TokenBreakdown {
 pub struct ModelUsageEntry {
     pub model: String,
     pub limits: TokenLimits,
+    #[serde(rename = "fiveHour")]
     pub hourly: TokenBreakdown,
     pub weekly: TokenBreakdown,
     pub total: TokenBreakdown,
+    #[serde(rename = "fiveHourResetAt")]
     pub hourly_reset_at: u64,
     pub weekly_reset_at: u64,
 }

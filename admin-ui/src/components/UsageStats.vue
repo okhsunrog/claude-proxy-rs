@@ -29,10 +29,10 @@ const items = computed<UsageItem[]>(() => {
   const { usage, limits } = props.usage
   return [
     {
-      label: 'Hourly',
-      used: usage.hourlyTokens ?? 0,
-      limit: limits.hourlyLimit,
-      resetAt: usage.hourlyResetAt,
+      label: '5-Hour',
+      used: usage.fiveHourTokens ?? 0,
+      limit: limits.fiveHourLimit,
+      resetAt: usage.fiveHourResetAt,
     },
     {
       label: 'Weekly',

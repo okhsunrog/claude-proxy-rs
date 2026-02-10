@@ -14,7 +14,7 @@ use crate::constants::{
     ANTHROPIC_PROFILE_URL, ANTHROPIC_USAGE_URL, ANTHROPIC_VERSION, OAUTH_BETA_HEADER, USER_AGENT,
 };
 use crate::parse_cookie;
-use crate::{AppState, SESSION_TTL_SECS, now_secs};
+use crate::{AppState, SESSION_TTL_SECS, WindowResets, now_secs};
 
 // --- Response types ---
 
@@ -113,6 +113,7 @@ pub struct CreateKeyRequest {
 #[derive(Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateLimitsRequest {
+    #[serde(rename = "fiveHourLimit", alias = "hourlyLimit")]
     hourly_limit: Option<u64>,
     weekly_limit: Option<u64>,
     total_limit: Option<u64>,
@@ -298,6 +299,97 @@ async fn fetch_plan_name(state: &AppState) -> Option<String> {
     None
 }
 
+/// Fetch subscription window reset times from Anthropic.
+/// Returns Default on any error (non-critical).
+async fn fetch_window_resets(state: &AppState) -> WindowResets {
+    let token = match state.oauth.refresh_if_needed().await {
+        Ok(Some(t)) => t,
+        _ => return WindowResets::default(),
+    };
+
+    let resp = match state
+        .http_client
+        .get(ANTHROPIC_USAGE_URL)
+        .header("authorization", format!("Bearer {token}"))
+        .header("anthropic-version", ANTHROPIC_VERSION)
+        .header("anthropic-beta", OAUTH_BETA_HEADER)
+        .header("content-type", "application/json")
+        .header("user-agent", USER_AGENT)
+        .header("accept", "application/json")
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => r,
+        _ => return WindowResets::default(),
+    };
+
+    let usage: SubscriptionUsageResponse = match resp.json().await {
+        Ok(u) => u,
+        Err(_) => return WindowResets::default(),
+    };
+
+    extract_window_resets(&usage)
+}
+
+/// Parse ISO resets_at strings from subscription usage into epoch ms.
+fn extract_window_resets(usage: &SubscriptionUsageResponse) -> WindowResets {
+    let parse_reset = |s: &str| -> Option<u64> {
+        chrono::DateTime::parse_from_rfc3339(s)
+            .ok()
+            .map(|dt| dt.timestamp_millis() as u64)
+    };
+
+    let five_hour_reset_at = usage
+        .five_hour
+        .as_ref()
+        .and_then(|u| u.resets_at.as_deref())
+        .and_then(parse_reset);
+
+    let seven_day_reset_at = usage
+        .seven_day
+        .as_ref()
+        .and_then(|u| u.resets_at.as_deref())
+        .and_then(parse_reset);
+
+    WindowResets {
+        five_hour_reset_at,
+        seven_day_reset_at,
+    }
+}
+
+fn timestamp_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+}
+
+/// Get cached window resets, refreshing inline if stale (window boundary crossed).
+pub async fn get_or_refresh_window_resets(state: &AppState) -> WindowResets {
+    let now = timestamp_millis();
+    let cached = state.window_resets.read().await.clone();
+
+    // Refresh if cache is empty or any cached reset time has passed
+    let needs_refresh = cached.five_hour_reset_at.is_none()
+        || cached.five_hour_reset_at.is_some_and(|t| now >= t)
+        || cached.seven_day_reset_at.is_some_and(|t| now >= t);
+
+    if needs_refresh {
+        let fresh = fetch_window_resets(state).await;
+        if fresh.five_hour_reset_at.is_some() {
+            tracing::info!(
+                "Fetched subscription window resets: 5h={:?}, 7d={:?}",
+                fresh.five_hour_reset_at,
+                fresh.seven_day_reset_at
+            );
+            *state.window_resets.write().await = fresh.clone();
+            return fresh;
+        }
+    }
+    cached
+}
+
 /// Get OAuth connection status
 #[utoipa::path(
     get,
@@ -458,6 +550,12 @@ pub async fn get_subscription_usage(
             }),
         )
     })?;
+
+    // Update window resets cache as side effect
+    let resets = extract_window_resets(&usage);
+    if resets.five_hour_reset_at.is_some() {
+        *state.window_resets.write().await = resets;
+    }
 
     Ok(Json(usage))
 }
@@ -655,7 +753,7 @@ pub async fn reset_key_usage(
     Json(body): Json<ResetUsageRequest>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
     let reset_type = match body.reset_type.to_lowercase().as_str() {
-        "hourly" => UsageResetType::Hourly,
+        "fivehour" | "hourly" => UsageResetType::FiveHour,
         "weekly" => UsageResetType::Weekly,
         "total" => UsageResetType::Total,
         "all" => UsageResetType::All,
@@ -663,7 +761,7 @@ pub async fn reset_key_usage(
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(ErrorResponse {
-                    error: "Invalid reset type. Use: hourly, weekly, total, or all".into(),
+                    error: "Invalid reset type. Use: fiveHour, weekly, total, or all".into(),
                 }),
             ));
         }
@@ -1029,7 +1127,7 @@ pub async fn reset_key_model_usage(
     Json(body): Json<ResetUsageRequest>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
     let reset_type = match body.reset_type.to_lowercase().as_str() {
-        "hourly" => UsageResetType::Hourly,
+        "fivehour" | "hourly" => UsageResetType::FiveHour,
         "weekly" => UsageResetType::Weekly,
         "total" => UsageResetType::Total,
         "all" => UsageResetType::All,
@@ -1037,7 +1135,7 @@ pub async fn reset_key_model_usage(
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(ErrorResponse {
-                    error: "Invalid reset type. Use: hourly, weekly, total, or all".into(),
+                    error: "Invalid reset type. Use: fiveHour, weekly, total, or all".into(),
                 }),
             ));
         }

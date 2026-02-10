@@ -76,7 +76,7 @@ export function useKeys() {
 
   async function resetUsage(
     id: string,
-    type: 'hourly' | 'weekly' | 'total' | 'all',
+    type: 'fiveHour' | 'weekly' | 'total' | 'all',
   ): Promise<void> {
     await resetKeyUsageApi({ path: { id }, body: { type } })
     await loadUsage(id)
@@ -113,7 +113,7 @@ export function useKeys() {
   async function resetModelUsage(
     keyId: string,
     model: string,
-    type: 'hourly' | 'weekly' | 'total' | 'all',
+    type: 'fiveHour' | 'weekly' | 'total' | 'all',
   ): Promise<void> {
     await resetKeyModelUsageApi({ path: { id: keyId, model }, body: { type } })
   }
