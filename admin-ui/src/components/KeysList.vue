@@ -46,7 +46,7 @@ onMounted(() => {
       No API keys yet
     </div>
 
-    <div v-else class="space-y-3">
+    <div v-else class="space-y-2">
       <KeyCard
         v-for="key in keys"
         :key="key.id"
