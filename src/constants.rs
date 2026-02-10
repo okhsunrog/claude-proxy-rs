@@ -8,6 +8,9 @@ pub const ANTHROPIC_COUNT_TOKENS_URL: &str =
 /// Anthropic API URL for subscription usage (OAuth)
 pub const ANTHROPIC_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 
+/// Anthropic API URL for OAuth profile (plan detection)
+pub const ANTHROPIC_PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
+
 /// Anthropic API version header value
 pub const ANTHROPIC_VERSION: &str = "2023-06-01";
 

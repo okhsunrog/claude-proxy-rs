@@ -10,7 +10,9 @@ use subtle::ConstantTimeEq;
 use utoipa::ToSchema;
 
 use crate::auth::{ClientKey, Model, ModelUsageEntry, TokenLimits, TokenUsage, UsageResetType};
-use crate::constants::{ANTHROPIC_USAGE_URL, ANTHROPIC_VERSION, OAUTH_BETA_HEADER, USER_AGENT};
+use crate::constants::{
+    ANTHROPIC_PROFILE_URL, ANTHROPIC_USAGE_URL, ANTHROPIC_VERSION, OAUTH_BETA_HEADER, USER_AGENT,
+};
 use crate::parse_cookie;
 use crate::{AppState, SESSION_TTL_SECS, now_secs};
 
@@ -34,6 +36,8 @@ pub struct ErrorResponse {
 #[derive(Serialize, ToSchema)]
 pub struct OAuthStatusResponse {
     pub authenticated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, ToSchema)]
@@ -270,6 +274,30 @@ pub async fn auth_check(headers: axum::http::HeaderMap) -> Json<AuthCheckRespons
 
 // --- Handlers ---
 
+/// Fetch plan name from Anthropic profile endpoint.
+/// Returns None on any error (non-critical).
+async fn fetch_plan_name(state: &AppState) -> Option<String> {
+    let token = state.oauth.refresh_if_needed().await.ok()??;
+    let resp = state
+        .http_client
+        .get(ANTHROPIC_PROFILE_URL)
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await
+        .ok()?;
+    let body: serde_json::Value = resp.json().await.ok()?;
+    let account = body.get("account")?;
+    if account.get("has_claude_max")?.as_bool() == Some(true) {
+        return Some("Max".into());
+    }
+    if account.get("has_claude_pro")?.as_bool() == Some(true) {
+        return Some("Pro".into());
+    }
+    None
+}
+
 /// Get OAuth connection status
 #[utoipa::path(
     get,
@@ -281,7 +309,15 @@ pub async fn auth_check(headers: axum::http::HeaderMap) -> Json<AuthCheckRespons
 )]
 pub async fn get_oauth_status(State(state): State<Arc<AppState>>) -> Json<OAuthStatusResponse> {
     let authenticated = state.auth_store.has("anthropic").await;
-    Json(OAuthStatusResponse { authenticated })
+    let plan = if authenticated {
+        fetch_plan_name(&state).await
+    } else {
+        None
+    };
+    Json(OAuthStatusResponse {
+        authenticated,
+        plan,
+    })
 }
 
 /// Start OAuth flow

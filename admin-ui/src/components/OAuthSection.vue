@@ -9,6 +9,7 @@ const {
   error,
   showCodeInput,
   subscriptionUsage,
+  planName,
   checkStatus,
   connect,
   exchangeCode,
@@ -120,7 +121,7 @@ function getUsageItems(): UsageDisplayItem[] {
   <UCard>
     <template #header>
       <div class="flex items-center justify-between">
-        <h2 class="text-xl font-semibold">OAuth Connection</h2>
+        <h2 class="text-xl font-semibold">Claude Subscription</h2>
         <UButton
           v-if="isConnected && subscriptionUsage"
           size="xs"
@@ -133,43 +134,15 @@ function getUsageItems(): UsageDisplayItem[] {
     </template>
 
     <div class="space-y-4">
+      <!-- Status row: badge + plan + connect/disconnect button all inline -->
       <div class="flex items-center gap-3">
         <span class="text-sm">Status:</span>
         <UBadge v-if="isConnected" color="success" variant="subtle">Connected</UBadge>
         <UBadge v-else color="error" variant="subtle">Not connected</UBadge>
-      </div>
-
-      <!-- Subscription Usage -->
-      <div v-if="isConnected && subscriptionUsage && getUsageItems().length > 0" class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div
-          v-for="item in getUsageItems()"
-          :key="item.label"
-          class="rounded-lg bg-elevated p-3"
-        >
-          <div class="text-xs text-muted uppercase">{{ item.label }}</div>
-          <div class="text-lg font-semibold mt-1">{{ Math.floor(item.utilization) }}%</div>
-          <UProgress
-            :model-value="Math.min(item.utilization, 100)"
-            :color="barColor(item.utilization)"
-            size="xs"
-            class="mt-1.5"
-          />
-          <div v-if="item.resetsAt" class="text-xs text-muted mt-1">
-            {{ formatResetTime(item.resetsAt) }}
-          </div>
-          <div v-if="item.subtitle" class="text-xs text-muted mt-1">
-            {{ item.subtitle }}
-          </div>
-        </div>
-      </div>
-
-      <div v-if="isConnected && isLoadingUsage && !subscriptionUsage" class="text-sm text-muted">
-        Loading usage...
-      </div>
-
-      <div class="flex gap-2">
+        <UBadge v-if="planName" color="info" variant="subtle">{{ planName }}</UBadge>
         <UButton
           v-if="!isConnected"
+          size="xs"
           color="primary"
           :loading="isLoading"
           @click="connect"
@@ -178,6 +151,7 @@ function getUsageItems(): UsageDisplayItem[] {
         </UButton>
         <UButton
           v-else
+          size="xs"
           color="error"
           variant="soft"
           :loading="isLoading"
@@ -185,6 +159,37 @@ function getUsageItems(): UsageDisplayItem[] {
         >
           Disconnect
         </UButton>
+      </div>
+
+      <!-- Subscription Limits -->
+      <div v-if="isConnected && subscriptionUsage && getUsageItems().length > 0">
+        <div class="text-xs text-muted uppercase mb-2">Subscription Limits</div>
+        <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div
+            v-for="item in getUsageItems()"
+            :key="item.label"
+            class="rounded-lg bg-elevated p-3"
+          >
+            <div class="text-xs text-muted uppercase">{{ item.label }}</div>
+            <div class="text-lg font-semibold mt-1">{{ Math.floor(item.utilization) }}%</div>
+            <UProgress
+              :model-value="Math.min(item.utilization, 100)"
+              :color="barColor(item.utilization)"
+              size="xs"
+              class="mt-1.5"
+            />
+            <div v-if="item.resetsAt" class="text-xs text-muted mt-1">
+              {{ formatResetTime(item.resetsAt) }}
+            </div>
+            <div v-if="item.subtitle" class="text-xs text-muted mt-1">
+              {{ item.subtitle }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="isConnected && isLoadingUsage && !subscriptionUsage" class="text-sm text-muted">
+        Loading usage...
       </div>
 
       <div v-if="showCodeInput" class="space-y-2">

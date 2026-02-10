@@ -15,15 +15,18 @@ export function useOAuth() {
   const showCodeInput = ref(false)
   const subscriptionUsage = ref<SubscriptionUsageResponse | null>(null)
   const isLoadingUsage = ref(false)
+  const planName = ref<string | null>(null)
 
   async function checkStatus() {
     try {
       const { data } = await getOauthStatus()
       isConnected.value = data?.authenticated ?? false
+      planName.value = data?.plan ?? null
       if (isConnected.value) {
         loadUsage()
       } else {
         subscriptionUsage.value = null
+        planName.value = null
       }
     } catch (e) {
       console.error('Failed to check OAuth status:', e)
@@ -108,6 +111,7 @@ export function useOAuth() {
     error,
     showCodeInput,
     subscriptionUsage,
+    planName,
     checkStatus,
     connect,
     exchangeCode,

@@ -105,6 +105,7 @@ export type ModelUsageEntry = {
 
 export type OAuthStatusResponse = {
     authenticated: boolean;
+    plan?: string | null;
 };
 
 export type OAuthUrlResponse = {
