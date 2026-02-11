@@ -14,6 +14,7 @@ const props = defineProps<{
   availableModels: Model[]
   deleteKey: (id: string) => Promise<void>
   toggleKey: (id: string, enabled: boolean) => Promise<void>
+  setAllowExtraUsage: (id: string, allow: boolean) => Promise<void>
   updateLimits: (id: string, limits: UpdateLimitsRequest) => Promise<void>
   resetUsage: (id: string, type: 'fiveHour' | 'weekly' | 'total' | 'all') => Promise<void>
   loadKeyModels: (id: string) => Promise<KeyModelsResponse>
@@ -151,6 +152,8 @@ const usageSummary = computed<UsageSummaryItem[]>(() => {
 
       <TokenLimitsForm
         :key-id="keyData.id"
+        :allow-extra-usage="keyData.allowExtraUsage"
+        :set-allow-extra-usage="setAllowExtraUsage"
         :usage="usage"
         :update-limits="updateLimits"
         :reset-usage="resetUsage"

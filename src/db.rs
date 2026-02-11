@@ -44,6 +44,11 @@ static MIGRATIONS: &[Migration] = &[
         description: "add admin_sessions table for persistent sessions",
         migrate: migrate_v3,
     },
+    Migration {
+        version: 4,
+        description: "add allow_extra_usage to client_keys",
+        migrate: migrate_v4,
+    },
 ];
 
 /// Read the current schema version (0 if table is empty or doesn't exist yet).
@@ -332,6 +337,27 @@ fn migrate_v3(
         .await
         .map_err(|e| {
             ProxyError::DatabaseError(format!("Failed to create admin_sessions table: {e}"))
+        })?;
+
+        Ok(())
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Migration v4 — per-key allow_extra_usage flag
+// ---------------------------------------------------------------------------
+
+fn migrate_v4(
+    conn: &Connection,
+) -> Pin<Box<dyn Future<Output = Result<(), ProxyError>> + Send + '_>> {
+    Box::pin(async move {
+        conn.execute(
+            "ALTER TABLE client_keys ADD COLUMN allow_extra_usage INTEGER NOT NULL DEFAULT 0",
+            (),
+        )
+        .await
+        .map_err(|e| {
+            ProxyError::DatabaseError(format!("Failed to add allow_extra_usage column: {e}"))
         })?;
 
         Ok(())

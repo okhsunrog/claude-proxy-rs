@@ -14,7 +14,7 @@ use crate::constants::{
     ANTHROPIC_PROFILE_URL, ANTHROPIC_USAGE_URL, ANTHROPIC_VERSION, OAUTH_BETA_HEADER, USER_AGENT,
 };
 use crate::parse_cookie;
-use crate::{AppState, SESSION_TTL_SECS, WindowResets, now_secs};
+use crate::{AppState, SESSION_TTL_SECS, SubscriptionState, now_secs};
 
 // --- Response types ---
 
@@ -122,6 +122,11 @@ pub struct UpdateLimitsRequest {
 #[derive(Deserialize, Serialize, ToSchema)]
 pub struct SetKeyEnabledRequest {
     enabled: bool,
+}
+
+#[derive(Deserialize, Serialize, ToSchema)]
+pub struct SetAllowExtraUsageRequest {
+    allow_extra_usage: bool,
 }
 
 #[derive(Deserialize, Serialize, ToSchema)]
@@ -306,10 +311,10 @@ async fn fetch_plan_name(state: &AppState) -> Option<String> {
 
 /// Fetch subscription window reset times from Anthropic.
 /// Returns Default on any error (non-critical).
-async fn fetch_window_resets(state: &AppState) -> WindowResets {
+async fn fetch_window_resets(state: &AppState) -> SubscriptionState {
     let token = match state.oauth.refresh_if_needed().await {
         Ok(Some(t)) => t,
-        _ => return WindowResets::default(),
+        _ => return SubscriptionState::default(),
     };
 
     let resp = match state
@@ -326,19 +331,19 @@ async fn fetch_window_resets(state: &AppState) -> WindowResets {
         .await
     {
         Ok(r) if r.status().is_success() => r,
-        _ => return WindowResets::default(),
+        _ => return SubscriptionState::default(),
     };
 
     let usage: SubscriptionUsageResponse = match resp.json().await {
         Ok(u) => u,
-        Err(_) => return WindowResets::default(),
+        Err(_) => return SubscriptionState::default(),
     };
 
-    extract_window_resets(&usage)
+    extract_subscription_state(&usage)
 }
 
-/// Parse ISO resets_at strings from subscription usage into epoch ms.
-fn extract_window_resets(usage: &SubscriptionUsageResponse) -> WindowResets {
+/// Parse subscription usage response into cached state (reset times + utilization).
+fn extract_subscription_state(usage: &SubscriptionUsageResponse) -> SubscriptionState {
     let parse_reset = |s: &str| -> Option<u64> {
         chrono::DateTime::parse_from_rfc3339(s)
             .ok()
@@ -357,9 +362,14 @@ fn extract_window_resets(usage: &SubscriptionUsageResponse) -> WindowResets {
         .and_then(|u| u.resets_at.as_deref())
         .and_then(parse_reset);
 
-    WindowResets {
+    let five_hour_utilization = usage.five_hour.as_ref().and_then(|u| u.utilization);
+    let seven_day_utilization = usage.seven_day.as_ref().and_then(|u| u.utilization);
+
+    SubscriptionState {
         five_hour_reset_at,
         seven_day_reset_at,
+        five_hour_utilization,
+        seven_day_utilization,
     }
 }
 
@@ -371,7 +381,7 @@ fn timestamp_millis() -> u64 {
 }
 
 /// Get cached window resets, refreshing inline if stale (window boundary crossed).
-pub async fn get_or_refresh_window_resets(state: &AppState) -> WindowResets {
+pub async fn get_or_refresh_window_resets(state: &AppState) -> SubscriptionState {
     let now = timestamp_millis();
     let cached = state.window_resets.read().await.clone();
 
@@ -393,6 +403,16 @@ pub async fn get_or_refresh_window_resets(state: &AppState) -> WindowResets {
         }
     }
     cached
+}
+
+/// Always fetch fresh subscription state from Anthropic and update cache.
+/// Used for pre-request extra-usage checks where stale data is not acceptable.
+pub async fn fetch_fresh_subscription_state(state: &AppState) -> SubscriptionState {
+    let fresh = fetch_window_resets(state).await;
+    if fresh.five_hour_reset_at.is_some() {
+        *state.window_resets.write().await = fresh.clone();
+    }
+    fresh
 }
 
 /// Get OAuth connection status
@@ -557,7 +577,7 @@ pub async fn get_subscription_usage(
     })?;
 
     // Update window resets cache as side effect
-    let resets = extract_window_resets(&usage);
+    let resets = extract_subscription_state(&usage);
     if resets.five_hour_reset_at.is_some() {
         *state.window_resets.write().await = resets;
     }
@@ -690,6 +710,45 @@ pub async fn set_key_enabled(
     Json(body): Json<SetKeyEnabledRequest>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
     match state.client_keys.set_enabled(&id, body.enabled).await {
+        Ok(true) => Ok(Json(SuccessResponse { success: true })),
+        Ok(false) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "Key not found".into(),
+            }),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+/// Toggle allow_extra_usage for a key
+#[utoipa::path(
+    put,
+    path = "/keys/{id}/allow-extra-usage",
+    tag = "keys",
+    params(("id" = String, Path, description = "Key ID")),
+    request_body = SetAllowExtraUsageRequest,
+    responses(
+        (status = 200, body = SuccessResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+pub async fn set_allow_extra_usage(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<SetAllowExtraUsageRequest>,
+) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    match state
+        .client_keys
+        .set_allow_extra_usage(&id, body.allow_extra_usage)
+        .await
+    {
         Ok(true) => Ok(Json(SuccessResponse { success: true })),
         Ok(false) => Err((
             StatusCode::NOT_FOUND,

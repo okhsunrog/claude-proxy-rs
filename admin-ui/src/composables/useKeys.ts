@@ -11,6 +11,7 @@ import {
   createKey as createKeyApi,
   deleteKey as deleteKeyApi,
   setKeyEnabled as setKeyEnabledApi,
+  setAllowExtraUsage as setAllowExtraUsageApi,
   getKeyUsage,
   updateKeyLimits,
   resetKeyUsage as resetKeyUsageApi,
@@ -73,6 +74,14 @@ export function useKeys() {
     await loadKeys()
   }
 
+  async function setAllowExtraUsage(id: string, allow: boolean): Promise<void> {
+    await setAllowExtraUsageApi({
+      path: { id },
+      body: { allow_extra_usage: allow },
+    })
+    await loadKeys()
+  }
+
   async function updateLimits(id: string, limits: UpdateLimitsRequest): Promise<void> {
     await updateKeyLimits({ path: { id }, body: limits })
     await loadUsage(id)
@@ -131,6 +140,7 @@ export function useKeys() {
     createKey,
     deleteKey,
     toggleKey,
+    setAllowExtraUsage,
     updateLimits,
     resetUsage,
     loadKeyModels,

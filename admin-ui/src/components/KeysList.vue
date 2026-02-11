@@ -13,6 +13,7 @@ const {
   createKey,
   deleteKey,
   toggleKey,
+  setAllowExtraUsage,
   updateLimits,
   resetUsage,
   loadKeyModels,
@@ -52,6 +53,7 @@ onMounted(() => {
         :available-models="models"
         :delete-key="deleteKey"
         :toggle-key="toggleKey"
+        :set-allow-extra-usage="setAllowExtraUsage"
         :update-limits="updateLimits"
         :reset-usage="resetUsage"
         :load-key-models="loadKeyModels"

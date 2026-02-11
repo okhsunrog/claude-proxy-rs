@@ -6,6 +6,8 @@ import type { KeyUsageResponse } from '../composables/useKeys'
 
 const props = defineProps<{
   keyId: string
+  allowExtraUsage: boolean
+  setAllowExtraUsage: (id: string, allow: boolean) => Promise<void>
   usage: KeyUsageResponse | undefined
   updateLimits: (id: string, limits: UpdateLimitsRequest) => Promise<void>
   resetUsage: (id: string, type: 'fiveHour' | 'weekly' | 'total' | 'all') => Promise<void>
@@ -77,6 +79,14 @@ async function handleReset(type: 'fiveHour' | 'weekly' | 'total' | 'all') {
     toast.add({ title: 'Failed to reset usage', description: errorMessage(e), color: 'error' })
   }
 }
+
+async function handleToggleExtraUsage(value: boolean) {
+  try {
+    await props.setAllowExtraUsage(props.keyId, value)
+  } catch (e: unknown) {
+    toast.add({ title: 'Failed to update setting', description: errorMessage(e), color: 'error' })
+  }
+}
 </script>
 
 <template>
@@ -124,6 +134,14 @@ async function handleReset(type: 'fiveHour' | 'weekly' | 'total' | 'all') {
       <UDropdownMenu :items="resetItems">
         <UButton size="sm" variant="soft">Reset Usage</UButton>
       </UDropdownMenu>
+    </div>
+    <div class="flex items-center gap-2 mt-3">
+      <USwitch
+        :model-value="allowExtraUsage"
+        @update:model-value="handleToggleExtraUsage"
+      />
+      <span class="text-sm">Allow extra usage</span>
+      <span class="text-xs text-muted">— use paid credits when subscription limits are full</span>
     </div>
   </div>
 </template>

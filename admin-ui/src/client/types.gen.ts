@@ -13,6 +13,7 @@ export type AddModelRequest = {
 };
 
 export type ClientKey = {
+    allowExtraUsage: boolean;
     createdAt: number;
     enabled: boolean;
     id: string;
@@ -113,6 +114,10 @@ export type ResetUsageRequest = {
      * Which counter to reset: "hourly", "weekly", "total", or "all"
      */
     type: string;
+};
+
+export type SetAllowExtraUsageRequest = {
+    allow_extra_usage: boolean;
 };
 
 export type SetKeyEnabledRequest = {
@@ -265,6 +270,31 @@ export type DeleteKeyResponses = {
 };
 
 export type DeleteKeyResponse = DeleteKeyResponses[keyof DeleteKeyResponses];
+
+export type SetAllowExtraUsageData = {
+    body: SetAllowExtraUsageRequest;
+    path: {
+        /**
+         * Key ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/keys/{id}/allow-extra-usage';
+};
+
+export type SetAllowExtraUsageErrors = {
+    404: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type SetAllowExtraUsageError = SetAllowExtraUsageErrors[keyof SetAllowExtraUsageErrors];
+
+export type SetAllowExtraUsageResponses = {
+    200: SuccessResponse;
+};
+
+export type SetAllowExtraUsageResponse = SetAllowExtraUsageResponses[keyof SetAllowExtraUsageResponses];
 
 export type SetKeyEnabledData = {
     body: SetKeyEnabledRequest;

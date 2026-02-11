@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use super::models::ModelPricing;
 use super::usage::TokenUsageReport;
-use crate::WindowResets;
+use crate::SubscriptionState;
 use crate::db;
 use crate::error::ProxyError;
 
@@ -68,6 +68,7 @@ pub struct ClientKey {
     pub created_at: u64,
     pub last_used_at: Option<u64>,
     pub enabled: bool,
+    pub allow_extra_usage: bool,
     #[serde(default)]
     pub limits: TokenLimits,
     #[serde(default)]
@@ -97,7 +98,7 @@ fn get_u64(row: &turso::Row, idx: usize) -> u64 {
 /// id, key, name, enabled, created_at, last_used_at,
 /// hourly_limit, weekly_limit, total_limit,
 /// hourly_usage, weekly_usage, total_usage,
-/// hourly_reset_at, weekly_reset_at
+/// hourly_reset_at, weekly_reset_at, allow_extra_usage
 fn row_to_client_key(row: &turso::Row) -> Option<ClientKey> {
     Some(ClientKey {
         id: row.get(0).ok()?,
@@ -106,6 +107,7 @@ fn row_to_client_key(row: &turso::Row) -> Option<ClientKey> {
         enabled: get_u64(row, 3) != 0,
         created_at: get_u64(row, 4),
         last_used_at: opt_u64(row, 5),
+        allow_extra_usage: get_u64(row, 14) != 0,
         limits: TokenLimits {
             hourly_limit: opt_u64(row, 6),
             weekly_limit: opt_u64(row, 7),
@@ -121,7 +123,7 @@ fn row_to_client_key(row: &turso::Row) -> Option<ClientKey> {
     })
 }
 
-const SELECT_ALL_COLS: &str = "id, key, name, enabled, created_at, last_used_at, hourly_limit, weekly_limit, total_limit, hourly_usage, weekly_usage, total_usage, hourly_reset_at, weekly_reset_at";
+const SELECT_ALL_COLS: &str = "id, key, name, enabled, created_at, last_used_at, hourly_limit, weekly_limit, total_limit, hourly_usage, weekly_usage, total_usage, hourly_reset_at, weekly_reset_at, allow_extra_usage";
 
 impl ClientKeysStore {
     pub fn new() -> Self {
@@ -174,6 +176,7 @@ impl ClientKeysStore {
             created_at: now,
             last_used_at: None,
             enabled: true,
+            allow_extra_usage: false,
             limits: TokenLimits::default(),
             usage: TokenUsage::default(),
         })
@@ -185,6 +188,18 @@ impl ClientKeysStore {
             .execute(
                 "UPDATE client_keys SET enabled = ? WHERE id = ?",
                 (enabled as i64, id),
+            )
+            .await
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to update key: {e}")))?;
+        Ok(affected > 0)
+    }
+
+    pub async fn set_allow_extra_usage(&self, id: &str, allow: bool) -> Result<bool, ProxyError> {
+        let conn = db::get_conn().await?;
+        let affected = conn
+            .execute(
+                "UPDATE client_keys SET allow_extra_usage = ? WHERE id = ?",
+                (allow as i64, id),
             )
             .await
             .map_err(|e| ProxyError::DatabaseError(format!("Failed to update key: {e}")))?;
@@ -343,7 +358,7 @@ impl ClientKeysStore {
         &self,
         id: &str,
         tokens: u64,
-        window_resets: &WindowResets,
+        window_resets: &SubscriptionState,
     ) -> Result<(), ProxyError> {
         let now = timestamp_millis();
         let five_hour_ms: u64 = 5 * 60 * 60 * 1000;
@@ -735,7 +750,7 @@ impl ClientKeysStore {
         key_id: &str,
         model: &str,
         report: &TokenUsageReport,
-        window_resets: &WindowResets,
+        window_resets: &SubscriptionState,
     ) -> Result<(), ProxyError> {
         let now = timestamp_millis();
         let five_hour_ms: u64 = 5 * 60 * 60 * 1000;

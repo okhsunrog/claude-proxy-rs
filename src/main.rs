@@ -38,12 +38,16 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const GIT_HASH: &str = env!("GIT_HASH");
 pub const BUILD_TIME: &str = env!("BUILD_TIME");
 
-/// Cached subscription window reset times (epoch ms).
-/// Used to sync per-key rate-limit windows with Claude's actual subscription windows.
+/// Cached subscription state: window reset times (epoch ms) and utilization percentages.
+/// Used to sync per-key rate-limit windows and enforce extra-usage restrictions.
 #[derive(Debug, Clone, Default)]
-pub struct WindowResets {
+pub struct SubscriptionState {
     pub five_hour_reset_at: Option<u64>,
     pub seven_day_reset_at: Option<u64>,
+    /// 5-hour utilization percentage (0.0–100.0+)
+    pub five_hour_utilization: Option<f64>,
+    /// 7-day utilization percentage (0.0–100.0+)
+    pub seven_day_utilization: Option<f64>,
 }
 
 pub struct AppState {
@@ -60,7 +64,7 @@ pub struct AppState {
     /// Cloaking mode (always / never / auto)
     pub cloak_mode: CloakMode,
     /// Cached subscription window reset times for syncing rate-limit windows
-    pub window_resets: RwLock<WindowResets>,
+    pub window_resets: RwLock<SubscriptionState>,
 }
 
 impl AppState {
@@ -283,7 +287,7 @@ async fn main() {
         secure_cookies,
         disable_auth,
         cloak_mode,
-        window_resets: RwLock::new(WindowResets::default()),
+        window_resets: RwLock::new(SubscriptionState::default()),
     });
 
     // CORS configuration based on environment
@@ -342,6 +346,7 @@ async fn main() {
         .routes(routes!(routes::admin::list_keys))
         .routes(routes!(routes::admin::delete_key))
         .routes(routes!(routes::admin::set_key_enabled))
+        .routes(routes!(routes::admin::set_allow_extra_usage))
         .routes(routes!(routes::admin::get_key_usage))
         .routes(routes!(routes::admin::update_key_limits))
         .routes(routes!(routes::admin::reset_key_usage))
