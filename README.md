@@ -18,14 +18,19 @@ Use your existing Claude Pro/Max subscription with AI coding assistants and tool
   - OpenAI-compatible API (`/v1/chat/completions`)
   - Anthropic native API (`/v1/messages`)
 - OAuth authentication with Claude Pro/Max subscription
-- Admin UI (Vue 3 SPA) for OAuth management and API key generation
+- Admin UI (Vue 3 SPA) for managing OAuth, API keys, models, and usage
 - Streaming support with keep-alive pings (prevents timeouts during extended thinking)
 - Tool/function calling
 - Image inputs (base64)
-- Extended thinking mode (configurable via model suffix)
+- Extended thinking mode (configurable via model suffix or native API parameters)
 - Automatic prompt caching (auto-injects cache breakpoints for tools, system, and conversation history)
 - Token counting (`/v1/messages/count_tokens`)
-- Per-key rate limiting (hourly/weekly/total)
+- **Per-key cost-based rate limiting** (5-hour/weekly/total limits in USD, synced with subscription windows)
+- **Per-key model access control** (allow all or whitelist specific models)
+- **Per-model usage tracking** with cost calculation (input/output/cache pricing)
+- **Dynamic model management** (add/remove models, configure per-token pricing)
+- Key enable/disable toggle
+- Configurable cloaking mode (`always`/`never`/`auto`)
 - Single binary deployment (admin UI embedded via memory-serve)
 
 ## Quick Start
