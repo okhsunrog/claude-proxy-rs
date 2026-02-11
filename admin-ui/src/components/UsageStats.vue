@@ -7,8 +7,20 @@ const props = defineProps<{
   usage: KeyUsageResponse | undefined
 }>()
 
-function formatDateTime(timestamp: number): string {
-  return new Date(timestamp).toLocaleString()
+function formatResetTime(timestamp: number): string {
+  const reset = new Date(timestamp)
+  const now = new Date()
+  const diffMs = reset.getTime() - now.getTime()
+  if (diffMs <= 0) return 'Resetting...'
+  const hours = Math.floor(diffMs / 3600000)
+  const minutes = Math.floor((diffMs % 3600000) / 60000)
+  const abs = `${String(reset.getDate()).padStart(2, '0')}/${String(reset.getMonth() + 1).padStart(2, '0')}, ${String(reset.getHours()).padStart(2, '0')}:${String(reset.getMinutes()).padStart(2, '0')}`
+  if (hours >= 24) {
+    const days = Math.floor(hours / 24)
+    const remainingHours = hours % 24
+    return `Resets in ${days}d ${remainingHours}h (${abs})`
+  }
+  return `Resets in ${hours}h ${minutes}m (${abs})`
 }
 
 function barColor(percentage: number): string {
@@ -73,7 +85,7 @@ const items = computed<UsageItem[]>(() => {
         class="mt-2"
       />
       <div v-if="item.resetAt" class="text-xs text-muted mt-1">
-        Resets: {{ formatDateTime(item.resetAt) }}
+        {{ formatResetTime(item.resetAt) }}
       </div>
     </div>
   </div>

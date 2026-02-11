@@ -53,12 +53,13 @@ function formatResetTime(isoString: string): string {
   if (diffMs <= 0) return 'Resetting...'
   const hours = Math.floor(diffMs / 3600000)
   const minutes = Math.floor((diffMs % 3600000) / 60000)
-  if (hours > 24) {
+  const abs = `${String(reset.getDate()).padStart(2, '0')}/${String(reset.getMonth() + 1).padStart(2, '0')}, ${String(reset.getHours()).padStart(2, '0')}:${String(reset.getMinutes()).padStart(2, '0')}`
+  if (hours >= 24) {
     const days = Math.floor(hours / 24)
     const remainingHours = hours % 24
-    return `Resets in ${days}d ${remainingHours}h`
+    return `Resets in ${days}d ${remainingHours}h (${abs})`
   }
-  return `Resets in ${hours}h ${minutes}m`
+  return `Resets in ${hours}h ${minutes}m (${abs})`
 }
 
 interface UsageDisplayItem {
