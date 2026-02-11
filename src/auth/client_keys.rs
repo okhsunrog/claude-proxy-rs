@@ -371,9 +371,17 @@ impl ClientKeysStore {
         let hourly_reset_at = get_u64(&row, 0);
         let weekly_reset_at = get_u64(&row, 1);
 
-        // Determine if counters need reset
-        let reset_hourly = hourly_reset_at == 0 || now >= hourly_reset_at;
-        let reset_weekly = weekly_reset_at == 0 || now >= weekly_reset_at;
+        // Determine if counters need reset (also reset if subscription started a new window)
+        let reset_hourly = hourly_reset_at == 0
+            || now >= hourly_reset_at
+            || window_resets
+                .five_hour_reset_at
+                .is_some_and(|t| t > now && t < hourly_reset_at);
+        let reset_weekly = weekly_reset_at == 0
+            || now >= weekly_reset_at
+            || window_resets
+                .seven_day_reset_at
+                .is_some_and(|t| t > now && t < weekly_reset_at);
 
         let new_hourly_reset = if reset_hourly {
             window_resets
@@ -755,8 +763,16 @@ impl ClientKeysStore {
             let hourly_reset_at = get_u64(&row, 0);
             let weekly_reset_at = get_u64(&row, 1);
 
-            let reset_hourly = hourly_reset_at == 0 || now >= hourly_reset_at;
-            let reset_weekly = weekly_reset_at == 0 || now >= weekly_reset_at;
+            let reset_hourly = hourly_reset_at == 0
+                || now >= hourly_reset_at
+                || window_resets
+                    .five_hour_reset_at
+                    .is_some_and(|t| t > now && t < hourly_reset_at);
+            let reset_weekly = weekly_reset_at == 0
+                || now >= weekly_reset_at
+                || window_resets
+                    .seven_day_reset_at
+                    .is_some_and(|t| t > now && t < weekly_reset_at);
 
             let new_hourly_reset = if reset_hourly {
                 window_resets
