@@ -377,6 +377,16 @@ fn migrate_v5(
     conn: &Connection,
 ) -> Pin<Box<dyn Future<Output = Result<(), ProxyError>> + Send + '_>> {
     Box::pin(async move {
+        // IMPORTANT: Disable foreign keys during migration to prevent CASCADE
+        // deletion when dropping parent tables. Without this, DROP TABLE client_keys
+        // triggers an implicit DELETE FROM client_keys, which cascades to
+        // key_model_usage and destroys all per-model usage data.
+        conn.execute("PRAGMA foreign_keys = OFF", ())
+            .await
+            .map_err(|e| {
+                ProxyError::DatabaseError(format!("v5: Failed to disable foreign keys: {e}"))
+            })?;
+
         // 1. Recreate client_keys: drop usage columns, rename hourly→five_hour
         conn.execute(
             r#"
@@ -497,6 +507,13 @@ fn migrate_v5(
         .map_err(|e| {
             ProxyError::DatabaseError(format!("v5: Failed to rename key_model_usage_new: {e}"))
         })?;
+
+        // Re-enable foreign keys after migration
+        conn.execute("PRAGMA foreign_keys = ON", ())
+            .await
+            .map_err(|e| {
+                ProxyError::DatabaseError(format!("v5: Failed to re-enable foreign keys: {e}"))
+            })?;
 
         Ok(())
     })
