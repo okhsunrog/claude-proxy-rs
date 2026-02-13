@@ -867,7 +867,17 @@ pub async fn reset_key_usage(
     };
 
     match state.client_keys.reset_usage(&id, reset_type).await {
-        Ok(true) => Ok(Json(SuccessResponse { success: true })),
+        Ok(true) => {
+            // Also reset per-model usage for this key
+            if let Err(e) = state
+                .client_keys
+                .reset_all_model_usage(&id, reset_type)
+                .await
+            {
+                tracing::warn!("Failed to reset model usage for key {id}: {e}");
+            }
+            Ok(Json(SuccessResponse { success: true }))
+        }
         Ok(false) => Err((
             StatusCode::NOT_FOUND,
             Json(ErrorResponse {

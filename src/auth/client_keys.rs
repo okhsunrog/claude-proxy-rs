@@ -1103,6 +1103,35 @@ impl ClientKeysStore {
             .map_err(|e| ProxyError::DatabaseError(format!("Failed to reset model usage: {e}")))?;
         Ok(affected > 0)
     }
+
+    /// Reset per-model usage for ALL models of a key
+    pub async fn reset_all_model_usage(
+        &self,
+        key_id: &str,
+        reset_type: UsageResetType,
+    ) -> Result<(), ProxyError> {
+        let conn = db::get_conn().await?;
+
+        let sql = match reset_type {
+            UsageResetType::FiveHour => {
+                "UPDATE key_model_usage SET hourly_input = 0, hourly_output = 0, hourly_cache_read = 0, hourly_cache_write = 0, hourly_reset_at = 0 WHERE key_id = ?"
+            }
+            UsageResetType::Weekly => {
+                "UPDATE key_model_usage SET weekly_input = 0, weekly_output = 0, weekly_cache_read = 0, weekly_cache_write = 0, weekly_reset_at = 0 WHERE key_id = ?"
+            }
+            UsageResetType::Total => {
+                "UPDATE key_model_usage SET total_input = 0, total_output = 0, total_cache_read = 0, total_cache_write = 0 WHERE key_id = ?"
+            }
+            UsageResetType::All => {
+                "UPDATE key_model_usage SET hourly_input = 0, hourly_output = 0, hourly_cache_read = 0, hourly_cache_write = 0, weekly_input = 0, weekly_output = 0, weekly_cache_read = 0, weekly_cache_write = 0, total_input = 0, total_output = 0, total_cache_read = 0, total_cache_write = 0, hourly_reset_at = 0, weekly_reset_at = 0 WHERE key_id = ?"
+            }
+        };
+
+        conn.execute(sql, [key_id])
+            .await
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to reset all model usage: {e}")))?;
+        Ok(())
+    }
 }
 
 /// 4-type token breakdown for display
