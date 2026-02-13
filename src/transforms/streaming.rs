@@ -18,7 +18,7 @@ use tokio::time::interval;
 
 use super::tool_names::strip_mcp_prefix;
 use crate::AppState;
-use crate::auth::{ModelPricing, StreamUsageData, TokenUsageReport};
+use crate::auth::{StreamUsageData, TokenUsageReport};
 
 /// Keep-alive interval for SSE streams (prevents proxy/load balancer timeouts).
 const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
@@ -89,7 +89,6 @@ pub fn stream_anthropic_to_openai_with_usage(
     model: String,
     state: Arc<AppState>,
     key_id: String,
-    model_pricing: ModelPricing,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
     stream! {
         use futures_util::StreamExt;
@@ -317,15 +316,8 @@ pub fn stream_anthropic_to_openai_with_usage(
             }
         }
 
-        // Record usage after stream ends
+        // Record usage after stream ends (per-model; global is derived via aggregation)
         let window_resets = crate::routes::admin::get_or_refresh_window_resets(&state).await;
-        let cost = usage_report.cost_microdollars(&model_pricing);
-        if cost > 0
-            && let Err(e) = state.client_keys.record_usage(&key_id, cost, &window_resets).await
-        {
-            tracing::warn!("Failed to record streaming usage for key {key_id}: {e}");
-        }
-        // Per-model usage (raw tokens)
         if let Err(e) = state.client_keys.record_model_usage(&key_id, &model, &usage_report, &window_resets).await {
             tracing::warn!("Failed to record streaming model usage for key {key_id}/{model}: {e}");
         }
@@ -344,7 +336,6 @@ pub fn stream_strip_mcp_prefix_with_usage(
     state: Arc<AppState>,
     key_id: String,
     model: String,
-    model_pricing: ModelPricing,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
     use futures_util::StreamExt;
 
@@ -454,15 +445,8 @@ pub fn stream_strip_mcp_prefix_with_usage(
             yield Ok(Bytes::from(buffer));
         }
 
-        // Record usage after stream ends
+        // Record usage after stream ends (per-model; global is derived via aggregation)
         let window_resets = crate::routes::admin::get_or_refresh_window_resets(&state).await;
-        let cost = usage_report.cost_microdollars(&model_pricing);
-        if cost > 0
-            && let Err(e) = state.client_keys.record_usage(&key_id, cost, &window_resets).await
-        {
-            tracing::warn!("Failed to record streaming usage for key {key_id}: {e}");
-        }
-        // Per-model usage (raw tokens)
         if let Err(e) = state.client_keys.record_model_usage(&key_id, &model, &usage_report, &window_resets).await {
             tracing::warn!("Failed to record streaming model usage for key {key_id}/{model}: {e}");
         }

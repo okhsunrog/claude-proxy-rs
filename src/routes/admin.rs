@@ -114,7 +114,7 @@ pub struct CreateKeyRequest {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateLimitsRequest {
     #[serde(rename = "fiveHourLimit", alias = "hourlyLimit")]
-    hourly_limit: Option<u64>,
+    five_hour_limit: Option<u64>,
     weekly_limit: Option<u64>,
     total_limit: Option<u64>,
 }
@@ -810,7 +810,7 @@ pub async fn update_key_limits(
     Json(body): Json<UpdateLimitsRequest>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
     let limits = TokenLimits {
-        hourly_limit: body.hourly_limit,
+        five_hour_limit: body.five_hour_limit,
         weekly_limit: body.weekly_limit,
         total_limit: body.total_limit,
     };
@@ -867,17 +867,7 @@ pub async fn reset_key_usage(
     };
 
     match state.client_keys.reset_usage(&id, reset_type).await {
-        Ok(true) => {
-            // Also reset per-model usage for this key
-            if let Err(e) = state
-                .client_keys
-                .reset_all_model_usage(&id, reset_type)
-                .await
-            {
-                tracing::warn!("Failed to reset model usage for key {id}: {e}");
-            }
-            Ok(Json(SuccessResponse { success: true }))
-        }
+        Ok(true) => Ok(Json(SuccessResponse { success: true })),
         Ok(false) => Err((
             StatusCode::NOT_FOUND,
             Json(ErrorResponse {
@@ -1157,7 +1147,7 @@ pub async fn set_key_model_limits(
     Json(body): Json<UpdateLimitsRequest>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
     let limits = TokenLimits {
-        hourly_limit: body.hourly_limit,
+        five_hour_limit: body.five_hour_limit,
         weekly_limit: body.weekly_limit,
         total_limit: body.total_limit,
     };

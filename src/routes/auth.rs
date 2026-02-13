@@ -11,7 +11,6 @@ use crate::error::ProxyError;
 pub struct AuthResult {
     pub client_key: ClientKey,
     pub token: String,
-    pub model_pricing: ModelPricing,
 }
 
 /// Extract API key from Authorization: Bearer header (OpenAI style)
@@ -54,8 +53,15 @@ async fn authenticate_key(
         .await
         .ok_or(ProxyError::InvalidApiKey)?;
 
-    // Check global limits (cost-based)
-    if let Err(msg) = state.client_keys.check_limits(&client_key.id).await {
+    // Get window resets for limit checks
+    let window_resets = crate::routes::admin::get_or_refresh_window_resets(state).await;
+
+    // Check global limits (cost-based, derived from per-model aggregation)
+    if let Err(msg) = state
+        .client_keys
+        .check_limits(&client_key.id, &window_resets)
+        .await
+    {
         return Err(ProxyError::RateLimitExceeded(msg));
     }
 
@@ -88,7 +94,7 @@ async fn authenticate_key(
     // Check per-model limits (cost-based)
     if let Err(msg) = state
         .client_keys
-        .check_model_limits(&client_key.id, model, &model_pricing)
+        .check_model_limits(&client_key.id, model, &model_pricing, &window_resets)
         .await
     {
         return Err(ProxyError::RateLimitExceeded(msg));
@@ -112,11 +118,7 @@ async fn authenticate_key(
 
     let token = get_oauth_token(state).await?;
 
-    Ok(AuthResult {
-        client_key,
-        token,
-        model_pricing,
-    })
+    Ok(AuthResult { client_key, token })
 }
 
 /// Full authentication flow for OpenAI-compatible endpoint

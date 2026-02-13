@@ -151,25 +151,25 @@ export type TokenBreakdown = {
 };
 
 /**
- * Token usage limits for a client key (all optional)
+ * Token usage limits for a client key (all optional, in microdollars)
  */
 export type TokenLimits = {
     /**
-     * Maximum tokens per 5-hour window (None = unlimited)
+     * Maximum cost per 5-hour window (None = unlimited)
      */
     fiveHourLimit?: number | null;
     /**
-     * Maximum total tokens ever (None = unlimited)
+     * Maximum total cost ever (None = unlimited)
      */
     totalLimit?: number | null;
     /**
-     * Maximum tokens per week (None = unlimited)
+     * Maximum cost per week (None = unlimited)
      */
     weeklyLimit?: number | null;
 };
 
 /**
- * Current token usage for a client key
+ * Current token usage for a client key (derived from per-model aggregation)
  */
 export type TokenUsage = {
     /**
@@ -177,11 +177,11 @@ export type TokenUsage = {
      */
     fiveHourResetAt?: number;
     /**
-     * Tokens used in current 5-hour window
+     * Cost in current 5-hour window (microdollars)
      */
     fiveHourTokens?: number;
     /**
-     * Total tokens used (lifetime)
+     * Total cost (lifetime, microdollars)
      */
     totalTokens?: number;
     /**
@@ -189,7 +189,7 @@ export type TokenUsage = {
      */
     weeklyResetAt?: number;
     /**
-     * Tokens used in current week
+     * Cost in current week (microdollars)
      */
     weeklyTokens?: number;
 };

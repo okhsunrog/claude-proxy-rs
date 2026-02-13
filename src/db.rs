@@ -49,6 +49,11 @@ static MIGRATIONS: &[Migration] = &[
         description: "add allow_extra_usage to client_keys",
         migrate: migrate_v4,
     },
+    Migration {
+        version: 5,
+        description: "remove redundant global usage, centralize reset timestamps, rename hourly→five_hour",
+        migrate: migrate_v5,
+    },
 ];
 
 /// Read the current schema version (0 if table is empty or doesn't exist yet).
@@ -358,6 +363,139 @@ fn migrate_v4(
         .await
         .map_err(|e| {
             ProxyError::DatabaseError(format!("Failed to add allow_extra_usage column: {e}"))
+        })?;
+
+        Ok(())
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Migration v5 — remove redundant global usage, centralize reset timestamps
+// ---------------------------------------------------------------------------
+
+fn migrate_v5(
+    conn: &Connection,
+) -> Pin<Box<dyn Future<Output = Result<(), ProxyError>> + Send + '_>> {
+    Box::pin(async move {
+        // 1. Recreate client_keys: drop usage columns, rename hourly→five_hour
+        conn.execute(
+            r#"
+            CREATE TABLE client_keys_new (
+                id TEXT PRIMARY KEY,
+                key TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL,
+                last_used_at INTEGER,
+                five_hour_limit INTEGER,
+                weekly_limit INTEGER,
+                total_limit INTEGER,
+                five_hour_reset_at INTEGER NOT NULL DEFAULT 0,
+                weekly_reset_at INTEGER NOT NULL DEFAULT 0,
+                allow_extra_usage INTEGER NOT NULL DEFAULT 0
+            )
+            "#,
+            (),
+        )
+        .await
+        .map_err(|e| {
+            ProxyError::DatabaseError(format!("v5: Failed to create client_keys_new: {e}"))
+        })?;
+
+        conn.execute(
+            r#"
+            INSERT INTO client_keys_new (id, key, name, enabled, created_at, last_used_at,
+                five_hour_limit, weekly_limit, total_limit,
+                five_hour_reset_at, weekly_reset_at, allow_extra_usage)
+            SELECT id, key, name, enabled, created_at, last_used_at,
+                hourly_limit, weekly_limit, total_limit,
+                hourly_reset_at, weekly_reset_at, allow_extra_usage
+            FROM client_keys
+            "#,
+            (),
+        )
+        .await
+        .map_err(|e| {
+            ProxyError::DatabaseError(format!("v5: Failed to copy client_keys data: {e}"))
+        })?;
+
+        conn.execute("DROP TABLE client_keys", ())
+            .await
+            .map_err(|e| {
+                ProxyError::DatabaseError(format!("v5: Failed to drop old client_keys: {e}"))
+            })?;
+
+        conn.execute("ALTER TABLE client_keys_new RENAME TO client_keys", ())
+            .await
+            .map_err(|e| {
+                ProxyError::DatabaseError(format!("v5: Failed to rename client_keys_new: {e}"))
+            })?;
+
+        // 2. Recreate key_model_usage: drop reset timestamps, rename hourly→five_hour
+        conn.execute(
+            r#"
+            CREATE TABLE key_model_usage_new (
+                key_id TEXT NOT NULL REFERENCES client_keys(id) ON DELETE CASCADE,
+                model TEXT NOT NULL,
+                five_hour_limit INTEGER,
+                weekly_limit INTEGER,
+                total_limit INTEGER,
+                five_hour_input INTEGER NOT NULL DEFAULT 0,
+                five_hour_output INTEGER NOT NULL DEFAULT 0,
+                five_hour_cache_read INTEGER NOT NULL DEFAULT 0,
+                five_hour_cache_write INTEGER NOT NULL DEFAULT 0,
+                weekly_input INTEGER NOT NULL DEFAULT 0,
+                weekly_output INTEGER NOT NULL DEFAULT 0,
+                weekly_cache_read INTEGER NOT NULL DEFAULT 0,
+                weekly_cache_write INTEGER NOT NULL DEFAULT 0,
+                total_input INTEGER NOT NULL DEFAULT 0,
+                total_output INTEGER NOT NULL DEFAULT 0,
+                total_cache_read INTEGER NOT NULL DEFAULT 0,
+                total_cache_write INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (key_id, model)
+            )
+            "#,
+            (),
+        )
+        .await
+        .map_err(|e| {
+            ProxyError::DatabaseError(format!("v5: Failed to create key_model_usage_new: {e}"))
+        })?;
+
+        conn.execute(
+            r#"
+            INSERT INTO key_model_usage_new (key_id, model,
+                five_hour_limit, weekly_limit, total_limit,
+                five_hour_input, five_hour_output, five_hour_cache_read, five_hour_cache_write,
+                weekly_input, weekly_output, weekly_cache_read, weekly_cache_write,
+                total_input, total_output, total_cache_read, total_cache_write)
+            SELECT key_id, model,
+                hourly_limit, weekly_limit, total_limit,
+                hourly_input, hourly_output, hourly_cache_read, hourly_cache_write,
+                weekly_input, weekly_output, weekly_cache_read, weekly_cache_write,
+                total_input, total_output, total_cache_read, total_cache_write
+            FROM key_model_usage
+            "#,
+            (),
+        )
+        .await
+        .map_err(|e| {
+            ProxyError::DatabaseError(format!("v5: Failed to copy key_model_usage data: {e}"))
+        })?;
+
+        conn.execute("DROP TABLE key_model_usage", ())
+            .await
+            .map_err(|e| {
+                ProxyError::DatabaseError(format!("v5: Failed to drop old key_model_usage: {e}"))
+            })?;
+
+        conn.execute(
+            "ALTER TABLE key_model_usage_new RENAME TO key_model_usage",
+            (),
+        )
+        .await
+        .map_err(|e| {
+            ProxyError::DatabaseError(format!("v5: Failed to rename key_model_usage_new: {e}"))
         })?;
 
         Ok(())

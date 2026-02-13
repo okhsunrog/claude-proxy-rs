@@ -4,6 +4,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use subtle::ConstantTimeEq;
+use turso::Connection;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -13,40 +14,40 @@ use crate::SubscriptionState;
 use crate::db;
 use crate::error::ProxyError;
 
-/// Token usage limits for a client key (all optional)
+/// Token usage limits for a client key (all optional, in microdollars)
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TokenLimits {
-    /// Maximum tokens per 5-hour window (None = unlimited)
+    /// Maximum cost per 5-hour window (None = unlimited)
     #[serde(
         rename = "fiveHourLimit",
         alias = "hourlyLimit",
         skip_serializing_if = "Option::is_none"
     )]
-    pub hourly_limit: Option<u64>,
-    /// Maximum tokens per week (None = unlimited)
+    pub five_hour_limit: Option<u64>,
+    /// Maximum cost per week (None = unlimited)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub weekly_limit: Option<u64>,
-    /// Maximum total tokens ever (None = unlimited)
+    /// Maximum total cost ever (None = unlimited)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_limit: Option<u64>,
 }
 
-/// Current token usage for a client key
+/// Current token usage for a client key (derived from per-model aggregation)
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
 #[serde(default, rename_all = "camelCase")]
 pub struct TokenUsage {
-    /// Tokens used in current 5-hour window
+    /// Cost in current 5-hour window (microdollars)
     #[serde(rename = "fiveHourTokens")]
-    pub hourly_tokens: u64,
+    pub five_hour_tokens: u64,
     /// Timestamp when 5-hour counter resets (epoch ms)
     #[serde(rename = "fiveHourResetAt")]
-    pub hourly_reset_at: u64,
-    /// Tokens used in current week
+    pub five_hour_reset_at: u64,
+    /// Cost in current week (microdollars)
     pub weekly_tokens: u64,
     /// Timestamp when weekly counter resets (epoch ms)
     pub weekly_reset_at: u64,
-    /// Total tokens used (lifetime)
+    /// Total cost (lifetime, microdollars)
     pub total_tokens: u64,
 }
 
@@ -96,9 +97,8 @@ fn get_u64(row: &turso::Row, idx: usize) -> u64 {
 
 /// Parse a ClientKey from a row with columns:
 /// id, key, name, enabled, created_at, last_used_at,
-/// hourly_limit, weekly_limit, total_limit,
-/// hourly_usage, weekly_usage, total_usage,
-/// hourly_reset_at, weekly_reset_at, allow_extra_usage
+/// five_hour_limit, weekly_limit, total_limit,
+/// five_hour_reset_at, weekly_reset_at, allow_extra_usage
 fn row_to_client_key(row: &turso::Row) -> Option<ClientKey> {
     Some(ClientKey {
         id: row.get(0).ok()?,
@@ -107,23 +107,201 @@ fn row_to_client_key(row: &turso::Row) -> Option<ClientKey> {
         enabled: get_u64(row, 3) != 0,
         created_at: get_u64(row, 4),
         last_used_at: opt_u64(row, 5),
-        allow_extra_usage: get_u64(row, 14) != 0,
+        allow_extra_usage: get_u64(row, 11) != 0,
         limits: TokenLimits {
-            hourly_limit: opt_u64(row, 6),
+            five_hour_limit: opt_u64(row, 6),
             weekly_limit: opt_u64(row, 7),
             total_limit: opt_u64(row, 8),
         },
+        // Usage is derived via aggregation — zero here, populated separately
         usage: TokenUsage {
-            hourly_tokens: get_u64(row, 9),
-            hourly_reset_at: get_u64(row, 12),
-            weekly_tokens: get_u64(row, 10),
-            weekly_reset_at: get_u64(row, 13),
-            total_tokens: get_u64(row, 11),
+            five_hour_tokens: 0,
+            five_hour_reset_at: get_u64(row, 9),
+            weekly_tokens: 0,
+            weekly_reset_at: get_u64(row, 10),
+            total_tokens: 0,
         },
     })
 }
 
-const SELECT_ALL_COLS: &str = "id, key, name, enabled, created_at, last_used_at, hourly_limit, weekly_limit, total_limit, hourly_usage, weekly_usage, total_usage, hourly_reset_at, weekly_reset_at, allow_extra_usage";
+const SELECT_ALL_COLS: &str = "id, key, name, enabled, created_at, last_used_at, five_hour_limit, weekly_limit, total_limit, five_hour_reset_at, weekly_reset_at, allow_extra_usage";
+
+// ============================================================================
+// Centralized helpers
+// ============================================================================
+
+/// Check and reset expired windows. Reads timestamps from client_keys,
+/// and if expired, zeros the corresponding per-model counters in key_model_usage
+/// and updates timestamps in client_keys.
+///
+/// Returns the current (possibly updated) reset timestamps.
+async fn maybe_reset_expired_windows(
+    conn: &Connection,
+    key_id: &str,
+    now: u64,
+    window_resets: &SubscriptionState,
+) -> Result<(u64, u64), ProxyError> {
+    let five_hour_ms: u64 = 5 * 60 * 60 * 1000;
+    let one_week_ms: u64 = 7 * 24 * 60 * 60 * 1000;
+
+    let mut rows = conn
+        .query(
+            "SELECT five_hour_reset_at, weekly_reset_at FROM client_keys WHERE id = ?",
+            [key_id],
+        )
+        .await
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to read reset timestamps: {e}")))?;
+
+    let Some(row) = rows
+        .next()
+        .await
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to read reset row: {e}")))?
+    else {
+        return Ok((0, 0));
+    };
+
+    let five_hour_reset_at = get_u64(&row, 0);
+    let weekly_reset_at = get_u64(&row, 1);
+
+    let reset_five_hour = five_hour_reset_at > 0 && now >= five_hour_reset_at;
+    let reset_weekly = weekly_reset_at > 0 && now >= weekly_reset_at;
+
+    if !reset_five_hour && !reset_weekly {
+        // Re-sync: adopt subscription timestamps if they're earlier (without resetting counters)
+        let new_five_hour = window_resets
+            .five_hour_reset_at
+            .filter(|&t| t > now && t < five_hour_reset_at)
+            .unwrap_or(five_hour_reset_at);
+        let new_weekly = window_resets
+            .seven_day_reset_at
+            .filter(|&t| t > now && t < weekly_reset_at)
+            .unwrap_or(weekly_reset_at);
+
+        if new_five_hour != five_hour_reset_at || new_weekly != weekly_reset_at {
+            let _ = conn
+                .execute(
+                    "UPDATE client_keys SET five_hour_reset_at = ?, weekly_reset_at = ? WHERE id = ?",
+                    (new_five_hour as i64, new_weekly as i64, key_id),
+                )
+                .await;
+        }
+
+        return Ok((new_five_hour, new_weekly));
+    }
+
+    // Reset expired per-model counters
+    if reset_five_hour && reset_weekly {
+        conn.execute(
+            "UPDATE key_model_usage SET \
+             five_hour_input = 0, five_hour_output = 0, five_hour_cache_read = 0, five_hour_cache_write = 0, \
+             weekly_input = 0, weekly_output = 0, weekly_cache_read = 0, weekly_cache_write = 0 \
+             WHERE key_id = ?",
+            [key_id],
+        )
+        .await
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to reset model counters: {e}")))?;
+    } else if reset_five_hour {
+        conn.execute(
+            "UPDATE key_model_usage SET \
+             five_hour_input = 0, five_hour_output = 0, five_hour_cache_read = 0, five_hour_cache_write = 0 \
+             WHERE key_id = ?",
+            [key_id],
+        )
+        .await
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to reset 5h model counters: {e}")))?;
+    } else {
+        conn.execute(
+            "UPDATE key_model_usage SET \
+             weekly_input = 0, weekly_output = 0, weekly_cache_read = 0, weekly_cache_write = 0 \
+             WHERE key_id = ?",
+            [key_id],
+        )
+        .await
+        .map_err(|e| {
+            ProxyError::DatabaseError(format!("Failed to reset weekly model counters: {e}"))
+        })?;
+    }
+
+    // Compute new timestamps
+    let new_five_hour = if reset_five_hour {
+        window_resets
+            .five_hour_reset_at
+            .filter(|&t| t > now)
+            .unwrap_or(now + five_hour_ms)
+    } else if five_hour_reset_at == 0 {
+        window_resets
+            .five_hour_reset_at
+            .filter(|&t| t > now)
+            .unwrap_or(0)
+    } else {
+        window_resets
+            .five_hour_reset_at
+            .filter(|&t| t > now && t < five_hour_reset_at)
+            .unwrap_or(five_hour_reset_at)
+    };
+
+    let new_weekly = if reset_weekly {
+        window_resets
+            .seven_day_reset_at
+            .filter(|&t| t > now)
+            .unwrap_or(now + one_week_ms)
+    } else if weekly_reset_at == 0 {
+        window_resets
+            .seven_day_reset_at
+            .filter(|&t| t > now)
+            .unwrap_or(0)
+    } else {
+        window_resets
+            .seven_day_reset_at
+            .filter(|&t| t > now && t < weekly_reset_at)
+            .unwrap_or(weekly_reset_at)
+    };
+
+    // Update timestamps in client_keys
+    conn.execute(
+        "UPDATE client_keys SET five_hour_reset_at = ?, weekly_reset_at = ? WHERE id = ?",
+        (new_five_hour as i64, new_weekly as i64, key_id),
+    )
+    .await
+    .map_err(|e| ProxyError::DatabaseError(format!("Failed to update reset timestamps: {e}")))?;
+
+    Ok((new_five_hour, new_weekly))
+}
+
+/// Aggregate per-model usage into global cost (microdollars) by joining with model prices.
+/// Returns (five_hour_cost, weekly_cost, total_cost).
+async fn aggregate_usage_costs(
+    conn: &Connection,
+    key_id: &str,
+) -> Result<(u64, u64, u64), ProxyError> {
+    let mut rows = conn
+        .query(
+            "SELECT \
+             COALESCE(SUM(u.five_hour_input * m.input_price + u.five_hour_output * m.output_price + u.five_hour_cache_read * m.cache_read_price + u.five_hour_cache_write * m.cache_write_price), 0), \
+             COALESCE(SUM(u.weekly_input * m.input_price + u.weekly_output * m.output_price + u.weekly_cache_read * m.cache_read_price + u.weekly_cache_write * m.cache_write_price), 0), \
+             COALESCE(SUM(u.total_input * m.input_price + u.total_output * m.output_price + u.total_cache_read * m.cache_read_price + u.total_cache_write * m.cache_write_price), 0) \
+             FROM key_model_usage u \
+             JOIN models m ON u.model = m.id \
+             WHERE u.key_id = ?",
+            [key_id],
+        )
+        .await
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to aggregate usage: {e}")))?;
+
+    let Some(row) = rows
+        .next()
+        .await
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to read aggregate row: {e}")))?
+    else {
+        return Ok((0, 0, 0));
+    };
+
+    let five_hour = row.get::<f64>(0).unwrap_or(0.0).round() as u64;
+    let weekly = row.get::<f64>(1).unwrap_or(0.0).round() as u64;
+    let total = row.get::<f64>(2).unwrap_or(0.0).round() as u64;
+
+    Ok((five_hour, weekly, total))
+}
 
 impl ClientKeysStore {
     pub fn new() -> Self {
@@ -269,15 +447,24 @@ impl ClientKeysStore {
     }
 
     /// Check if a key's usage is within limits.
-    /// Automatically resets hourly/weekly counters if time has passed.
-    pub async fn check_limits(&self, id: &str) -> Result<(), String> {
+    /// Derives global usage from per-model aggregation.
+    pub async fn check_limits(
+        &self,
+        id: &str,
+        window_resets: &SubscriptionState,
+    ) -> Result<(), String> {
         let now = timestamp_millis();
         let conn = db::get_conn().await.map_err(|e| e.to_string())?;
 
-        // Read current state
+        // Reset expired windows (centralised)
+        maybe_reset_expired_windows(&conn, id, now, window_resets)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // Read limits
         let mut rows = conn
             .query(
-                "SELECT hourly_limit, weekly_limit, total_limit, hourly_usage, weekly_usage, total_usage, hourly_reset_at, weekly_reset_at FROM client_keys WHERE id = ?",
+                "SELECT five_hour_limit, weekly_limit, total_limit FROM client_keys WHERE id = ?",
                 [id],
             )
             .await
@@ -289,192 +476,209 @@ impl ClientKeysStore {
             .map_err(|e| format!("DB error: {e}"))?
             .ok_or_else(|| "Key not found".to_string())?;
 
-        let hourly_limit = opt_u64(&row, 0);
+        let five_hour_limit = opt_u64(&row, 0);
         let weekly_limit = opt_u64(&row, 1);
         let total_limit = opt_u64(&row, 2);
-        let mut hourly_usage = get_u64(&row, 3);
-        let mut weekly_usage = get_u64(&row, 4);
-        let total_usage = get_u64(&row, 5);
-        let mut hourly_reset_at = get_u64(&row, 6);
-        let mut weekly_reset_at = get_u64(&row, 7);
 
-        // Auto-reset expired counters
-        let mut needs_update = false;
-        if hourly_reset_at > 0 && now >= hourly_reset_at {
-            hourly_usage = 0;
-            hourly_reset_at = 0;
-            needs_update = true;
-        }
-        if weekly_reset_at > 0 && now >= weekly_reset_at {
-            weekly_usage = 0;
-            weekly_reset_at = 0;
-            needs_update = true;
+        // Skip aggregation if no limits are set
+        if five_hour_limit.is_none() && weekly_limit.is_none() && total_limit.is_none() {
+            return Ok(());
         }
 
-        if needs_update
-            && let Err(e) = conn
-                .execute(
-                    "UPDATE client_keys SET hourly_usage = ?, weekly_usage = ?, hourly_reset_at = ?, weekly_reset_at = ? WHERE id = ?",
-                    (hourly_usage as i64, weekly_usage as i64, hourly_reset_at as i64, weekly_reset_at as i64, id),
-                )
-                .await
-        {
-            tracing::warn!("Failed to reset expired usage counters for key {id}: {e}");
-        }
+        // Aggregate per-model usage into global cost
+        let (five_hour_cost, weekly_cost, total_cost) = aggregate_usage_costs(&conn, id)
+            .await
+            .map_err(|e| e.to_string())?;
 
-        if let Some(limit) = hourly_limit
-            && hourly_usage >= limit
+        if let Some(limit) = five_hour_limit
+            && five_hour_cost >= limit
         {
             return Err(format!(
                 "5-hour token limit exceeded ({}/{})",
-                hourly_usage, limit
+                five_hour_cost, limit
             ));
         }
 
         if let Some(limit) = weekly_limit
-            && weekly_usage >= limit
+            && weekly_cost >= limit
         {
             return Err(format!(
                 "Weekly token limit exceeded ({}/{})",
-                weekly_usage, limit
+                weekly_cost, limit
             ));
         }
 
         if let Some(limit) = total_limit
-            && total_usage >= limit
+            && total_cost >= limit
         {
             return Err(format!(
                 "Total token limit exceeded ({}/{})",
-                total_usage, limit
+                total_cost, limit
             ));
         }
 
         Ok(())
     }
 
-    /// Record token usage for a key.
-    /// Initializes reset timestamps if not set, using subscription window resets when available.
-    pub async fn record_usage(
+    /// Record per-model usage (all 4 token types).
+    /// Reset timestamps are centralized in client_keys and handled by maybe_reset_expired_windows.
+    pub async fn record_model_usage(
         &self,
-        id: &str,
-        tokens: u64,
+        key_id: &str,
+        model: &str,
+        report: &TokenUsageReport,
         window_resets: &SubscriptionState,
     ) -> Result<(), ProxyError> {
         let now = timestamp_millis();
-        let five_hour_ms: u64 = 5 * 60 * 60 * 1000;
-        let one_week_ms: u64 = 7 * 24 * 60 * 60 * 1000;
-
         let conn = db::get_conn().await?;
 
-        // Read current reset timestamps
+        // Reset expired windows (centralised in client_keys)
+        maybe_reset_expired_windows(&conn, key_id, now, window_resets).await?;
+
+        // Initialize timestamps if not yet set
         let mut rows = conn
             .query(
-                "SELECT hourly_reset_at, weekly_reset_at FROM client_keys WHERE id = ?",
-                [id],
+                "SELECT five_hour_reset_at, weekly_reset_at FROM client_keys WHERE id = ?",
+                [key_id],
             )
             .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to read usage: {e}")))?;
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to read timestamps: {e}")))?;
 
-        let Some(row) = rows
+        if let Some(row) = rows
             .next()
             .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to read usage row: {e}")))?
-        else {
-            return Ok(());
-        };
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to read timestamp row: {e}")))?
+        {
+            let five_hour_reset_at = get_u64(&row, 0);
+            let weekly_reset_at = get_u64(&row, 1);
 
-        let hourly_reset_at = get_u64(&row, 0);
-        let weekly_reset_at = get_u64(&row, 1);
+            let mut needs_init = false;
+            let new_five_hour = if five_hour_reset_at == 0 {
+                needs_init = true;
+                window_resets
+                    .five_hour_reset_at
+                    .filter(|&t| t > now)
+                    .unwrap_or(0)
+            } else {
+                five_hour_reset_at
+            };
+            let new_weekly = if weekly_reset_at == 0 {
+                needs_init = true;
+                window_resets
+                    .seven_day_reset_at
+                    .filter(|&t| t > now)
+                    .unwrap_or(0)
+            } else {
+                weekly_reset_at
+            };
 
-        // Counter reset: ONLY on genuine window expiry. Never on re-sync or initialization —
-        // re-sync just corrects the timestamp so the counter resets at the right time later.
-        let reset_hourly = hourly_reset_at > 0 && now >= hourly_reset_at;
-        let reset_weekly = weekly_reset_at > 0 && now >= weekly_reset_at;
-
-        // Timestamp: use subscription data when available.
-        // - On reset/init: set from subscription or fallback
-        // - Otherwise: adopt subscription value if it's earlier (re-sync without counter reset)
-        let new_hourly_reset = if reset_hourly {
-            window_resets
-                .five_hour_reset_at
-                .filter(|&t| t > now)
-                .unwrap_or(now + five_hour_ms)
-        } else if hourly_reset_at == 0 {
-            window_resets
-                .five_hour_reset_at
-                .filter(|&t| t > now)
-                .unwrap_or(0)
-        } else {
-            window_resets
-                .five_hour_reset_at
-                .filter(|&t| t > now && t < hourly_reset_at)
-                .unwrap_or(hourly_reset_at)
-        };
-        let new_weekly_reset = if reset_weekly {
-            window_resets
-                .seven_day_reset_at
-                .filter(|&t| t > now)
-                .unwrap_or(now + one_week_ms)
-        } else if weekly_reset_at == 0 {
-            window_resets
-                .seven_day_reset_at
-                .filter(|&t| t > now)
-                .unwrap_or(0)
-        } else {
-            window_resets
-                .seven_day_reset_at
-                .filter(|&t| t > now && t < weekly_reset_at)
-                .unwrap_or(weekly_reset_at)
-        };
-
-        // Build update: reset counters if needed, then add tokens.
-        // Always update reset timestamps so uninitialized keys pick up real values without resetting.
-        if reset_hourly && reset_weekly {
-            conn.execute(
-                "UPDATE client_keys SET hourly_usage = ?, weekly_usage = ?, total_usage = total_usage + ?, hourly_reset_at = ?, weekly_reset_at = ? WHERE id = ?",
-                (tokens as i64, tokens as i64, tokens as i64, new_hourly_reset as i64, new_weekly_reset as i64, id),
-            ).await
-        } else if reset_hourly {
-            conn.execute(
-                "UPDATE client_keys SET hourly_usage = ?, weekly_usage = weekly_usage + ?, total_usage = total_usage + ?, hourly_reset_at = ?, weekly_reset_at = ? WHERE id = ?",
-                (tokens as i64, tokens as i64, tokens as i64, new_hourly_reset as i64, new_weekly_reset as i64, id),
-            ).await
-        } else if reset_weekly {
-            conn.execute(
-                "UPDATE client_keys SET hourly_usage = hourly_usage + ?, weekly_usage = ?, total_usage = total_usage + ?, hourly_reset_at = ?, weekly_reset_at = ? WHERE id = ?",
-                (tokens as i64, tokens as i64, tokens as i64, new_hourly_reset as i64, new_weekly_reset as i64, id),
-            ).await
-        } else {
-            conn.execute(
-                "UPDATE client_keys SET hourly_usage = hourly_usage + ?, weekly_usage = weekly_usage + ?, total_usage = total_usage + ?, hourly_reset_at = ?, weekly_reset_at = ? WHERE id = ?",
-                (tokens as i64, tokens as i64, tokens as i64, new_hourly_reset as i64, new_weekly_reset as i64, id),
-            ).await
+            if needs_init {
+                let _ = conn
+                    .execute(
+                        "UPDATE client_keys SET five_hour_reset_at = ?, weekly_reset_at = ? WHERE id = ?",
+                        (new_five_hour as i64, new_weekly as i64, key_id),
+                    )
+                    .await;
+            }
         }
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to record usage: {e}")))?;
+
+        let inp = report.input_tokens as i64;
+        let out = report.output_tokens as i64;
+        let cr = report.cache_read_tokens as i64;
+        let cw = report.cache_creation_tokens as i64;
+
+        // Check if row exists
+        let mut rows = conn
+            .query(
+                "SELECT COUNT(*) FROM key_model_usage WHERE key_id = ? AND model = ?",
+                (key_id, model),
+            )
+            .await
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to check model usage: {e}")))?;
+
+        let exists: i64 = rows
+            .next()
+            .await
+            .ok()
+            .flatten()
+            .and_then(|r| r.get::<i64>(0).ok())
+            .unwrap_or(0);
+
+        if exists > 0 {
+            // Simple += since windows were already reset above
+            conn.execute(
+                "UPDATE key_model_usage SET \
+                 five_hour_input = five_hour_input + ?, five_hour_output = five_hour_output + ?, \
+                 five_hour_cache_read = five_hour_cache_read + ?, five_hour_cache_write = five_hour_cache_write + ?, \
+                 weekly_input = weekly_input + ?, weekly_output = weekly_output + ?, \
+                 weekly_cache_read = weekly_cache_read + ?, weekly_cache_write = weekly_cache_write + ?, \
+                 total_input = total_input + ?, total_output = total_output + ?, \
+                 total_cache_read = total_cache_read + ?, total_cache_write = total_cache_write + ? \
+                 WHERE key_id = ? AND model = ?",
+                (
+                    inp, out, cr, cw, // five_hour
+                    inp, out, cr, cw, // weekly
+                    inp, out, cr, cw, // total
+                    key_id, model,
+                ),
+            )
+            .await
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to update model usage: {e}")))?;
+        } else {
+            conn.execute(
+                "INSERT INTO key_model_usage (key_id, model, \
+                 five_hour_input, five_hour_output, five_hour_cache_read, five_hour_cache_write, \
+                 weekly_input, weekly_output, weekly_cache_read, weekly_cache_write, \
+                 total_input, total_output, total_cache_read, total_cache_write) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    key_id, model, inp, out, cr, cw, inp, out, cr, cw, inp, out, cr, cw,
+                ),
+            )
+            .await
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to insert model usage: {e}")))?;
+        }
 
         Ok(())
     }
 
-    /// Get usage statistics for a key
+    /// Get usage statistics for a key (derived from per-model aggregation)
     pub async fn get_usage(&self, id: &str) -> Option<(TokenLimits, TokenUsage)> {
         let now = timestamp_millis();
         let key = self.get(id).await?;
+        let conn = db::get_conn().await.ok()?;
 
-        let mut usage = key.usage;
+        let mut five_hour_reset_at = key.usage.five_hour_reset_at;
+        let mut weekly_reset_at = key.usage.weekly_reset_at;
+
         // Show 0 if counters have expired (read-only view)
-        if usage.hourly_reset_at > 0 && now >= usage.hourly_reset_at {
-            usage.hourly_tokens = 0;
-            usage.hourly_reset_at = 0;
+        let five_hour_expired = five_hour_reset_at > 0 && now >= five_hour_reset_at;
+        let weekly_expired = weekly_reset_at > 0 && now >= weekly_reset_at;
+
+        if five_hour_expired {
+            five_hour_reset_at = 0;
         }
-        if usage.weekly_reset_at > 0 && now >= usage.weekly_reset_at {
-            usage.weekly_tokens = 0;
-            usage.weekly_reset_at = 0;
+        if weekly_expired {
+            weekly_reset_at = 0;
         }
 
-        Some((key.limits, usage))
+        let (five_hour_cost, weekly_cost, total_cost) =
+            aggregate_usage_costs(&conn, id).await.ok()?;
+
+        Some((
+            key.limits,
+            TokenUsage {
+                five_hour_tokens: if five_hour_expired { 0 } else { five_hour_cost },
+                five_hour_reset_at,
+                weekly_tokens: if weekly_expired { 0 } else { weekly_cost },
+                weekly_reset_at,
+                total_tokens: total_cost,
+            },
+        ))
     }
 
-    /// Reset usage counters for a key
+    /// Reset usage counters for a key.
+    /// Resets both timestamps in client_keys AND per-model counters in key_model_usage.
     pub async fn reset_usage(
         &self,
         id: &str,
@@ -482,38 +686,68 @@ impl ClientKeysStore {
     ) -> Result<bool, ProxyError> {
         let conn = db::get_conn().await?;
 
-        let sql = match reset_type {
+        // Reset timestamps in client_keys
+        let ts_sql = match reset_type {
             UsageResetType::FiveHour => {
-                "UPDATE client_keys SET hourly_usage = 0, hourly_reset_at = 0 WHERE id = ?"
+                "UPDATE client_keys SET five_hour_reset_at = 0 WHERE id = ?"
             }
-            UsageResetType::Weekly => {
-                "UPDATE client_keys SET weekly_usage = 0, weekly_reset_at = 0 WHERE id = ?"
+            UsageResetType::Weekly => "UPDATE client_keys SET weekly_reset_at = 0 WHERE id = ?",
+            UsageResetType::Total => {
+                // Total has no timestamp to reset, but we still need to check key exists
+                "UPDATE client_keys SET id = id WHERE id = ?"
             }
-            UsageResetType::Total => "UPDATE client_keys SET total_usage = 0 WHERE id = ?",
             UsageResetType::All => {
-                "UPDATE client_keys SET hourly_usage = 0, weekly_usage = 0, total_usage = 0, hourly_reset_at = 0, weekly_reset_at = 0 WHERE id = ?"
+                "UPDATE client_keys SET five_hour_reset_at = 0, weekly_reset_at = 0 WHERE id = ?"
             }
         };
 
         let affected = conn
-            .execute(sql, [id])
+            .execute(ts_sql, [id])
             .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to reset usage: {e}")))?;
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to reset timestamps: {e}")))?;
 
-        Ok(affected > 0)
+        if affected == 0 {
+            return Ok(false);
+        }
+
+        // Reset per-model counters
+        let model_sql = match reset_type {
+            UsageResetType::FiveHour => {
+                "UPDATE key_model_usage SET five_hour_input = 0, five_hour_output = 0, five_hour_cache_read = 0, five_hour_cache_write = 0 WHERE key_id = ?"
+            }
+            UsageResetType::Weekly => {
+                "UPDATE key_model_usage SET weekly_input = 0, weekly_output = 0, weekly_cache_read = 0, weekly_cache_write = 0 WHERE key_id = ?"
+            }
+            UsageResetType::Total => {
+                "UPDATE key_model_usage SET total_input = 0, total_output = 0, total_cache_read = 0, total_cache_write = 0 WHERE key_id = ?"
+            }
+            UsageResetType::All => {
+                "UPDATE key_model_usage SET \
+                 five_hour_input = 0, five_hour_output = 0, five_hour_cache_read = 0, five_hour_cache_write = 0, \
+                 weekly_input = 0, weekly_output = 0, weekly_cache_read = 0, weekly_cache_write = 0, \
+                 total_input = 0, total_output = 0, total_cache_read = 0, total_cache_write = 0 \
+                 WHERE key_id = ?"
+            }
+        };
+
+        conn.execute(model_sql, [id])
+            .await
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to reset model usage: {e}")))?;
+
+        Ok(true)
     }
 
     /// Update limits for a key
     pub async fn set_limits(&self, id: &str, limits: TokenLimits) -> Result<bool, ProxyError> {
         let conn = db::get_conn().await?;
 
-        let h = limits.hourly_limit.map(|v| v as i64);
+        let h = limits.five_hour_limit.map(|v| v as i64);
         let w = limits.weekly_limit.map(|v| v as i64);
         let t = limits.total_limit.map(|v| v as i64);
 
         let affected = conn
             .execute(
-                "UPDATE client_keys SET hourly_limit = ?, weekly_limit = ?, total_limit = ? WHERE id = ?",
+                "UPDATE client_keys SET five_hour_limit = ?, weekly_limit = ?, total_limit = ? WHERE id = ?",
                 (h, w, t, id),
             )
             .await
@@ -633,17 +867,22 @@ impl ClientKeysStore {
         key_id: &str,
         model: &str,
         pricing: &ModelPricing,
+        window_resets: &SubscriptionState,
     ) -> Result<(), String> {
         let now = timestamp_millis();
         let conn = db::get_conn().await.map_err(|e| e.to_string())?;
 
+        // Reset expired windows (centralised)
+        maybe_reset_expired_windows(&conn, key_id, now, window_resets)
+            .await
+            .map_err(|e| e.to_string())?;
+
         let mut rows = conn
             .query(
-                "SELECT hourly_limit, weekly_limit, total_limit, \
-                 hourly_input, hourly_output, hourly_cache_read, hourly_cache_write, \
+                "SELECT five_hour_limit, weekly_limit, total_limit, \
+                 five_hour_input, five_hour_output, five_hour_cache_read, five_hour_cache_write, \
                  weekly_input, weekly_output, weekly_cache_read, weekly_cache_write, \
-                 total_input, total_output, total_cache_read, total_cache_write, \
-                 hourly_reset_at, weekly_reset_at \
+                 total_input, total_output, total_cache_read, total_cache_write \
                  FROM key_model_usage WHERE key_id = ? AND model = ?",
                 (key_id, model),
             )
@@ -654,63 +893,22 @@ impl ClientKeysStore {
             return Ok(()); // No row = no limits
         };
 
-        let hourly_limit = opt_u64(&row, 0);
+        let five_hour_limit = opt_u64(&row, 0);
         let weekly_limit = opt_u64(&row, 1);
         let total_limit = opt_u64(&row, 2);
 
-        let mut h_in = get_u64(&row, 3);
-        let mut h_out = get_u64(&row, 4);
-        let mut h_cr = get_u64(&row, 5);
-        let mut h_cw = get_u64(&row, 6);
-        let mut w_in = get_u64(&row, 7);
-        let mut w_out = get_u64(&row, 8);
-        let mut w_cr = get_u64(&row, 9);
-        let mut w_cw = get_u64(&row, 10);
+        let h_in = get_u64(&row, 3);
+        let h_out = get_u64(&row, 4);
+        let h_cr = get_u64(&row, 5);
+        let h_cw = get_u64(&row, 6);
+        let w_in = get_u64(&row, 7);
+        let w_out = get_u64(&row, 8);
+        let w_cr = get_u64(&row, 9);
+        let w_cw = get_u64(&row, 10);
         let t_in = get_u64(&row, 11);
         let t_out = get_u64(&row, 12);
         let t_cr = get_u64(&row, 13);
         let t_cw = get_u64(&row, 14);
-        let mut hourly_reset_at = get_u64(&row, 15);
-        let mut weekly_reset_at = get_u64(&row, 16);
-
-        // Auto-reset expired counters
-        let mut needs_update = false;
-        if hourly_reset_at > 0 && now >= hourly_reset_at {
-            h_in = 0;
-            h_out = 0;
-            h_cr = 0;
-            h_cw = 0;
-            hourly_reset_at = 0;
-            needs_update = true;
-        }
-        if weekly_reset_at > 0 && now >= weekly_reset_at {
-            w_in = 0;
-            w_out = 0;
-            w_cr = 0;
-            w_cw = 0;
-            weekly_reset_at = 0;
-            needs_update = true;
-        }
-
-        if needs_update
-            && let Err(e) = conn
-                .execute(
-                    "UPDATE key_model_usage SET \
-                     hourly_input = ?, hourly_output = ?, hourly_cache_read = ?, hourly_cache_write = ?, \
-                     weekly_input = ?, weekly_output = ?, weekly_cache_read = ?, weekly_cache_write = ?, \
-                     hourly_reset_at = ?, weekly_reset_at = ? \
-                     WHERE key_id = ? AND model = ?",
-                    (
-                        h_in as i64, h_out as i64, h_cr as i64, h_cw as i64,
-                        w_in as i64, w_out as i64, w_cr as i64, w_cw as i64,
-                        hourly_reset_at as i64, weekly_reset_at as i64,
-                        key_id, model,
-                    ),
-                )
-                .await
-        {
-            tracing::warn!("Failed to reset expired model usage counters for {key_id}/{model}: {e}");
-        }
 
         // Compute costs using model prices
         let compute_cost = |inp: u64, out: u64, cr: u64, cw: u64| -> u64 {
@@ -721,7 +919,7 @@ impl ClientKeysStore {
             cost.round() as u64
         };
 
-        if let Some(limit) = hourly_limit {
+        if let Some(limit) = five_hour_limit {
             let cost = compute_cost(h_in, h_out, h_cr, h_cw);
             if cost >= limit {
                 return Err(format!(
@@ -757,191 +955,38 @@ impl ClientKeysStore {
         Ok(())
     }
 
-    /// Record per-model usage (all 4 token types).
-    pub async fn record_model_usage(
-        &self,
-        key_id: &str,
-        model: &str,
-        report: &TokenUsageReport,
-        window_resets: &SubscriptionState,
-    ) -> Result<(), ProxyError> {
-        let now = timestamp_millis();
-        let five_hour_ms: u64 = 5 * 60 * 60 * 1000;
-        let one_week_ms: u64 = 7 * 24 * 60 * 60 * 1000;
-        let conn = db::get_conn().await?;
-
-        // Check if row exists
-        let mut rows = conn
-            .query(
-                "SELECT hourly_reset_at, weekly_reset_at FROM key_model_usage WHERE key_id = ? AND model = ?",
-                (key_id, model),
-            )
-            .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to read model usage: {e}")))?;
-
-        let inp = report.input_tokens as i64;
-        let out = report.output_tokens as i64;
-        let cr = report.cache_read_tokens as i64;
-        let cw = report.cache_creation_tokens as i64;
-
-        if let Some(row) = rows.next().await.map_err(|e| {
-            ProxyError::DatabaseError(format!("Failed to read model usage row: {e}"))
-        })? {
-            // Row exists - update with reset logic
-            let hourly_reset_at = get_u64(&row, 0);
-            let weekly_reset_at = get_u64(&row, 1);
-
-            let reset_hourly = hourly_reset_at > 0 && now >= hourly_reset_at;
-            let reset_weekly = weekly_reset_at > 0 && now >= weekly_reset_at;
-
-            let new_hourly_reset = if reset_hourly {
-                window_resets
-                    .five_hour_reset_at
-                    .filter(|&t| t > now)
-                    .unwrap_or(now + five_hour_ms)
-            } else if hourly_reset_at == 0 {
-                window_resets
-                    .five_hour_reset_at
-                    .filter(|&t| t > now)
-                    .unwrap_or(0)
-            } else {
-                window_resets
-                    .five_hour_reset_at
-                    .filter(|&t| t > now && t < hourly_reset_at)
-                    .unwrap_or(hourly_reset_at)
-            } as i64;
-            let new_weekly_reset = if reset_weekly {
-                window_resets
-                    .seven_day_reset_at
-                    .filter(|&t| t > now)
-                    .unwrap_or(now + one_week_ms)
-            } else if weekly_reset_at == 0 {
-                window_resets
-                    .seven_day_reset_at
-                    .filter(|&t| t > now)
-                    .unwrap_or(0)
-            } else {
-                window_resets
-                    .seven_day_reset_at
-                    .filter(|&t| t > now && t < weekly_reset_at)
-                    .unwrap_or(weekly_reset_at)
-            } as i64;
-
-            // Build UPDATE based on which counters need reset
-            let h_prefix = if reset_hourly { "" } else { "hourly_input + " };
-            let w_prefix = if reset_weekly { "" } else { "weekly_input + " };
-
-            let sql = format!(
-                "UPDATE key_model_usage SET \
-                 hourly_input = {h_prefix}?, hourly_output = {}?, hourly_cache_read = {}?, hourly_cache_write = {}?, \
-                 weekly_input = {w_prefix}?, weekly_output = {}?, weekly_cache_read = {}?, weekly_cache_write = {}?, \
-                 total_input = total_input + ?, total_output = total_output + ?, total_cache_read = total_cache_read + ?, total_cache_write = total_cache_write + ?, \
-                 hourly_reset_at = ?, weekly_reset_at = ? \
-                 WHERE key_id = ? AND model = ?",
-                if reset_hourly { "" } else { "hourly_output + " },
-                if reset_hourly {
-                    ""
-                } else {
-                    "hourly_cache_read + "
-                },
-                if reset_hourly {
-                    ""
-                } else {
-                    "hourly_cache_write + "
-                },
-                if reset_weekly { "" } else { "weekly_output + " },
-                if reset_weekly {
-                    ""
-                } else {
-                    "weekly_cache_read + "
-                },
-                if reset_weekly {
-                    ""
-                } else {
-                    "weekly_cache_write + "
-                },
-            );
-
-            conn.execute(
-                &sql,
-                (
-                    inp,
-                    out,
-                    cr,
-                    cw, // hourly
-                    inp,
-                    out,
-                    cr,
-                    cw, // weekly
-                    inp,
-                    out,
-                    cr,
-                    cw, // total
-                    new_hourly_reset,
-                    new_weekly_reset,
-                    key_id,
-                    model,
-                ),
-            )
-            .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to update model usage: {e}")))?;
-        } else {
-            // No row - insert new (use 0 if subscription data unavailable to avoid fallback drift)
-            let new_hourly_reset = window_resets
-                .five_hour_reset_at
-                .filter(|&t| t > now)
-                .unwrap_or(0) as i64;
-            let new_weekly_reset = window_resets
-                .seven_day_reset_at
-                .filter(|&t| t > now)
-                .unwrap_or(0) as i64;
-
-            conn.execute(
-                "INSERT INTO key_model_usage (key_id, model, \
-                 hourly_input, hourly_output, hourly_cache_read, hourly_cache_write, \
-                 weekly_input, weekly_output, weekly_cache_read, weekly_cache_write, \
-                 total_input, total_output, total_cache_read, total_cache_write, \
-                 hourly_reset_at, weekly_reset_at) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    key_id,
-                    model,
-                    inp,
-                    out,
-                    cr,
-                    cw,
-                    inp,
-                    out,
-                    cr,
-                    cw,
-                    inp,
-                    out,
-                    cr,
-                    cw,
-                    new_hourly_reset,
-                    new_weekly_reset,
-                ),
-            )
-            .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to insert model usage: {e}")))?;
-        }
-
-        Ok(())
-    }
-
     /// Get per-model usage entries for a key
     pub async fn get_model_usage(&self, key_id: &str) -> Vec<ModelUsageEntry> {
         let now = timestamp_millis();
         let Ok(conn) = db::get_conn().await else {
             return Vec::new();
         };
+
+        // Read centralized reset timestamps from client_keys
+        let Ok(mut ts_rows) = conn
+            .query(
+                "SELECT five_hour_reset_at, weekly_reset_at FROM client_keys WHERE id = ?",
+                [key_id],
+            )
+            .await
+        else {
+            return Vec::new();
+        };
+        let (five_hour_reset_at, weekly_reset_at) = if let Ok(Some(row)) = ts_rows.next().await {
+            (get_u64(&row, 0), get_u64(&row, 1))
+        } else {
+            (0, 0)
+        };
+
+        let five_hour_expired = five_hour_reset_at > 0 && now >= five_hour_reset_at;
+        let weekly_expired = weekly_reset_at > 0 && now >= weekly_reset_at;
+
         let Ok(mut rows) = conn
             .query(
-                "SELECT model, hourly_limit, weekly_limit, total_limit, \
-                 hourly_input, hourly_output, hourly_cache_read, hourly_cache_write, \
+                "SELECT model, five_hour_limit, weekly_limit, total_limit, \
+                 five_hour_input, five_hour_output, five_hour_cache_read, five_hour_cache_write, \
                  weekly_input, weekly_output, weekly_cache_read, weekly_cache_write, \
-                 total_input, total_output, total_cache_read, total_cache_write, \
-                 hourly_reset_at, weekly_reset_at \
+                 total_input, total_output, total_cache_read, total_cache_write \
                  FROM key_model_usage WHERE key_id = ?",
                 [key_id],
             )
@@ -956,21 +1001,14 @@ impl ClientKeysStore {
                 continue;
             };
 
-            let hourly_reset_at = get_u64(&row, 16);
-            let weekly_reset_at = get_u64(&row, 17);
-
-            // Show 0 for expired counters
-            let hourly_expired = hourly_reset_at > 0 && now >= hourly_reset_at;
-            let weekly_expired = weekly_reset_at > 0 && now >= weekly_reset_at;
-
             entries.push(ModelUsageEntry {
                 model,
                 limits: TokenLimits {
-                    hourly_limit: opt_u64(&row, 1),
+                    five_hour_limit: opt_u64(&row, 1),
                     weekly_limit: opt_u64(&row, 2),
                     total_limit: opt_u64(&row, 3),
                 },
-                hourly: if hourly_expired {
+                five_hour: if five_hour_expired {
                     TokenBreakdown::default()
                 } else {
                     TokenBreakdown {
@@ -996,7 +1034,11 @@ impl ClientKeysStore {
                     cache_read: get_u64(&row, 14),
                     cache_write: get_u64(&row, 15),
                 },
-                hourly_reset_at: if hourly_expired { 0 } else { hourly_reset_at },
+                five_hour_reset_at: if five_hour_expired {
+                    0
+                } else {
+                    five_hour_reset_at
+                },
                 weekly_reset_at: if weekly_expired { 0 } else { weekly_reset_at },
             });
         }
@@ -1030,11 +1072,11 @@ impl ClientKeysStore {
             .unwrap_or(0);
 
         if exists > 0 {
-            let h = limits.hourly_limit.map(|v| v as i64);
+            let h = limits.five_hour_limit.map(|v| v as i64);
             let w = limits.weekly_limit.map(|v| v as i64);
             let t = limits.total_limit.map(|v| v as i64);
             conn.execute(
-                "UPDATE key_model_usage SET hourly_limit = ?, weekly_limit = ?, total_limit = ? WHERE key_id = ? AND model = ?",
+                "UPDATE key_model_usage SET five_hour_limit = ?, weekly_limit = ?, total_limit = ? WHERE key_id = ? AND model = ?",
                 (h, w, t, key_id, model),
             )
             .await
@@ -1043,11 +1085,11 @@ impl ClientKeysStore {
             })?;
         } else {
             // Insert new row with limits only
-            let h = limits.hourly_limit.map(|v| v as i64);
+            let h = limits.five_hour_limit.map(|v| v as i64);
             let w = limits.weekly_limit.map(|v| v as i64);
             let t = limits.total_limit.map(|v| v as i64);
             conn.execute(
-                "INSERT INTO key_model_usage (key_id, model, hourly_limit, weekly_limit, total_limit) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO key_model_usage (key_id, model, five_hour_limit, weekly_limit, total_limit) VALUES (?, ?, ?, ?, ?)",
                 (key_id, model, h, w, t),
             )
             .await
@@ -1084,16 +1126,16 @@ impl ClientKeysStore {
 
         let sql = match reset_type {
             UsageResetType::FiveHour => {
-                "UPDATE key_model_usage SET hourly_input = 0, hourly_output = 0, hourly_cache_read = 0, hourly_cache_write = 0, hourly_reset_at = 0 WHERE key_id = ? AND model = ?"
+                "UPDATE key_model_usage SET five_hour_input = 0, five_hour_output = 0, five_hour_cache_read = 0, five_hour_cache_write = 0 WHERE key_id = ? AND model = ?"
             }
             UsageResetType::Weekly => {
-                "UPDATE key_model_usage SET weekly_input = 0, weekly_output = 0, weekly_cache_read = 0, weekly_cache_write = 0, weekly_reset_at = 0 WHERE key_id = ? AND model = ?"
+                "UPDATE key_model_usage SET weekly_input = 0, weekly_output = 0, weekly_cache_read = 0, weekly_cache_write = 0 WHERE key_id = ? AND model = ?"
             }
             UsageResetType::Total => {
                 "UPDATE key_model_usage SET total_input = 0, total_output = 0, total_cache_read = 0, total_cache_write = 0 WHERE key_id = ? AND model = ?"
             }
             UsageResetType::All => {
-                "UPDATE key_model_usage SET hourly_input = 0, hourly_output = 0, hourly_cache_read = 0, hourly_cache_write = 0, weekly_input = 0, weekly_output = 0, weekly_cache_read = 0, weekly_cache_write = 0, total_input = 0, total_output = 0, total_cache_read = 0, total_cache_write = 0, hourly_reset_at = 0, weekly_reset_at = 0 WHERE key_id = ? AND model = ?"
+                "UPDATE key_model_usage SET five_hour_input = 0, five_hour_output = 0, five_hour_cache_read = 0, five_hour_cache_write = 0, weekly_input = 0, weekly_output = 0, weekly_cache_read = 0, weekly_cache_write = 0, total_input = 0, total_output = 0, total_cache_read = 0, total_cache_write = 0 WHERE key_id = ? AND model = ?"
             }
         };
 
@@ -1102,35 +1144,6 @@ impl ClientKeysStore {
             .await
             .map_err(|e| ProxyError::DatabaseError(format!("Failed to reset model usage: {e}")))?;
         Ok(affected > 0)
-    }
-
-    /// Reset per-model usage for ALL models of a key
-    pub async fn reset_all_model_usage(
-        &self,
-        key_id: &str,
-        reset_type: UsageResetType,
-    ) -> Result<(), ProxyError> {
-        let conn = db::get_conn().await?;
-
-        let sql = match reset_type {
-            UsageResetType::FiveHour => {
-                "UPDATE key_model_usage SET hourly_input = 0, hourly_output = 0, hourly_cache_read = 0, hourly_cache_write = 0, hourly_reset_at = 0 WHERE key_id = ?"
-            }
-            UsageResetType::Weekly => {
-                "UPDATE key_model_usage SET weekly_input = 0, weekly_output = 0, weekly_cache_read = 0, weekly_cache_write = 0, weekly_reset_at = 0 WHERE key_id = ?"
-            }
-            UsageResetType::Total => {
-                "UPDATE key_model_usage SET total_input = 0, total_output = 0, total_cache_read = 0, total_cache_write = 0 WHERE key_id = ?"
-            }
-            UsageResetType::All => {
-                "UPDATE key_model_usage SET hourly_input = 0, hourly_output = 0, hourly_cache_read = 0, hourly_cache_write = 0, weekly_input = 0, weekly_output = 0, weekly_cache_read = 0, weekly_cache_write = 0, total_input = 0, total_output = 0, total_cache_read = 0, total_cache_write = 0, hourly_reset_at = 0, weekly_reset_at = 0 WHERE key_id = ?"
-            }
-        };
-
-        conn.execute(sql, [key_id])
-            .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to reset all model usage: {e}")))?;
-        Ok(())
     }
 }
 
@@ -1151,10 +1164,10 @@ pub struct ModelUsageEntry {
     pub model: String,
     pub limits: TokenLimits,
     #[serde(rename = "fiveHour")]
-    pub hourly: TokenBreakdown,
+    pub five_hour: TokenBreakdown,
     pub weekly: TokenBreakdown,
     pub total: TokenBreakdown,
     #[serde(rename = "fiveHourResetAt")]
-    pub hourly_reset_at: u64,
+    pub five_hour_reset_at: u64,
     pub weekly_reset_at: u64,
 }
