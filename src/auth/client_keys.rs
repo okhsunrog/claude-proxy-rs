@@ -277,9 +277,9 @@ async fn aggregate_usage_costs(
     let mut rows = conn
         .query(
             "SELECT \
-             COALESCE(SUM(u.five_hour_input * m.input_price + u.five_hour_output * m.output_price + u.five_hour_cache_read * m.cache_read_price + u.five_hour_cache_write * m.cache_write_price), 0), \
-             COALESCE(SUM(u.weekly_input * m.input_price + u.weekly_output * m.output_price + u.weekly_cache_read * m.cache_read_price + u.weekly_cache_write * m.cache_write_price), 0), \
-             COALESCE(SUM(u.total_input * m.input_price + u.total_output * m.output_price + u.total_cache_read * m.cache_read_price + u.total_cache_write * m.cache_write_price), 0) \
+             COALESCE(SUM(u.five_hour_input * m.input_price + u.five_hour_output * m.output_price + u.five_hour_cache_read * m.cache_read_price + u.five_hour_cache_write * m.cache_write_price), 0.0), \
+             COALESCE(SUM(u.weekly_input * m.input_price + u.weekly_output * m.output_price + u.weekly_cache_read * m.cache_read_price + u.weekly_cache_write * m.cache_write_price), 0.0), \
+             COALESCE(SUM(u.total_input * m.input_price + u.total_output * m.output_price + u.total_cache_read * m.cache_read_price + u.total_cache_write * m.cache_write_price), 0.0) \
              FROM key_model_usage u \
              JOIN models m ON u.model = m.id \
              WHERE u.key_id = ?",
