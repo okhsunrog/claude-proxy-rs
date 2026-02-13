@@ -12,12 +12,6 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     CreateKeyForm: typeof import('./src/components/CreateKeyForm.vue')['default']
-    HelloWorld: typeof import('./src/components/HelloWorld.vue')['default']
-    IconCommunity: typeof import('./src/components/icons/IconCommunity.vue')['default']
-    IconDocumentation: typeof import('./src/components/icons/IconDocumentation.vue')['default']
-    IconEcosystem: typeof import('./src/components/icons/IconEcosystem.vue')['default']
-    IconSupport: typeof import('./src/components/icons/IconSupport.vue')['default']
-    IconTooling: typeof import('./src/components/icons/IconTooling.vue')['default']
     KeyCard: typeof import('./src/components/KeyCard.vue')['default']
     KeyModelAccess: typeof import('./src/components/KeyModelAccess.vue')['default']
     KeysList: typeof import('./src/components/KeysList.vue')['default']
@@ -26,7 +20,6 @@ declare module 'vue' {
     OAuthSection: typeof import('./src/components/OAuthSection.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
-    TheWelcome: typeof import('./src/components/TheWelcome.vue')['default']
     TokenLimitsForm: typeof import('./src/components/TokenLimitsForm.vue')['default']
     UAlert: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Alert.vue')['default']
     UApp: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/App.vue')['default']
@@ -43,6 +36,5 @@ declare module 'vue' {
     UsageStats: typeof import('./src/components/UsageStats.vue')['default']
     USwitch: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Switch.vue')['default']
     UTabs: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Tabs.vue')['default']
-    WelcomeItem: typeof import('./src/components/WelcomeItem.vue')['default']
   }
 }

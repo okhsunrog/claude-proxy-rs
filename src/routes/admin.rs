@@ -603,6 +603,40 @@ fn validate_key_name(name: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// Maximum allowed length for model IDs
+const MAX_MODEL_ID_LENGTH: usize = 100;
+
+/// Validate a model ID: non-empty, max 100 chars, only safe characters
+fn validate_model_id(id: &str) -> Result<(), &'static str> {
+    let id = id.trim();
+    if id.is_empty() {
+        return Err("Model ID cannot be empty");
+    }
+    if id.len() > MAX_MODEL_ID_LENGTH {
+        return Err("Model ID too long (max 100 characters)");
+    }
+    if !id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '-'))
+    {
+        return Err(
+            "Model ID can only contain letters, digits, dots, underscores, colons, and hyphens",
+        );
+    }
+    Ok(())
+}
+
+/// Validate a price value: must be finite and non-negative
+fn validate_price(price: f64) -> Result<(), &'static str> {
+    if !price.is_finite() {
+        return Err("Price must be a finite number");
+    }
+    if price < 0.0 {
+        return Err("Price cannot be negative");
+    }
+    Ok(())
+}
+
 /// Create a new API key
 #[utoipa::path(
     post,
@@ -918,13 +952,27 @@ pub async fn add_model(
     Json(body): Json<AddModelRequest>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
     let id = body.id.trim();
-    if id.is_empty() {
+    if let Err(e) = validate_model_id(id) {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "Model ID cannot be empty".into(),
-            }),
+            Json(ErrorResponse { error: e.into() }),
         ));
+    }
+
+    for (label, price) in [
+        ("Input price", body.input_price),
+        ("Output price", body.output_price),
+        ("Cache read price", body.cache_read_price),
+        ("Cache write price", body.cache_write_price),
+    ] {
+        if let Err(e) = validate_price(price) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: format!("{label}: {e}"),
+                }),
+            ));
+        }
     }
 
     match state
@@ -999,6 +1047,24 @@ pub async fn update_model(
     Path(id): Path<String>,
     Json(body): Json<UpdateModelRequest>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    for (label, price) in [
+        ("Input price", body.input_price),
+        ("Output price", body.output_price),
+        ("Cache read price", body.cache_read_price),
+        ("Cache write price", body.cache_write_price),
+    ] {
+        if let Some(p) = price
+            && let Err(e) = validate_price(p)
+        {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: format!("{label}: {e}"),
+                }),
+            ));
+        }
+    }
+
     match state
         .models
         .update(
