@@ -34,6 +34,7 @@ const isExpanded = ref(false)
 const showDeleteModal = ref(false)
 const isDeleting = ref(false)
 const isToggling = ref(false)
+const modelUsageTable = ref<InstanceType<typeof ModelUsageTable> | null>(null)
 
 function formatDate(timestamp: number): string {
   return new Date(timestamp).toLocaleString()
@@ -89,6 +90,11 @@ interface UsageSummaryItem {
   label: string
   used: number
   limit: number | null | undefined
+}
+
+async function handleResetUsage(id: string, type: 'fiveHour' | 'weekly' | 'total' | 'all') {
+  await props.resetUsage(id, type)
+  modelUsageTable.value?.loadData()
 }
 
 const usageSummary = computed<UsageSummaryItem[]>(() => {
@@ -156,7 +162,7 @@ const usageSummary = computed<UsageSummaryItem[]>(() => {
         :set-allow-extra-usage="setAllowExtraUsage"
         :usage="usage"
         :update-limits="updateLimits"
-        :reset-usage="resetUsage"
+        :reset-usage="handleResetUsage"
       />
 
       <KeyModelAccess
@@ -167,6 +173,7 @@ const usageSummary = computed<UsageSummaryItem[]>(() => {
       />
 
       <ModelUsageTable
+        ref="modelUsageTable"
         :key-id="keyData.id"
         :available-models="availableModels"
         :load-key-model-usage="loadKeyModelUsage"

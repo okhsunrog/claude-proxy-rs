@@ -42,6 +42,8 @@ onMounted(async () => {
   await loadData()
 })
 
+defineExpose({ loadData })
+
 async function loadData() {
   isLoading.value = true
   try {

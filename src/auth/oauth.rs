@@ -183,6 +183,16 @@ impl OAuthManager {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
+
+            // If the refresh token is invalid (e.g. rotated or revoked),
+            // clear the stale credentials so the UI shows "Connect" instead
+            // of endlessly failing.
+            if text.contains("invalid_grant") {
+                tracing::warn!("OAuth refresh token is invalid, clearing stale credentials");
+                let _ = self.auth_store.remove("anthropic").await;
+                return Ok(None);
+            }
+
             return Err(format!("Token refresh failed ({}): {}", status, text));
         }
 

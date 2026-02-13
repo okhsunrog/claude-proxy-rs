@@ -106,7 +106,7 @@ async fn table_exists(conn: &Connection, table_name: &str) -> Result<bool, Proxy
 }
 
 /// Run all pending migrations.
-async fn run_migrations(conn: &Connection) -> Result<(), ProxyError> {
+async fn run_migrations(conn: &Connection, db_path: &Path) -> Result<(), ProxyError> {
     // Ensure the schema_version table exists
     conn.execute(
         "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)",
@@ -125,6 +125,27 @@ async fn run_migrations(conn: &Connection) -> Result<(), ProxyError> {
         info!("Existing database detected without schema version — setting to v1");
         set_schema_version(conn, 1).await?;
         current = 1;
+    }
+
+    // Back up the database before running any pending migrations
+    let has_pending = MIGRATIONS.iter().any(|m| m.version > current);
+    if has_pending && db_path.exists() {
+        let backup_name = format!(
+            "{}.backup-v{}",
+            db_path.file_name().unwrap_or_default().to_string_lossy(),
+            current
+        );
+        let backup_path = db_path.with_file_name(&backup_name);
+        std::fs::copy(db_path, &backup_path).map_err(|e| {
+            ProxyError::DatabaseError(format!("Failed to backup database before migration: {e}"))
+        })?;
+        // Also copy WAL file if present (contains recent uncommitted writes)
+        let wal_path = db_path.with_extension("db-wal");
+        if wal_path.exists() {
+            let wal_backup = db_path.with_file_name(format!("{backup_name}-wal"));
+            let _ = std::fs::copy(&wal_path, &wal_backup);
+        }
+        info!("Database backup created at {}", backup_path.display());
     }
 
     for migration in MIGRATIONS {
@@ -547,7 +568,7 @@ pub async fn init_db(path: &Path) -> Result<(), ProxyError> {
         .await
         .map_err(|e| ProxyError::DatabaseError(format!("Failed to enable foreign keys: {e}")))?;
 
-    run_migrations(&conn).await?;
+    run_migrations(&conn, path).await?;
 
     DATABASE
         .set(Arc::new(db))
