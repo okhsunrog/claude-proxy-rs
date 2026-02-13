@@ -386,31 +386,29 @@ impl ClientKeysStore {
         let hourly_reset_at = get_u64(&row, 0);
         let weekly_reset_at = get_u64(&row, 1);
 
-        // Determine if counters need reset (also reset if subscription started a new window).
-        // Don't reset when reset_at == 0 (uninitialized) — just accumulate until we get real
-        // subscription data to avoid fallback timestamps causing spurious re-syncs later.
-        let reset_hourly = (hourly_reset_at > 0 && now >= hourly_reset_at)
-            || window_resets
-                .five_hour_reset_at
-                .is_some_and(|t| t > now && t < hourly_reset_at);
-        let reset_weekly = (weekly_reset_at > 0 && now >= weekly_reset_at)
-            || window_resets
-                .seven_day_reset_at
-                .is_some_and(|t| t > now && t < weekly_reset_at);
+        // Counter reset: ONLY on genuine window expiry. Never on re-sync or initialization —
+        // re-sync just corrects the timestamp so the counter resets at the right time later.
+        let reset_hourly = hourly_reset_at > 0 && now >= hourly_reset_at;
+        let reset_weekly = weekly_reset_at > 0 && now >= weekly_reset_at;
 
+        // Timestamp: use subscription data when available.
+        // - On reset/init: set from subscription or fallback
+        // - Otherwise: adopt subscription value if it's earlier (re-sync without counter reset)
         let new_hourly_reset = if reset_hourly {
             window_resets
                 .five_hour_reset_at
                 .filter(|&t| t > now)
                 .unwrap_or(now + five_hour_ms)
         } else if hourly_reset_at == 0 {
-            // Not initialized: set from subscription data if available, stay 0 otherwise
             window_resets
                 .five_hour_reset_at
                 .filter(|&t| t > now)
                 .unwrap_or(0)
         } else {
-            hourly_reset_at
+            window_resets
+                .five_hour_reset_at
+                .filter(|&t| t > now && t < hourly_reset_at)
+                .unwrap_or(hourly_reset_at)
         };
         let new_weekly_reset = if reset_weekly {
             window_resets
@@ -418,13 +416,15 @@ impl ClientKeysStore {
                 .filter(|&t| t > now)
                 .unwrap_or(now + one_week_ms)
         } else if weekly_reset_at == 0 {
-            // Not initialized: set from subscription data if available, stay 0 otherwise
             window_resets
                 .seven_day_reset_at
                 .filter(|&t| t > now)
                 .unwrap_or(0)
         } else {
-            weekly_reset_at
+            window_resets
+                .seven_day_reset_at
+                .filter(|&t| t > now && t < weekly_reset_at)
+                .unwrap_or(weekly_reset_at)
         };
 
         // Build update: reset counters if needed, then add tokens.
@@ -791,14 +791,8 @@ impl ClientKeysStore {
             let hourly_reset_at = get_u64(&row, 0);
             let weekly_reset_at = get_u64(&row, 1);
 
-            let reset_hourly = (hourly_reset_at > 0 && now >= hourly_reset_at)
-                || window_resets
-                    .five_hour_reset_at
-                    .is_some_and(|t| t > now && t < hourly_reset_at);
-            let reset_weekly = (weekly_reset_at > 0 && now >= weekly_reset_at)
-                || window_resets
-                    .seven_day_reset_at
-                    .is_some_and(|t| t > now && t < weekly_reset_at);
+            let reset_hourly = hourly_reset_at > 0 && now >= hourly_reset_at;
+            let reset_weekly = weekly_reset_at > 0 && now >= weekly_reset_at;
 
             let new_hourly_reset = if reset_hourly {
                 window_resets
@@ -811,7 +805,10 @@ impl ClientKeysStore {
                     .filter(|&t| t > now)
                     .unwrap_or(0)
             } else {
-                hourly_reset_at
+                window_resets
+                    .five_hour_reset_at
+                    .filter(|&t| t > now && t < hourly_reset_at)
+                    .unwrap_or(hourly_reset_at)
             } as i64;
             let new_weekly_reset = if reset_weekly {
                 window_resets
@@ -824,7 +821,10 @@ impl ClientKeysStore {
                     .filter(|&t| t > now)
                     .unwrap_or(0)
             } else {
-                weekly_reset_at
+                window_resets
+                    .seven_day_reset_at
+                    .filter(|&t| t > now && t < weekly_reset_at)
+                    .unwrap_or(weekly_reset_at)
             } as i64;
 
             // Build UPDATE based on which counters need reset
