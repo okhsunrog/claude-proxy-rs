@@ -386,14 +386,14 @@ impl ClientKeysStore {
         let hourly_reset_at = get_u64(&row, 0);
         let weekly_reset_at = get_u64(&row, 1);
 
-        // Determine if counters need reset (also reset if subscription started a new window)
-        let reset_hourly = hourly_reset_at == 0
-            || now >= hourly_reset_at
+        // Determine if counters need reset (also reset if subscription started a new window).
+        // Don't reset when reset_at == 0 (uninitialized) — just accumulate until we get real
+        // subscription data to avoid fallback timestamps causing spurious re-syncs later.
+        let reset_hourly = (hourly_reset_at > 0 && now >= hourly_reset_at)
             || window_resets
                 .five_hour_reset_at
                 .is_some_and(|t| t > now && t < hourly_reset_at);
-        let reset_weekly = weekly_reset_at == 0
-            || now >= weekly_reset_at
+        let reset_weekly = (weekly_reset_at > 0 && now >= weekly_reset_at)
             || window_resets
                 .seven_day_reset_at
                 .is_some_and(|t| t > now && t < weekly_reset_at);
@@ -403,6 +403,12 @@ impl ClientKeysStore {
                 .five_hour_reset_at
                 .filter(|&t| t > now)
                 .unwrap_or(now + five_hour_ms)
+        } else if hourly_reset_at == 0 {
+            // Not initialized: set from subscription data if available, stay 0 otherwise
+            window_resets
+                .five_hour_reset_at
+                .filter(|&t| t > now)
+                .unwrap_or(0)
         } else {
             hourly_reset_at
         };
@@ -411,11 +417,18 @@ impl ClientKeysStore {
                 .seven_day_reset_at
                 .filter(|&t| t > now)
                 .unwrap_or(now + one_week_ms)
+        } else if weekly_reset_at == 0 {
+            // Not initialized: set from subscription data if available, stay 0 otherwise
+            window_resets
+                .seven_day_reset_at
+                .filter(|&t| t > now)
+                .unwrap_or(0)
         } else {
             weekly_reset_at
         };
 
-        // Build update: reset counters if needed, then add tokens
+        // Build update: reset counters if needed, then add tokens.
+        // Always update reset timestamps so uninitialized keys pick up real values without resetting.
         if reset_hourly && reset_weekly {
             conn.execute(
                 "UPDATE client_keys SET hourly_usage = ?, weekly_usage = ?, total_usage = total_usage + ?, hourly_reset_at = ?, weekly_reset_at = ? WHERE id = ?",
@@ -433,8 +446,8 @@ impl ClientKeysStore {
             ).await
         } else {
             conn.execute(
-                "UPDATE client_keys SET hourly_usage = hourly_usage + ?, weekly_usage = weekly_usage + ?, total_usage = total_usage + ? WHERE id = ?",
-                (tokens as i64, tokens as i64, tokens as i64, id),
+                "UPDATE client_keys SET hourly_usage = hourly_usage + ?, weekly_usage = weekly_usage + ?, total_usage = total_usage + ?, hourly_reset_at = ?, weekly_reset_at = ? WHERE id = ?",
+                (tokens as i64, tokens as i64, tokens as i64, new_hourly_reset as i64, new_weekly_reset as i64, id),
             ).await
         }
         .map_err(|e| ProxyError::DatabaseError(format!("Failed to record usage: {e}")))?;
@@ -778,13 +791,11 @@ impl ClientKeysStore {
             let hourly_reset_at = get_u64(&row, 0);
             let weekly_reset_at = get_u64(&row, 1);
 
-            let reset_hourly = hourly_reset_at == 0
-                || now >= hourly_reset_at
+            let reset_hourly = (hourly_reset_at > 0 && now >= hourly_reset_at)
                 || window_resets
                     .five_hour_reset_at
                     .is_some_and(|t| t > now && t < hourly_reset_at);
-            let reset_weekly = weekly_reset_at == 0
-                || now >= weekly_reset_at
+            let reset_weekly = (weekly_reset_at > 0 && now >= weekly_reset_at)
                 || window_resets
                     .seven_day_reset_at
                     .is_some_and(|t| t > now && t < weekly_reset_at);
@@ -794,6 +805,11 @@ impl ClientKeysStore {
                     .five_hour_reset_at
                     .filter(|&t| t > now)
                     .unwrap_or(now + five_hour_ms)
+            } else if hourly_reset_at == 0 {
+                window_resets
+                    .five_hour_reset_at
+                    .filter(|&t| t > now)
+                    .unwrap_or(0)
             } else {
                 hourly_reset_at
             } as i64;
@@ -802,6 +818,11 @@ impl ClientKeysStore {
                     .seven_day_reset_at
                     .filter(|&t| t > now)
                     .unwrap_or(now + one_week_ms)
+            } else if weekly_reset_at == 0 {
+                window_resets
+                    .seven_day_reset_at
+                    .filter(|&t| t > now)
+                    .unwrap_or(0)
             } else {
                 weekly_reset_at
             } as i64;
@@ -865,15 +886,15 @@ impl ClientKeysStore {
             .await
             .map_err(|e| ProxyError::DatabaseError(format!("Failed to update model usage: {e}")))?;
         } else {
-            // No row - insert new
+            // No row - insert new (use 0 if subscription data unavailable to avoid fallback drift)
             let new_hourly_reset = window_resets
                 .five_hour_reset_at
                 .filter(|&t| t > now)
-                .unwrap_or(now + five_hour_ms) as i64;
+                .unwrap_or(0) as i64;
             let new_weekly_reset = window_resets
                 .seven_day_reset_at
                 .filter(|&t| t > now)
-                .unwrap_or(now + one_week_ms) as i64;
+                .unwrap_or(0) as i64;
 
             conn.execute(
                 "INSERT INTO key_model_usage (key_id, model, \
