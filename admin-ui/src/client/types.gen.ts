@@ -49,9 +49,13 @@ export type ExtraUsage = {
 };
 
 export type KeyBreakdown = {
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
     costMicrodollars: number;
+    inputTokens: number;
     keyId: string;
     keyName?: string | null;
+    outputTokens: number;
     requestCount: number;
 };
 
@@ -96,8 +100,12 @@ export type Model = {
 };
 
 export type ModelBreakdown = {
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
     costMicrodollars: number;
+    inputTokens: number;
     model: string;
+    outputTokens: number;
     requestCount: number;
 };
 

@@ -16,6 +16,10 @@ export interface ModelBreakdown {
   model: string
   requestCount: number
   costMicrodollars: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
 }
 
 export interface KeyBreakdown {
@@ -23,6 +27,10 @@ export interface KeyBreakdown {
   keyName: string | null
   requestCount: number
   costMicrodollars: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
 }
 
 const period = ref<Period>('24h')
@@ -43,6 +51,30 @@ export function useUsageHistory() {
 
   const avgCostPerRequest = computed(() =>
     totalRequests.value > 0 ? totalCost.value / totalRequests.value : 0,
+  )
+
+  const totalInputTokens = computed(() =>
+    timeseries.value.reduce((sum, p) => sum + p.inputTokens, 0),
+  )
+
+  const totalOutputTokens = computed(() =>
+    timeseries.value.reduce((sum, p) => sum + p.outputTokens, 0),
+  )
+
+  const totalCacheReadTokens = computed(() =>
+    timeseries.value.reduce((sum, p) => sum + p.cacheReadTokens, 0),
+  )
+
+  const totalCacheWriteTokens = computed(() =>
+    timeseries.value.reduce((sum, p) => sum + p.cacheWriteTokens, 0),
+  )
+
+  const totalTokens = computed(
+    () =>
+      totalInputTokens.value +
+      totalOutputTokens.value +
+      totalCacheReadTokens.value +
+      totalCacheWriteTokens.value,
   )
 
   async function fetchTimeseries() {
@@ -126,6 +158,11 @@ export function useUsageHistory() {
     totalCost,
     totalRequests,
     avgCostPerRequest,
+    totalInputTokens,
+    totalOutputTokens,
+    totalCacheReadTokens,
+    totalCacheWriteTokens,
+    totalTokens,
     fetchAll,
     clearHistory,
     setPeriod,

@@ -1364,6 +1364,10 @@ pub struct ModelBreakdown {
     pub model: String,
     pub request_count: u64,
     pub cost_microdollars: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -1380,6 +1384,10 @@ pub struct KeyBreakdown {
     pub key_name: Option<String>,
     pub request_count: u64,
     pub cost_microdollars: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -1508,7 +1516,9 @@ pub async fn get_usage_history_by_model(
 
     let Ok(mut rows) = conn
         .query(
-            "SELECT model, COUNT(*), SUM(cost_microdollars) \
+            "SELECT model, COUNT(*), SUM(cost_microdollars), \
+             SUM(input_tokens), SUM(output_tokens), \
+             SUM(cache_read_tokens), SUM(cache_write_tokens) \
              FROM request_log WHERE created_at >= ? \
              GROUP BY model ORDER BY SUM(cost_microdollars) DESC",
             [cutoff as i64],
@@ -1530,6 +1540,10 @@ pub async fn get_usage_history_by_model(
             model,
             request_count: get_u64(&row, 1),
             cost_microdollars: get_u64(&row, 2),
+            input_tokens: get_u64(&row, 3),
+            output_tokens: get_u64(&row, 4),
+            cache_read_tokens: get_u64(&row, 5),
+            cache_write_tokens: get_u64(&row, 6),
         });
     }
 
@@ -1564,7 +1578,9 @@ pub async fn get_usage_history_by_key(
 
     let Ok(mut rows) = conn
         .query(
-            "SELECT r.key_id, k.name, COUNT(*), SUM(r.cost_microdollars) \
+            "SELECT r.key_id, k.name, COUNT(*), SUM(r.cost_microdollars), \
+             SUM(r.input_tokens), SUM(r.output_tokens), \
+             SUM(r.cache_read_tokens), SUM(r.cache_write_tokens) \
              FROM request_log r LEFT JOIN client_keys k ON r.key_id = k.id \
              WHERE r.created_at >= ? \
              GROUP BY r.key_id ORDER BY SUM(r.cost_microdollars) DESC",
@@ -1588,6 +1604,10 @@ pub async fn get_usage_history_by_key(
             key_name: row.get::<Option<String>>(1).ok().flatten(),
             request_count: get_u64(&row, 2),
             cost_microdollars: get_u64(&row, 3),
+            input_tokens: get_u64(&row, 4),
+            output_tokens: get_u64(&row, 5),
+            cache_read_tokens: get_u64(&row, 6),
+            cache_write_tokens: get_u64(&row, 7),
         });
     }
 
