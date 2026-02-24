@@ -370,6 +370,11 @@ async fn main() {
             routes::admin::remove_key_model_limits
         ))
         .routes(routes!(routes::admin::reset_key_model_usage))
+        // Usage history (charts)
+        .routes(routes!(routes::admin::get_usage_history_timeseries))
+        .routes(routes!(routes::admin::get_usage_history_by_model))
+        .routes(routes!(routes::admin::get_usage_history_by_key))
+        .routes(routes!(routes::admin::delete_usage_history))
         .split_for_parts();
 
     // Swagger UI + OpenAPI spec (accessible without authentication)

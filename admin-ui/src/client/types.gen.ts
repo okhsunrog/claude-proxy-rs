@@ -48,6 +48,18 @@ export type ExtraUsage = {
     utilization?: number | null;
 };
 
+export type KeyBreakdown = {
+    costMicrodollars: number;
+    keyId: string;
+    keyName?: string | null;
+    requestCount: number;
+};
+
+export type KeyBreakdownResponse = {
+    keys: Array<KeyBreakdown>;
+    period: string;
+};
+
 export type KeyModelUsageResponse = {
     entries: Array<ModelUsageEntry>;
 };
@@ -81,6 +93,17 @@ export type Model = {
     inputPrice: number;
     outputPrice: number;
     sortOrder: number;
+};
+
+export type ModelBreakdown = {
+    costMicrodollars: number;
+    model: string;
+    requestCount: number;
+};
+
+export type ModelBreakdownResponse = {
+    models: Array<ModelBreakdown>;
+    period: string;
 };
 
 /**
@@ -138,6 +161,22 @@ export type SubscriptionUsageResponse = {
 
 export type SuccessResponse = {
     success: boolean;
+};
+
+export type TimeseriesPoint = {
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+    costMicrodollars: number;
+    inputTokens: number;
+    outputTokens: number;
+    requestCount: number;
+    timestamp: number;
+};
+
+export type TimeseriesResponse = {
+    granularity: string;
+    period: string;
+    points: Array<TimeseriesPoint>;
 };
 
 /**
@@ -728,3 +767,76 @@ export type GetSubscriptionUsageResponses = {
 };
 
 export type GetSubscriptionUsageResponse = GetSubscriptionUsageResponses[keyof GetSubscriptionUsageResponses];
+
+export type DeleteUsageHistoryData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/usage-history';
+};
+
+export type DeleteUsageHistoryErrors = {
+    500: ErrorResponse;
+};
+
+export type DeleteUsageHistoryError = DeleteUsageHistoryErrors[keyof DeleteUsageHistoryErrors];
+
+export type DeleteUsageHistoryResponses = {
+    200: SuccessResponse;
+};
+
+export type DeleteUsageHistoryResponse = DeleteUsageHistoryResponses[keyof DeleteUsageHistoryResponses];
+
+export type GetUsageHistoryByKeyData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Period: 24h, 7d, or 30d
+         */
+        period?: string;
+    };
+    url: '/usage-history/by-key';
+};
+
+export type GetUsageHistoryByKeyResponses = {
+    200: KeyBreakdownResponse;
+};
+
+export type GetUsageHistoryByKeyResponse = GetUsageHistoryByKeyResponses[keyof GetUsageHistoryByKeyResponses];
+
+export type GetUsageHistoryByModelData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Period: 24h, 7d, or 30d
+         */
+        period?: string;
+    };
+    url: '/usage-history/by-model';
+};
+
+export type GetUsageHistoryByModelResponses = {
+    200: ModelBreakdownResponse;
+};
+
+export type GetUsageHistoryByModelResponse = GetUsageHistoryByModelResponses[keyof GetUsageHistoryByModelResponses];
+
+export type GetUsageHistoryTimeseriesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Period: 24h, 7d, or 30d
+         */
+        period?: string;
+    };
+    url: '/usage-history/timeseries';
+};
+
+export type GetUsageHistoryTimeseriesResponses = {
+    200: TimeseriesResponse;
+};
+
+export type GetUsageHistoryTimeseriesResponse = GetUsageHistoryTimeseriesResponses[keyof GetUsageHistoryTimeseriesResponses];

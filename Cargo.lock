@@ -539,7 +539,7 @@ checksum = "c3e64b0cc0439b12df2fa678eae89a1c56a529fd067a9115f7827f1fffd22b32"
 
 [[package]]
 name = "claude-proxy-rs"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "async-stream",
  "axum",
@@ -1533,6 +1533,8 @@ checksum = "6373607a59f0be73a39b6fe456b8192fcc3585f602af20751600e974dd455e77"
 [[package]]
 name = "llm-relay"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81f2ddd84456041619343a24669ee61fc08af6440d6a5d703fa2c15555bb1240"
 dependencies = [
  "serde",
  "serde_json",

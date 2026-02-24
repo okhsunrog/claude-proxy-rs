@@ -54,6 +54,11 @@ static MIGRATIONS: &[Migration] = &[
         description: "remove redundant global usage, centralize reset timestamps, rename hourly→five_hour",
         migrate: migrate_v5,
     },
+    Migration {
+        version: 6,
+        description: "replace counter-based usage with request_log, add count_from timestamps",
+        migrate: migrate_v6,
+    },
 ];
 
 /// Read the current schema version (0 if table is empty or doesn't exist yet).
@@ -534,6 +539,175 @@ fn migrate_v5(
             .await
             .map_err(|e| {
                 ProxyError::DatabaseError(format!("v5: Failed to re-enable foreign keys: {e}"))
+            })?;
+
+        Ok(())
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Migration v6 — replace counter-based usage with request_log
+// ---------------------------------------------------------------------------
+
+fn migrate_v6(
+    conn: &Connection,
+) -> Pin<Box<dyn Future<Output = Result<(), ProxyError>> + Send + '_>> {
+    Box::pin(async move {
+        info!(
+            "v6: Switching from counter-based usage to request_log. Existing counter data will not be migrated."
+        );
+
+        // 1. Create request_log table (append-only, single source of truth for all usage)
+        conn.execute(
+            r#"
+            CREATE TABLE IF NOT EXISTS request_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key_id TEXT NOT NULL,
+                model TEXT NOT NULL,
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+                cost_microdollars INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL
+            )
+            "#,
+            (),
+        )
+        .await
+        .map_err(|e| {
+            ProxyError::DatabaseError(format!("v6: Failed to create request_log table: {e}"))
+        })?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_request_log_created_at ON request_log(created_at)",
+            (),
+        )
+        .await
+        .map_err(|e| {
+            ProxyError::DatabaseError(format!("v6: Failed to create created_at index: {e}"))
+        })?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_request_log_key_created ON request_log(key_id, created_at)",
+            (),
+        )
+        .await
+        .map_err(|e| {
+            ProxyError::DatabaseError(format!("v6: Failed to create key_created index: {e}"))
+        })?;
+
+        // 2. Recreate client_keys with count_from columns
+        conn.execute("PRAGMA foreign_keys = OFF", ())
+            .await
+            .map_err(|e| {
+                ProxyError::DatabaseError(format!("v6: Failed to disable foreign keys: {e}"))
+            })?;
+
+        conn.execute(
+            r#"
+            CREATE TABLE client_keys_new (
+                id TEXT PRIMARY KEY,
+                key TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL,
+                last_used_at INTEGER,
+                five_hour_limit INTEGER,
+                weekly_limit INTEGER,
+                total_limit INTEGER,
+                five_hour_reset_at INTEGER NOT NULL DEFAULT 0,
+                weekly_reset_at INTEGER NOT NULL DEFAULT 0,
+                five_hour_count_from INTEGER NOT NULL DEFAULT 0,
+                weekly_count_from INTEGER NOT NULL DEFAULT 0,
+                total_count_from INTEGER NOT NULL DEFAULT 0,
+                allow_extra_usage INTEGER NOT NULL DEFAULT 0
+            )
+            "#,
+            (),
+        )
+        .await
+        .map_err(|e| {
+            ProxyError::DatabaseError(format!("v6: Failed to create client_keys_new: {e}"))
+        })?;
+
+        conn.execute(
+            r#"
+            INSERT INTO client_keys_new (id, key, name, enabled, created_at, last_used_at,
+                five_hour_limit, weekly_limit, total_limit,
+                five_hour_reset_at, weekly_reset_at,
+                five_hour_count_from, weekly_count_from, total_count_from,
+                allow_extra_usage)
+            SELECT id, key, name, enabled, created_at, last_used_at,
+                five_hour_limit, weekly_limit, total_limit,
+                five_hour_reset_at, weekly_reset_at,
+                0, 0, 0,
+                allow_extra_usage
+            FROM client_keys
+            "#,
+            (),
+        )
+        .await
+        .map_err(|e| {
+            ProxyError::DatabaseError(format!("v6: Failed to copy client_keys data: {e}"))
+        })?;
+
+        conn.execute("DROP TABLE client_keys", ())
+            .await
+            .map_err(|e| {
+                ProxyError::DatabaseError(format!("v6: Failed to drop old client_keys: {e}"))
+            })?;
+
+        conn.execute("ALTER TABLE client_keys_new RENAME TO client_keys", ())
+            .await
+            .map_err(|e| {
+                ProxyError::DatabaseError(format!("v6: Failed to rename client_keys_new: {e}"))
+            })?;
+
+        // 3. Replace key_model_usage with key_model_limits (drop all counter columns)
+        conn.execute(
+            r#"
+            CREATE TABLE key_model_limits (
+                key_id TEXT NOT NULL REFERENCES client_keys(id) ON DELETE CASCADE,
+                model TEXT NOT NULL,
+                five_hour_limit INTEGER,
+                weekly_limit INTEGER,
+                total_limit INTEGER,
+                count_from INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (key_id, model)
+            )
+            "#,
+            (),
+        )
+        .await
+        .map_err(|e| {
+            ProxyError::DatabaseError(format!("v6: Failed to create key_model_limits: {e}"))
+        })?;
+
+        conn.execute(
+            r#"
+            INSERT INTO key_model_limits (key_id, model, five_hour_limit, weekly_limit, total_limit, count_from)
+            SELECT key_id, model, five_hour_limit, weekly_limit, total_limit, 0
+            FROM key_model_usage
+            "#,
+            (),
+        )
+        .await
+        .map_err(|e| {
+            ProxyError::DatabaseError(format!("v6: Failed to copy key_model_limits data: {e}"))
+        })?;
+
+        conn.execute("DROP TABLE key_model_usage", ())
+            .await
+            .map_err(|e| {
+                ProxyError::DatabaseError(format!("v6: Failed to drop key_model_usage: {e}"))
+            })?;
+
+        // Re-enable foreign keys
+        conn.execute("PRAGMA foreign_keys = ON", ())
+            .await
+            .map_err(|e| {
+                ProxyError::DatabaseError(format!("v6: Failed to re-enable foreign keys: {e}"))
             })?;
 
         Ok(())

@@ -3,7 +3,7 @@ use reqwest::{Client, RequestBuilder};
 use std::sync::Arc;
 
 use crate::AppState;
-use crate::auth::{ClientKey, ModelPricing};
+use crate::auth::ClientKey;
 use crate::constants::{ANTHROPIC_VERSION, OAUTH_BETA_HEADER, USER_AGENT};
 use crate::error::ProxyError;
 
@@ -79,22 +79,10 @@ async fn authenticate_key(
         return Err(ProxyError::ModelNotAllowed(model.to_string()));
     }
 
-    // Get model pricing (needed for cost calculation and per-model limit check)
-    let model_pricing = state
-        .models
-        .get_pricing(model)
-        .await
-        .unwrap_or(ModelPricing {
-            input_price: 0.0,
-            output_price: 0.0,
-            cache_read_price: 0.0,
-            cache_write_price: 0.0,
-        });
-
-    // Check per-model limits (cost-based)
+    // Check per-model limits (cost-based, from request_log)
     if let Err(msg) = state
         .client_keys
-        .check_model_limits(&client_key.id, model, &model_pricing, &window_resets)
+        .check_model_limits(&client_key.id, model, &window_resets)
         .await
     {
         return Err(ProxyError::RateLimitExceeded(msg));

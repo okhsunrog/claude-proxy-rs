@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import OAuthSection from '../components/OAuthSection.vue'
 import KeysList from '../components/KeysList.vue'
 import ModelManagement from '../components/ModelManagement.vue'
+import UsageHistory from '../components/UsageHistory.vue'
 import { useAuth } from '../composables/useAuth'
 
 const { authRequired, logout } = useAuth()
@@ -13,6 +14,7 @@ const activeTab = ref('keys')
 const tabs = [
   { label: 'API Keys', value: 'keys', icon: 'i-lucide-key' },
   { label: 'Models', value: 'models', icon: 'i-lucide-cpu' },
+  { label: 'Usage History', value: 'usage', icon: 'i-lucide-chart-area' },
 ]
 
 async function handleLogout() {
@@ -47,6 +49,7 @@ async function handleLogout() {
         <div class="mt-4">
           <KeysList v-if="activeTab === 'keys'" />
           <ModelManagement v-else-if="activeTab === 'models'" />
+          <UsageHistory v-else-if="activeTab === 'usage'" />
         </div>
       </UCard>
     </div>
