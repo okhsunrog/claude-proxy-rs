@@ -11,6 +11,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    CategoryDistribution: typeof import('./src/components/CategoryDistribution.vue')['default']
     CreateKeyForm: typeof import('./src/components/CreateKeyForm.vue')['default']
     KeyCard: typeof import('./src/components/KeyCard.vue')['default']
     KeyModelAccess: typeof import('./src/components/KeyModelAccess.vue')['default']

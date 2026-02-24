@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, computed } from 'vue'
-import { AreaChart, DonutChart } from 'vue-chrts'
+import { AreaChart } from 'vue-chrts'
+import CategoryDistribution from './CategoryDistribution.vue'
 import { useUsageHistory, type Period } from '../composables/useUsageHistory'
 import { formatCost } from '../utils/format'
 
@@ -33,7 +34,7 @@ const areaData = computed(() =>
 )
 
 const areaCategories = computed(() => ({
-  cost: { name: 'Cost ($)' },
+  cost: { name: 'Cost ($)', color: '#22c55e' },
 }))
 
 function formatTime(tick: number | Date) {
@@ -51,10 +52,7 @@ function formatDollars(tick: number | Date) {
   return `$${v.toFixed(3)}`
 }
 
-// Donut chart: model breakdown
-const modelDonutData = computed(() => byModel.value.map((m) => m.costMicrodollars))
-
-const modelColors = [
+const categoryColors = [
   '#22c55e', // green
   '#3b82f6', // blue
   '#f59e0b', // amber
@@ -65,30 +63,21 @@ const modelColors = [
   '#f97316', // orange
 ]
 
-const modelDonutCategories = computed(() => {
-  const cats: Record<string, { name: string; color: string }> = {}
-  byModel.value.forEach((m, i) => {
-    cats[`${i}`] = {
-      name: `${m.model} (${formatCost(m.costMicrodollars)})`,
-      color: modelColors[i % modelColors.length]!,
-    }
-  })
-  return cats
-})
+const modelCategories = computed(() =>
+  byModel.value.map((m, i) => ({
+    label: m.model,
+    value: m.costMicrodollars,
+    color: categoryColors[i % categoryColors.length]!,
+  })),
+)
 
-// Donut chart: key breakdown
-const keyDonutData = computed(() => byKey.value.map((k) => k.costMicrodollars))
-
-const keyDonutCategories = computed(() => {
-  const cats: Record<string, { name: string; color: string }> = {}
-  byKey.value.forEach((k, i) => {
-    cats[`${i}`] = {
-      name: `${k.keyName ?? k.keyId.slice(0, 8)} (${formatCost(k.costMicrodollars)})`,
-      color: modelColors[(i + 3) % modelColors.length]!,
-    }
-  })
-  return cats
-})
+const keyCategories = computed(() =>
+  byKey.value.map((k, i) => ({
+    label: k.keyName ?? k.keyId.slice(0, 8),
+    value: k.costMicrodollars,
+    color: categoryColors[(i + 3) % categoryColors.length]!,
+  })),
+)
 
 const hasData = computed(
   () => timeseries.value.length > 0 || byModel.value.length > 0 || byKey.value.length > 0,
@@ -152,7 +141,7 @@ onMounted(() => fetchAll())
     />
 
     <!-- Area chart: cost over time -->
-    <UCard v-if="areaData.length > 1">
+    <UCard v-if="areaData.length > 0">
       <template #header>
         <span class="text-sm font-medium">Cost over time</span>
       </template>
@@ -169,35 +158,36 @@ onMounted(() => fetchAll())
       />
     </UCard>
 
-    <!-- Breakdown: model + key donuts -->
+    <!-- Breakdown: model + key distributions -->
     <div v-if="hasData" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      <UCard v-if="modelDonutData.length > 0">
+      <UCard v-if="modelCategories.length > 0">
         <template #header>
           <span class="text-sm font-medium">Cost by model</span>
         </template>
-        <div class="flex justify-center">
-          <DonutChart
-            :data="modelDonutData"
-            :radius="90"
-            :arc-width="30"
-            :categories="modelDonutCategories"
-          />
-        </div>
+        <CategoryDistribution
+          :primary-value="formatCost(totalCost)"
+          :categories="modelCategories"
+          :gap="2"
+        />
       </UCard>
 
-      <UCard v-if="keyDonutData.length > 0">
+      <UCard v-if="keyCategories.length > 0">
         <template #header>
           <span class="text-sm font-medium">Cost by key</span>
         </template>
-        <div class="flex justify-center">
-          <DonutChart
-            :data="keyDonutData"
-            :radius="90"
-            :arc-width="30"
-            :categories="keyDonutCategories"
-          />
-        </div>
+        <CategoryDistribution
+          :primary-value="formatCost(totalCost)"
+          :categories="keyCategories"
+          :gap="2"
+        />
       </UCard>
     </div>
   </div>
 </template>
+
+<style scoped>
+:deep() {
+  --vis-dark-axis-grid-color: rgba(108, 119, 140, 0.25);
+  --vis-axis-grid-color: rgba(200, 200, 210, 0.3);
+}
+</style>

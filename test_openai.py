@@ -9,8 +9,9 @@ api_key = os.getenv("PROXY_API_KEY")
 if not api_key:
     raise ValueError("PROXY_API_KEY environment variable is required")
 
+base_url = os.getenv("PROXY_BASE_URL", "http://127.0.0.1:4096")
 client = OpenAI(
-    base_url="http://127.0.0.1:4096/v1",
+    base_url=f"{base_url}/v1",
     api_key=api_key
 )
 

@@ -1441,17 +1441,39 @@ pub async fn get_usage_history_timeseries(
         });
     };
 
-    let mut points = Vec::new();
+    let mut data_map = std::collections::HashMap::new();
     while let Ok(Some(row)) = rows.next().await {
-        points.push(TimeseriesPoint {
-            timestamp: get_u64(&row, 0),
-            request_count: get_u64(&row, 1),
-            cost_microdollars: get_u64(&row, 2),
-            input_tokens: get_u64(&row, 3),
-            output_tokens: get_u64(&row, 4),
-            cache_read_tokens: get_u64(&row, 5),
-            cache_write_tokens: get_u64(&row, 6),
-        });
+        let ts = get_u64(&row, 0);
+        data_map.insert(
+            ts,
+            TimeseriesPoint {
+                timestamp: ts,
+                request_count: get_u64(&row, 1),
+                cost_microdollars: get_u64(&row, 2),
+                input_tokens: get_u64(&row, 3),
+                output_tokens: get_u64(&row, 4),
+                cache_read_tokens: get_u64(&row, 5),
+                cache_write_tokens: get_u64(&row, 6),
+            },
+        );
+    }
+
+    // Fill empty buckets across the full time range
+    let bucket_start = (cutoff / bucket_ms) * bucket_ms;
+    let bucket_end = (now / bucket_ms) * bucket_ms;
+    let mut points = Vec::new();
+    let mut ts = bucket_start;
+    while ts <= bucket_end {
+        points.push(data_map.remove(&ts).unwrap_or(TimeseriesPoint {
+            timestamp: ts,
+            request_count: 0,
+            cost_microdollars: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+        }));
+        ts += bucket_ms;
     }
 
     Json(TimeseriesResponse {
