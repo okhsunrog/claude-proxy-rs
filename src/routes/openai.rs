@@ -121,7 +121,11 @@ pub async fn chat_completions(
         };
 
         // Record token usage (per-model; global is derived via aggregation)
-        let usage_report = TokenUsageReport::from_anthropic_usage(&anthropic_response.usage);
+        let usage_report = anthropic_response
+            .usage
+            .as_ref()
+            .map(TokenUsageReport::from_usage)
+            .unwrap_or_default();
         let window_resets = crate::routes::admin::get_or_refresh_window_resets(&state).await;
 
         if let Err(e) = state

@@ -7,7 +7,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::models::ModelPricing;
-use crate::transforms::AnthropicUsage;
+use llm_relay::Usage;
 
 /// Weight applied to cache read tokens (they cost 0.1x of regular input)
 const CACHE_READ_WEIGHT: f64 = 0.1;
@@ -88,13 +88,13 @@ impl TokenUsageReport {
         }
     }
 
-    /// Parse from the typed AnthropicUsage struct (from transforms module).
-    pub fn from_anthropic_usage(usage: &AnthropicUsage) -> Self {
+    /// Parse from the typed Usage struct (from llm-relay).
+    pub fn from_usage(usage: &Usage) -> Self {
         Self {
-            input_tokens: usage.input_tokens as u64,
-            output_tokens: usage.output_tokens as u64,
-            cache_creation_tokens: usage.cache_creation_input_tokens.unwrap_or(0) as u64,
-            cache_read_tokens: usage.cache_read_input_tokens.unwrap_or(0) as u64,
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            cache_creation_tokens: usage.cache_creation_input_tokens.unwrap_or(0),
+            cache_read_tokens: usage.cache_read_input_tokens.unwrap_or(0),
         }
     }
 
