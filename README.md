@@ -28,6 +28,7 @@ Use your existing Claude Pro/Max subscription with AI coding assistants and tool
 - **Per-key cost-based rate limiting** (5-hour/weekly/total limits in USD, synced with subscription windows)
 - **Per-key model access control** (allow all or whitelist specific models)
 - **Per-model usage tracking** with cost calculation (input/output/cache pricing)
+- **Usage history** — time-series charts for cost and tokens, breakdowns by model and API key (24h/7d/30d)
 - **Dynamic model management** (add/remove models, configure per-token pricing)
 - Key enable/disable toggle
 - Configurable cloaking mode (`always`/`never`/`auto`)
