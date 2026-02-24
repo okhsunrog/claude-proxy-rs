@@ -7,6 +7,7 @@ use axum::{
 };
 use serde_json::{Value, json};
 use std::sync::Arc;
+use tracing::warn;
 
 use llm_relay::MessagesResponse;
 use llm_relay::types::openai::InboundChatRequest;
@@ -21,8 +22,13 @@ use crate::transforms::{
 
 use super::auth::{authenticate_openai, build_anthropic_request};
 
-pub async fn list_models(State(state): State<Arc<AppState>>) -> Json<Value> {
-    let model_ids = state.models.list_enabled_ids().await;
+pub async fn list_models(State(state): State<Arc<AppState>>) -> Response {
+    let model_ids = match state.models.list_enabled_ids().await {
+        Ok(ids) => ids,
+        Err(e) => {
+            return ProxyError::DatabaseError(e.to_string()).to_openai_response();
+        }
+    };
     let models: Vec<Value> = model_ids
         .iter()
         .map(|id| {
@@ -38,6 +44,7 @@ pub async fn list_models(State(state): State<Arc<AppState>>) -> Json<Value> {
         "object": "list",
         "data": models
     }))
+    .into_response()
 }
 
 pub async fn chat_completions(
@@ -124,14 +131,14 @@ pub async fn chat_completions(
 
         // Record token usage (per-model; global is derived via aggregation)
         let usage_report = anthropic_response.usage.clone().unwrap_or_default();
-        let window_resets = crate::routes::admin::get_or_refresh_window_resets(&state).await;
+        let window_resets = crate::subscription::get_or_refresh_window_resets(&state).await;
 
         if let Err(e) = state
             .client_keys
             .record_model_usage(&auth.client_key.id, &model, &usage_report, &window_resets)
             .await
         {
-            tracing::warn!(
+            warn!(
                 "Failed to record model usage for key {}/{model}: {e}",
                 auth.client_key.id
             );

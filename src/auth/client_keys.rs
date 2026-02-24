@@ -2,13 +2,13 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::time::{SystemTime, UNIX_EPOCH};
 use subtle::ConstantTimeEq;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::db;
 use crate::error::ProxyError;
+use crate::subscription::timestamp_millis;
 
 /// Token usage limits for a client key (all optional, in microdollars)
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
@@ -74,13 +74,6 @@ pub struct ClientKey {
 
 pub struct ClientKeysStore;
 
-pub(crate) fn timestamp_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64
-}
-
 /// Helper to read a nullable i64 column as Option<u64>
 pub(crate) fn opt_u64(row: &turso::Row, idx: usize) -> Option<u64> {
     row.get::<Option<i64>>(idx).ok().flatten().map(|v| v as u64)
@@ -127,16 +120,12 @@ impl ClientKeysStore {
         Self
     }
 
-    pub async fn list(&self) -> Vec<ClientKey> {
-        let Ok(conn) = db::get_conn().await else {
-            return Vec::new();
-        };
-        let Ok(mut rows) = conn
+    pub async fn list(&self) -> Result<Vec<ClientKey>, ProxyError> {
+        let conn = db::get_conn().await?;
+        let mut rows = conn
             .query(&format!("SELECT {SELECT_ALL_COLS} FROM client_keys"), ())
             .await
-        else {
-            return Vec::new();
-        };
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to list keys: {e}")))?;
 
         let mut keys = Vec::new();
         while let Ok(Some(row)) = rows.next().await {
@@ -144,7 +133,7 @@ impl ClientKeysStore {
                 keys.push(key);
             }
         }
-        keys
+        Ok(keys)
     }
 
     pub async fn create(&self, name: String) -> Result<ClientKey, ProxyError> {
@@ -214,19 +203,15 @@ impl ClientKeysStore {
 
     /// Validate an API key using constant-time comparison to prevent timing attacks.
     /// Fetches all enabled keys and compares in constant time.
-    pub async fn validate(&self, key: &str) -> Option<ClientKey> {
-        let Ok(conn) = db::get_conn().await else {
-            return None;
-        };
-        let Ok(mut rows) = conn
+    pub async fn validate(&self, key: &str) -> Result<Option<ClientKey>, ProxyError> {
+        let conn = db::get_conn().await?;
+        let mut rows = conn
             .query(
                 &format!("SELECT {SELECT_ALL_COLS} FROM client_keys WHERE enabled = 1"),
                 (),
             )
             .await
-        else {
-            return None;
-        };
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to validate key: {e}")))?;
 
         let mut result = None;
         while let Ok(Some(row)) = rows.next().await {
@@ -237,7 +222,7 @@ impl ClientKeysStore {
             }
             // Continue iterating all rows to maintain constant time
         }
-        result
+        Ok(result)
     }
 
     pub async fn update_last_used(&self, id: &str) -> Result<(), ProxyError> {
@@ -252,17 +237,23 @@ impl ClientKeysStore {
         Ok(())
     }
 
-    pub async fn get(&self, id: &str) -> Option<ClientKey> {
-        let conn = db::get_conn().await.ok()?;
+    pub async fn get(&self, id: &str) -> Result<Option<ClientKey>, ProxyError> {
+        let conn = db::get_conn().await?;
         let mut rows = conn
             .query(
                 &format!("SELECT {SELECT_ALL_COLS} FROM client_keys WHERE id = ?"),
                 [id],
             )
             .await
-            .ok()?;
-        let row = rows.next().await.ok()??;
-        row_to_client_key(&row)
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to get key: {e}")))?;
+        let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to read key row: {e}")))?
+        else {
+            return Ok(None);
+        };
+        Ok(row_to_client_key(&row))
     }
 
     /// Update limits for a key

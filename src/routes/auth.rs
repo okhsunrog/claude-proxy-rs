@@ -1,6 +1,7 @@
 use axum::http::{HeaderMap, header};
 use reqwest::{Client, RequestBuilder};
 use std::sync::Arc;
+use tracing::warn;
 
 use crate::AppState;
 use crate::auth::ClientKey;
@@ -50,11 +51,11 @@ async fn authenticate_key(
     let client_key = state
         .client_keys
         .validate(key)
-        .await
+        .await?
         .ok_or(ProxyError::InvalidApiKey)?;
 
     // Get window resets for limit checks
-    let window_resets = crate::routes::admin::get_or_refresh_window_resets(state).await;
+    let window_resets = crate::subscription::get_or_refresh_window_resets(state).await;
 
     // Check global limits (cost-based, derived from per-model aggregation)
     if let Err(msg) = state
@@ -66,7 +67,7 @@ async fn authenticate_key(
     }
 
     // Check model exists and is enabled
-    if !state.models.is_valid(model).await {
+    if !state.models.is_valid(model).await? {
         return Err(ProxyError::InvalidModel(model.to_string()));
     }
 
@@ -74,7 +75,7 @@ async fn authenticate_key(
     if !state
         .client_keys
         .is_model_allowed(&client_key.id, model)
-        .await
+        .await?
     {
         return Err(ProxyError::ModelNotAllowed(model.to_string()));
     }
@@ -90,7 +91,7 @@ async fn authenticate_key(
 
     // Block keys without extra-usage permission when subscription limits are exhausted
     if !client_key.allow_extra_usage {
-        let sub = crate::routes::admin::fetch_fresh_subscription_state(state).await;
+        let sub = crate::subscription::fetch_fresh_subscription_state(state).await;
         let is_over = sub.five_hour_utilization.is_some_and(|u| u >= 100.0)
             || sub.seven_day_utilization.is_some_and(|u| u >= 100.0);
         if is_over {
@@ -101,7 +102,7 @@ async fn authenticate_key(
     }
 
     if let Err(e) = state.client_keys.update_last_used(&client_key.id).await {
-        tracing::warn!("Failed to update last_used for key {}: {e}", client_key.id);
+        warn!("Failed to update last_used for key {}: {e}", client_key.id);
     }
 
     let token = get_oauth_token(state).await?;

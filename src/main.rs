@@ -4,6 +4,7 @@ mod constants;
 mod db;
 mod error;
 mod routes;
+mod subscription;
 mod transforms;
 
 use auth::{AuthStore, ClientKeysStore, ModelsStore, OAuthManager};
@@ -27,7 +28,7 @@ use subtle::ConstantTimeEq;
 use tokio::sync::RwLock;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::normalize_path::NormalizePath;
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
@@ -38,16 +39,11 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const GIT_HASH: &str = env!("GIT_HASH");
 pub const BUILD_TIME: &str = env!("BUILD_TIME");
 
-/// Cached subscription state: window reset times (epoch ms) and utilization percentages.
-/// Used to sync per-key rate-limit windows and enforce extra-usage restrictions.
-#[derive(Debug, Clone, Default)]
-pub struct SubscriptionState {
-    pub five_hour_reset_at: Option<u64>,
-    pub seven_day_reset_at: Option<u64>,
-    /// 5-hour utilization percentage (0.0–100.0+)
-    pub five_hour_utilization: Option<f64>,
-    /// 7-day utilization percentage (0.0–100.0+)
-    pub seven_day_utilization: Option<f64>,
+use subscription::SubscriptionState;
+
+pub struct AdminCredentials {
+    pub username: String,
+    pub password: String,
 }
 
 pub struct AppState {
@@ -56,7 +52,7 @@ pub struct AppState {
     pub models: Arc<ModelsStore>,
     pub oauth: OAuthManager,
     pub http_client: Client,
-    pub admin_credentials: (String, String),
+    pub admin_credentials: AdminCredentials,
     /// Whether to set Secure flag on cookies (true when not binding to localhost)
     pub secure_cookies: bool,
     /// When true, admin auth middleware is bypassed (for local development)
@@ -91,7 +87,7 @@ pub async fn save_session(token: &str, expires_at: u64) {
             )
             .await
     {
-        tracing::warn!("Failed to save session: {e}");
+        warn!("Failed to save session: {e}");
     }
 }
 
@@ -177,7 +173,7 @@ async fn admin_auth_middleware(
         return next.run(request).await;
     }
 
-    let (username, password) = &state.admin_credentials;
+    let creds = &state.admin_credentials;
 
     // Check for session cookie first
     if let Some(cookie_header) = request
@@ -217,8 +213,8 @@ async fn admin_auth_middleware(
     };
 
     // Constant-time comparison to prevent timing attacks
-    let user_match = provided_user.as_bytes().ct_eq(username.as_bytes());
-    let pass_match = provided_pass.as_bytes().ct_eq(password.as_bytes());
+    let user_match = provided_user.as_bytes().ct_eq(creds.username.as_bytes());
+    let pass_match = provided_pass.as_bytes().ct_eq(creds.password.as_bytes());
 
     if user_match.into() && pass_match.into() {
         next.run(request).await
@@ -255,7 +251,6 @@ async fn main() {
     let auth_store = Arc::new(AuthStore::new());
     let client_keys = Arc::new(ClientKeysStore::new());
     let models = Arc::new(ModelsStore::new());
-    let oauth = OAuthManager::new(auth_store.clone());
 
     // Shared HTTP client with connection pooling
     let http_client = Client::builder()
@@ -264,14 +259,19 @@ async fn main() {
         .build()
         .expect("Failed to create HTTP client");
 
-    let admin_credentials = (config.admin_username, config.admin_password);
+    let oauth = OAuthManager::new(http_client.clone(), auth_store.clone());
+
+    let admin_credentials = AdminCredentials {
+        username: config.admin_username,
+        password: config.admin_password,
+    };
 
     let is_localhost = matches!(host.as_str(), "127.0.0.1" | "localhost" | "::1");
     let secure_cookies = !is_localhost;
 
     let disable_auth = config.disable_auth;
     if disable_auth {
-        tracing::warn!("Admin authentication is DISABLED (CLAUDE_PROXY_DISABLE_AUTH=1)");
+        warn!("Admin authentication is DISABLED (CLAUDE_PROXY_DISABLE_AUTH=1)");
     }
 
     let cloak_mode = config.cloak_mode;

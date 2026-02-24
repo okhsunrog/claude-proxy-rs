@@ -5,11 +5,12 @@ use turso::Connection;
 use utoipa::ToSchema;
 
 use super::client_keys::{
-    ClientKeysStore, TokenLimits, TokenUsage, UsageResetType, get_u64, opt_u64, timestamp_millis,
+    ClientKeysStore, TokenLimits, TokenUsage, UsageResetType, get_u64, opt_u64,
 };
 use crate::SubscriptionState;
 use crate::db;
 use crate::error::ProxyError;
+use crate::subscription::timestamp_millis;
 
 // ============================================================================
 // Structs
@@ -427,10 +428,15 @@ impl ClientKeysStore {
     }
 
     /// Get usage statistics for a key (derived from request_log aggregation)
-    pub async fn get_usage(&self, id: &str) -> Option<(TokenLimits, TokenUsage)> {
+    pub async fn get_usage(
+        &self,
+        id: &str,
+    ) -> Result<Option<(TokenLimits, TokenUsage)>, ProxyError> {
         let now = timestamp_millis();
-        let key = self.get(id).await?;
-        let conn = db::get_conn().await.ok()?;
+        let Some(key) = self.get(id).await? else {
+            return Ok(None);
+        };
+        let conn = db::get_conn().await?;
 
         // Read count_from values
         let mut rows = conn
@@ -439,8 +445,13 @@ impl ClientKeysStore {
                 [id],
             )
             .await
-            .ok()?;
-        let count_from_row = rows.next().await.ok()??;
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to read count_from: {e}")))?;
+        let Some(count_from_row) = rows.next().await.map_err(|e| {
+            ProxyError::DatabaseError(format!("Failed to read count_from row: {e}"))
+        })?
+        else {
+            return Ok(None);
+        };
         let five_hour_count_from = get_u64(&count_from_row, 0);
         let weekly_count_from = get_u64(&count_from_row, 1);
         let total_count_from = get_u64(&count_from_row, 2);
@@ -466,9 +477,9 @@ impl ClientKeysStore {
         };
 
         let (five_hour_cost, weekly_cost, total_cost) =
-            aggregate_usage_costs(&conn, id, &ws).await.ok()?;
+            aggregate_usage_costs(&conn, id, &ws).await?;
 
-        Some((
+        Ok(Some((
             key.limits,
             TokenUsage {
                 five_hour_tokens: if five_hour_expired { 0 } else { five_hour_cost },
@@ -477,7 +488,7 @@ impl ClientKeysStore {
                 weekly_reset_at,
                 total_tokens: total_cost,
             },
-        ))
+        )))
     }
 
     /// Reset usage for a key by advancing count_from timestamps.
@@ -522,26 +533,22 @@ impl ClientKeysStore {
     // ========================================================================
 
     /// Get allowed models for a key. Empty vec means "all models allowed".
-    pub async fn get_allowed_models(&self, key_id: &str) -> Vec<String> {
-        let Ok(conn) = db::get_conn().await else {
-            return Vec::new();
-        };
-        let Ok(mut rows) = conn
+    pub async fn get_allowed_models(&self, key_id: &str) -> Result<Vec<String>, ProxyError> {
+        let conn = db::get_conn().await?;
+        let mut rows = conn
             .query(
                 "SELECT model FROM key_allowed_models WHERE key_id = ?",
                 [key_id],
             )
             .await
-        else {
-            return Vec::new();
-        };
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to get allowed models: {e}")))?;
         let mut models = Vec::new();
         while let Ok(Some(row)) = rows.next().await {
             if let Ok(model) = row.get::<String>(0) {
                 models.push(model);
             }
         }
-        models
+        Ok(models)
     }
 
     /// Set allowed models for a key. Empty vec = allow all.
@@ -572,20 +579,16 @@ impl ClientKeysStore {
 
     /// Check if a specific model is allowed for a key.
     /// If no rows exist in key_allowed_models for this key, all models are allowed.
-    pub async fn is_model_allowed(&self, key_id: &str, model: &str) -> bool {
-        let Ok(conn) = db::get_conn().await else {
-            return false;
-        };
+    pub async fn is_model_allowed(&self, key_id: &str, model: &str) -> Result<bool, ProxyError> {
+        let conn = db::get_conn().await?;
         // Count total allowed models for this key
-        let Ok(mut rows) = conn
+        let mut rows = conn
             .query(
                 "SELECT COUNT(*) FROM key_allowed_models WHERE key_id = ?",
                 [key_id],
             )
             .await
-        else {
-            return false;
-        };
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to check model access: {e}")))?;
         let total: i64 = rows
             .next()
             .await
@@ -595,26 +598,25 @@ impl ClientKeysStore {
             .unwrap_or(0);
 
         if total == 0 {
-            return true; // No whitelist = allow all
+            return Ok(true); // No whitelist = allow all
         }
 
         // Check if this specific model is in the whitelist
-        let Ok(mut rows) = conn
+        let mut rows = conn
             .query(
                 "SELECT COUNT(*) FROM key_allowed_models WHERE key_id = ? AND model = ?",
                 (key_id, model),
             )
             .await
-        else {
-            return false;
-        };
-        rows.next()
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to check model access: {e}")))?;
+        let count = rows
+            .next()
             .await
             .ok()
             .flatten()
             .and_then(|r| r.get::<i64>(0).ok())
-            .unwrap_or(0)
-            > 0
+            .unwrap_or(0);
+        Ok(count > 0)
     }
 
     // ========================================================================
@@ -702,24 +704,24 @@ impl ClientKeysStore {
     }
 
     /// Get per-model usage entries for a key (from request_log + key_model_limits)
-    pub async fn get_model_usage(&self, key_id: &str) -> Vec<ModelUsageEntry> {
+    pub async fn get_model_usage(&self, key_id: &str) -> Result<Vec<ModelUsageEntry>, ProxyError> {
         let now = timestamp_millis();
-        let Ok(conn) = db::get_conn().await else {
-            return Vec::new();
-        };
+        let conn = db::get_conn().await?;
 
         // Read window state from client_keys
-        let Ok(mut ts_rows) = conn
+        let mut ts_rows = conn
             .query(
                 "SELECT five_hour_reset_at, weekly_reset_at, five_hour_count_from, weekly_count_from, total_count_from FROM client_keys WHERE id = ?",
                 [key_id],
             )
             .await
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to read window state: {e}")))?;
+        let Some(ts_row) = ts_rows
+            .next()
+            .await
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to read window row: {e}")))?
         else {
-            return Vec::new();
-        };
-        let Some(ts_row) = ts_rows.next().await.ok().flatten() else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
         let five_hour_reset_at = get_u64(&ts_row, 0);
         let weekly_reset_at = get_u64(&ts_row, 1);
@@ -742,15 +744,13 @@ impl ClientKeysStore {
         };
 
         // Read per-model limits and count_from
-        let Ok(mut limit_rows) = conn
+        let mut limit_rows = conn
             .query(
                 "SELECT model, five_hour_limit, weekly_limit, total_limit, count_from FROM key_model_limits WHERE key_id = ?",
                 [key_id],
             )
             .await
-        else {
-            return Vec::new();
-        };
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to read model limits: {e}")))?;
 
         let mut model_limits: Vec<(String, TokenLimits, u64)> = Vec::new();
         while let Ok(Some(row)) = limit_rows.next().await {
@@ -774,7 +774,7 @@ impl ClientKeysStore {
             .min(total_count_from);
 
         // Query aggregated usage from request_log grouped by model
-        let Ok(mut usage_rows) = conn
+        let mut usage_rows = conn
             .query(
                 "SELECT model, \
                      SUM(CASE WHEN created_at >= ?1 THEN input_tokens ELSE 0 END), \
@@ -799,9 +799,7 @@ impl ClientKeysStore {
                 ),
             )
             .await
-        else {
-            return Vec::new();
-        };
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to query model usage: {e}")))?;
 
         // Collect usage data from request_log
         let mut usage_map: std::collections::HashMap<
@@ -870,7 +868,7 @@ impl ClientKeysStore {
                 weekly_reset_at: if weekly_expired { 0 } else { weekly_reset_at },
             });
         }
-        entries
+        Ok(entries)
     }
 
     /// Set per-model limits for a key (UPSERT into key_model_limits)

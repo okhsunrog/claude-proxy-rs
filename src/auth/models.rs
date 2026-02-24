@@ -34,19 +34,15 @@ impl ModelsStore {
     }
 
     /// List all models ordered by sort_order
-    pub async fn list(&self) -> Vec<Model> {
-        let Ok(conn) = db::get_conn().await else {
-            return Vec::new();
-        };
-        let Ok(mut rows) = conn
+    pub async fn list(&self) -> Result<Vec<Model>, ProxyError> {
+        let conn = db::get_conn().await?;
+        let mut rows = conn
             .query(
                 "SELECT id, sort_order, enabled, input_price, output_price, cache_read_price, cache_write_price FROM models ORDER BY sort_order",
                 (),
             )
             .await
-        else {
-            return Vec::new();
-        };
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to list models: {e}")))?;
 
         let mut models = Vec::new();
         while let Ok(Some(row)) = rows.next().await {
@@ -62,23 +58,19 @@ impl ModelsStore {
                 });
             }
         }
-        models
+        Ok(models)
     }
 
     /// List only enabled models (for API endpoints)
-    pub async fn list_enabled(&self) -> Vec<Model> {
-        let Ok(conn) = db::get_conn().await else {
-            return Vec::new();
-        };
-        let Ok(mut rows) = conn
+    pub async fn list_enabled(&self) -> Result<Vec<Model>, ProxyError> {
+        let conn = db::get_conn().await?;
+        let mut rows = conn
             .query(
                 "SELECT id, sort_order, enabled, input_price, output_price, cache_read_price, cache_write_price FROM models WHERE enabled = 1 ORDER BY sort_order",
                 (),
             )
             .await
-        else {
-            return Vec::new();
-        };
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to list enabled models: {e}")))?;
 
         let mut models = Vec::new();
         while let Ok(Some(row)) = rows.next().await {
@@ -94,23 +86,19 @@ impl ModelsStore {
                 });
             }
         }
-        models
+        Ok(models)
     }
 
     /// List only enabled model IDs (for /v1/models endpoint)
-    pub async fn list_enabled_ids(&self) -> Vec<String> {
-        let Ok(conn) = db::get_conn().await else {
-            return Vec::new();
-        };
-        let Ok(mut rows) = conn
+    pub async fn list_enabled_ids(&self) -> Result<Vec<String>, ProxyError> {
+        let conn = db::get_conn().await?;
+        let mut rows = conn
             .query(
                 "SELECT id FROM models WHERE enabled = 1 ORDER BY sort_order",
                 (),
             )
             .await
-        else {
-            return Vec::new();
-        };
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to list model IDs: {e}")))?;
 
         let mut ids = Vec::new();
         while let Ok(Some(row)) = rows.next().await {
@@ -118,7 +106,7 @@ impl ModelsStore {
                 ids.push(id);
             }
         }
-        ids
+        Ok(ids)
     }
 
     /// Get pricing for a model (for cost calculation)
@@ -246,25 +234,22 @@ impl ModelsStore {
     }
 
     /// Check if a model exists and is enabled
-    pub async fn is_valid(&self, model_id: &str) -> bool {
-        let Ok(conn) = db::get_conn().await else {
-            return false;
-        };
-        let Ok(mut rows) = conn
+    pub async fn is_valid(&self, model_id: &str) -> Result<bool, ProxyError> {
+        let conn = db::get_conn().await?;
+        let mut rows = conn
             .query(
                 "SELECT COUNT(*) FROM models WHERE id = ? AND enabled = 1",
                 [model_id],
             )
             .await
-        else {
-            return false;
-        };
-        rows.next()
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to check model: {e}")))?;
+        let count = rows
+            .next()
             .await
             .ok()
             .flatten()
             .and_then(|r| r.get::<i64>(0).ok())
-            .unwrap_or(0)
-            > 0
+            .unwrap_or(0);
+        Ok(count > 0)
     }
 }

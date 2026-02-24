@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
+use tracing::warn;
 
 use super::storage::{Auth, AuthStore};
 use crate::error::ProxyError;
@@ -32,9 +33,9 @@ pub struct OAuthManager {
 }
 
 impl OAuthManager {
-    pub fn new(auth_store: Arc<AuthStore>) -> Self {
+    pub fn new(client: Client, auth_store: Arc<AuthStore>) -> Self {
         Self {
-            client: Client::new(),
+            client,
             verifier: RwLock::new(None),
             auth_store,
         }
@@ -188,7 +189,7 @@ impl OAuthManager {
             // clear the stale credentials so the UI shows "Connect" instead
             // of endlessly failing.
             if text.contains("invalid_grant") {
-                tracing::warn!("OAuth refresh token is invalid, clearing stale credentials");
+                warn!("OAuth refresh token is invalid, clearing stale credentials");
                 let _ = self.auth_store.remove("anthropic").await;
                 return Ok(None);
             }
@@ -222,6 +223,6 @@ impl OAuthManager {
     }
 
     pub async fn is_authenticated(&self) -> bool {
-        self.auth_store.has("anthropic").await
+        self.auth_store.has("anthropic").await.unwrap_or(false)
     }
 }

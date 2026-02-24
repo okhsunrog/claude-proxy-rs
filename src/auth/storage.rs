@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 use crate::db;
 use crate::error::ProxyError;
@@ -104,7 +105,7 @@ impl AuthStore {
                         )
                         .await
                 {
-                    tracing::warn!("Failed to save account_id for {provider}: {e}");
+                    warn!("Failed to save account_id for {provider}: {e}");
                 }
                 if let Some(eurl) = enterprise_url
                     && let Err(e) = conn
@@ -114,7 +115,7 @@ impl AuthStore {
                         )
                         .await
                 {
-                    tracing::warn!("Failed to save enterprise_url for {provider}: {e}");
+                    warn!("Failed to save enterprise_url for {provider}: {e}");
                 }
             }
             Auth::Api { key } => {
@@ -148,17 +149,13 @@ impl AuthStore {
         Ok(())
     }
 
-    pub async fn has(&self, provider: &str) -> bool {
-        let Ok(conn) = db::get_conn().await else {
-            return false;
-        };
-        let Ok(mut rows) = conn
+    pub async fn has(&self, provider: &str) -> Result<bool, ProxyError> {
+        let conn = db::get_conn().await?;
+        let mut rows = conn
             .query("SELECT 1 FROM auth WHERE provider = ? LIMIT 1", [provider])
             .await
-        else {
-            return false;
-        };
-        rows.next().await.ok().flatten().is_some()
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to check auth: {e}")))?;
+        Ok(rows.next().await.ok().flatten().is_some())
     }
 
     pub async fn update_tokens(

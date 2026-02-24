@@ -7,6 +7,7 @@ use axum::{
 };
 use serde_json::Value;
 use std::sync::Arc;
+use tracing::{debug, warn};
 
 use llm_relay::convert::tool_names::transform_response_tool_names;
 
@@ -49,7 +50,7 @@ pub async fn messages(
     // Log outgoing request body keys for debugging
     if let Some(obj) = prepared.body.as_object() {
         let keys: Vec<&String> = obj.keys().collect();
-        tracing::debug!(model = %model, stream = %stream, "Forwarding to Anthropic with body keys: {keys:?}");
+        debug!(model = %model, stream = %stream, "Forwarding to Anthropic with body keys: {keys:?}");
     }
 
     let req_builder = build_anthropic_request(
@@ -71,7 +72,7 @@ pub async fn messages(
     if !response.status().is_success() {
         let status = response.status();
         let text: String = response.text().await.unwrap_or_default();
-        tracing::warn!(
+        warn!(
             status = %status, model = %model,
             "Anthropic API error: {text}"
         );
@@ -108,14 +109,14 @@ pub async fn messages(
         // Record token usage (per-model; global is derived via aggregation)
         if let Some(usage) = json_response.get("usage") {
             let usage_report = usage_from_json(usage);
-            let window_resets = crate::routes::admin::get_or_refresh_window_resets(&state).await;
+            let window_resets = crate::subscription::get_or_refresh_window_resets(&state).await;
 
             if let Err(e) = state
                 .client_keys
                 .record_model_usage(&auth.client_key.id, &model, &usage_report, &window_resets)
                 .await
             {
-                tracing::warn!(
+                warn!(
                     "Failed to record model usage for key {}/{model}: {e}",
                     auth.client_key.id
                 );
