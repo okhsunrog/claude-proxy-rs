@@ -16,9 +16,11 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::interval;
 
-use super::tool_names::strip_mcp_prefix;
+use llm_relay::Usage;
+use llm_relay::convert::tool_names::strip_mcp_prefix;
+
 use crate::AppState;
-use crate::auth::{StreamUsageData, TokenUsageReport};
+use crate::auth::usage::{add_usage, usage_from_json};
 
 /// Keep-alive interval for SSE streams (prevents proxy/load balancer timeouts).
 const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
@@ -70,8 +72,8 @@ struct MessageInfo {
     usage: Option<StreamUsage>,
 }
 
-/// Alias for usage data from streaming events (uses centralized type)
-type StreamUsage = StreamUsageData;
+/// Alias for usage data from streaming events.
+type StreamUsage = Usage;
 
 // ============================================================================
 // Stream Transformations
@@ -101,7 +103,7 @@ pub fn stream_anthropic_to_openai_with_usage(
         let mut buffer = String::new();
         let mut current_tool_call_id: Option<String> = None;
         let mut tool_call_index: u32 = 0;
-        let mut usage_report = TokenUsageReport::new();
+        let mut usage_report = Usage::default();
 
         let mut body = std::pin::pin!(body);
         let mut keep_alive = interval(KEEP_ALIVE_INTERVAL);
@@ -156,14 +158,14 @@ pub fn stream_anthropic_to_openai_with_usage(
                             && let Some(msg) = &event.message
                             && let Some(usage) = &msg.usage
                         {
-                            usage_report.add(&TokenUsageReport::from_stream_usage(usage));
+                            add_usage(&mut usage_report, usage);
                         }
 
                         // Capture usage from message_delta event (output tokens)
                         if event.event_type == "message_delta"
                             && let Some(usage) = &event.usage
                         {
-                            usage_report.add(&TokenUsageReport::from_stream_usage(usage));
+                            add_usage(&mut usage_report, usage);
                         }
 
                         match event.event_type.as_str() {
@@ -344,7 +346,7 @@ pub fn stream_strip_mcp_prefix_with_usage(
         let mut buffer = String::new();
         let mut keep_alive = interval(KEEP_ALIVE_INTERVAL);
         keep_alive.reset(); // Don't fire immediately
-        let mut usage_report = TokenUsageReport::new();
+        let mut usage_report = Usage::default();
 
         loop {
             tokio::select! {
@@ -390,14 +392,14 @@ pub fn stream_strip_mcp_prefix_with_usage(
                                         .get("message")
                                         .and_then(|m| m.get("usage"))
                                 {
-                                    usage_report.add(&TokenUsageReport::from_json(usage));
+                                    add_usage(&mut usage_report, &usage_from_json(usage));
                                 }
 
                                 // Capture usage from message_delta event
                                 if event.get("type").and_then(|t| t.as_str()) == Some("message_delta")
                                     && let Some(usage) = event.get("usage")
                                 {
-                                    usage_report.add(&TokenUsageReport::from_json(usage));
+                                    add_usage(&mut usage_report, &usage_from_json(usage));
                                 }
                             }
                         }

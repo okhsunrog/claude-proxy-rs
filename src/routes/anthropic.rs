@@ -8,11 +8,12 @@ use axum::{
 use serde_json::Value;
 use std::sync::Arc;
 
+use llm_relay::convert::tool_names::transform_response_tool_names;
+
 use crate::AppState;
-use crate::auth::TokenUsageReport;
+use crate::auth::usage::usage_from_json;
 use crate::constants::{ANTHROPIC_API_URL, ANTHROPIC_COUNT_TOKENS_URL};
 use crate::error::ProxyError;
-use crate::transforms::tool_names::transform_response_tool_names;
 use crate::transforms::{
     prepare_anthropic_request, prepare_count_tokens_request, stream_strip_mcp_prefix_with_usage,
 };
@@ -106,7 +107,7 @@ pub async fn messages(
 
         // Record token usage (per-model; global is derived via aggregation)
         if let Some(usage) = json_response.get("usage") {
-            let usage_report = TokenUsageReport::from_json(usage);
+            let usage_report = usage_from_json(usage);
             let window_resets = crate::routes::admin::get_or_refresh_window_resets(&state).await;
 
             if let Err(e) = state

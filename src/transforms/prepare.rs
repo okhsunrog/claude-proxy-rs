@@ -9,10 +9,13 @@
 //! - Injecting system message prefix
 //! - Auto-injecting cache_control breakpoints for optimal caching
 
+use rand::Rng;
 use serde_json::{Value, json};
+use uuid::Uuid;
 
-use super::common::{ensure_cache_control, generate_fake_user_id, is_valid_user_id};
-use super::tool_names::transform_request_tool_names;
+use llm_relay::convert::cache_control::ensure_cache_control;
+use llm_relay::convert::tool_names::transform_request_tool_names;
+
 use crate::constants::SYSTEM_PREFIX;
 
 /// Result of preparing a request for Anthropic API.
@@ -208,6 +211,35 @@ fn sanitize_system_only(mut body: Value) -> Value {
     body
 }
 
+/// Generate a fake user ID in Claude Code format.
+/// Format: user_[64-hex-chars]_account__session_[UUID-v4]
+fn generate_fake_user_id() -> String {
+    let mut rng = rand::rng();
+    let hex_bytes: [u8; 32] = rng.random();
+    let hex_part: String = hex_bytes.iter().map(|b| format!("{:02x}", b)).collect();
+    let uuid_part = Uuid::new_v4().to_string();
+    format!("user_{}_account__session_{}", hex_part, uuid_part)
+}
+
+/// Check if a user ID matches Claude Code format.
+/// Format: user_[64-hex]_account__session_[uuid-v4]
+fn is_valid_user_id(user_id: &str) -> bool {
+    let parts: Vec<&str> = user_id.split("_account__session_").collect();
+    if parts.len() != 2 {
+        return false;
+    }
+
+    // Check hex part
+    let hex_part = parts[0].strip_prefix("user_");
+    let valid_hex =
+        hex_part.is_some_and(|h| h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()));
+
+    // Check UUID part (basic validation)
+    let valid_uuid = parts[1].len() == 36 && parts[1].matches('-').count() == 4;
+
+    valid_hex && valid_uuid
+}
+
 /// Sanitize system prompt text blocks.
 /// The Anthropic OAuth backend blocks requests containing "OpenCode" in system prompts.
 fn sanitize_system(mut system: Value) -> Value {
@@ -312,5 +344,23 @@ mod tests {
         // Index 0 is prefix, 1 and 2 are user-provided
         assert!(!system[1]["text"].as_str().unwrap().contains("OpenCode"));
         assert!(!system[2]["text"].as_str().unwrap().contains("opencode"));
+    }
+
+    #[test]
+    fn test_generate_fake_user_id_format() {
+        let id = generate_fake_user_id();
+        assert!(id.starts_with("user_"));
+        assert!(id.contains("_account__session_"));
+        assert!(is_valid_user_id(&id));
+    }
+
+    #[test]
+    fn test_is_valid_user_id() {
+        let valid = "user_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef_account__session_12345678-1234-1234-1234-123456789012";
+        assert!(is_valid_user_id(valid));
+
+        assert!(!is_valid_user_id("invalid"));
+        assert!(!is_valid_user_id("user_short_account__session_uuid"));
+        assert!(!is_valid_user_id(""));
     }
 }

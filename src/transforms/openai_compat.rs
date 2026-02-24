@@ -5,29 +5,18 @@
 //! llm-relay; this module adds proxy-specific concerns (model suffix parsing,
 //! thinking config, max_tokens caps, mcp_ prefix stripping).
 
-use serde_json::Value;
-
-use super::tool_names::strip_mcp_prefix;
-use crate::constants::{DEFAULT_MAX_OUTPUT, OPUS_4_6_MAX_OUTPUT};
-
-// Re-export llm-relay types under the names used by the rest of the proxy.
-pub use llm_relay::types::openai::InboundChatRequest as OpenAIChatRequest;
-
-// Anthropic response — proxy uses MessagesResponse directly.
-pub use llm_relay::MessagesResponse as AnthropicResponse;
-
-// OpenAI response types
-pub use llm_relay::types::openai::ChatResponse as OpenAIChatResponse;
-
-// Thinking helpers from llm-relay
+use llm_relay::MessagesResponse;
 use llm_relay::convert::thinking::{
     build_thinking_for_model, build_thinking_params_json, parse_model_suffix,
     supports_adaptive_thinking,
 };
-
-// Core conversion
 use llm_relay::convert::to_anthropic::inbound_request_to_anthropic;
 use llm_relay::convert::to_openai::anthropic_response_to_openai;
+use llm_relay::convert::tool_names::strip_mcp_prefix;
+use llm_relay::types::openai::{ChatResponse, InboundChatRequest};
+use serde_json::Value;
+
+use crate::constants::{DEFAULT_MAX_OUTPUT, OPUS_4_6_MAX_OUTPUT};
 
 const DEFAULT_MODEL: &str = "claude-sonnet-4-5";
 const DEFAULT_MAX_TOKENS: u32 = 16000;
@@ -48,7 +37,7 @@ const DEFAULT_MAX_TOKENS: u32 = 16000;
 ///
 /// Note: This does NOT add mcp_ prefix, system injection, or user ID.
 /// Those are handled by `prepare_anthropic_request()`.
-pub fn transform_openai_request(req: OpenAIChatRequest) -> Value {
+pub fn transform_openai_request(req: InboundChatRequest) -> Value {
     // Save proxy-specific fields before consuming
     let stream = req.stream;
     let top_p = req.top_p;
@@ -137,7 +126,7 @@ pub fn transform_openai_request(req: OpenAIChatRequest) -> Value {
 /// Transform an Anthropic response to OpenAI format.
 ///
 /// Uses llm-relay's core conversion and adds mcp_ prefix stripping for tool names.
-pub fn transform_openai_response(resp: AnthropicResponse) -> OpenAIChatResponse {
+pub fn transform_openai_response(resp: MessagesResponse) -> ChatResponse {
     let mut response = anthropic_response_to_openai(resp);
 
     // Override id to use OpenAI chatcmpl-* format instead of Anthropic's msg_* id

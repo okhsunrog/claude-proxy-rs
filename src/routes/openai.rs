@@ -8,13 +8,15 @@ use axum::{
 use serde_json::{Value, json};
 use std::sync::Arc;
 
+use llm_relay::MessagesResponse;
+use llm_relay::types::openai::InboundChatRequest;
+
 use crate::AppState;
-use crate::auth::TokenUsageReport;
 use crate::constants::ANTHROPIC_API_URL;
 use crate::error::ProxyError;
 use crate::transforms::{
-    AnthropicResponse, OpenAIChatRequest, prepare_anthropic_request,
-    stream_anthropic_to_openai_with_usage, transform_openai_request, transform_openai_response,
+    prepare_anthropic_request, stream_anthropic_to_openai_with_usage, transform_openai_request,
+    transform_openai_response,
 };
 
 use super::auth::{authenticate_openai, build_anthropic_request};
@@ -41,7 +43,7 @@ pub async fn list_models(State(state): State<Arc<AppState>>) -> Json<Value> {
 pub async fn chat_completions(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<OpenAIChatRequest>,
+    Json(body): Json<InboundChatRequest>,
 ) -> Response {
     // Extract model before auth so we can validate it
     let model_name = body
@@ -112,7 +114,7 @@ pub async fn chat_completions(
             .body(Body::from_stream(sse_stream))
             .unwrap()
     } else {
-        let anthropic_response = match response.json::<AnthropicResponse>().await {
+        let anthropic_response = match response.json::<MessagesResponse>().await {
             Ok(r) => r,
             Err(e) => {
                 return ProxyError::ParseError(format!("Failed to parse response: {}", e))
@@ -121,11 +123,7 @@ pub async fn chat_completions(
         };
 
         // Record token usage (per-model; global is derived via aggregation)
-        let usage_report = anthropic_response
-            .usage
-            .as_ref()
-            .map(TokenUsageReport::from_usage)
-            .unwrap_or_default();
+        let usage_report = anthropic_response.usage.clone().unwrap_or_default();
         let window_resets = crate::routes::admin::get_or_refresh_window_resets(&state).await;
 
         if let Err(e) = state

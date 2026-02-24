@@ -10,4 +10,3 @@ pub use models::{Model, ModelsStore};
 pub use oauth::OAuthManager;
 pub use rate_limits::ModelUsageEntry;
 pub use storage::AuthStore;
-pub use usage::{StreamUsageData, TokenUsageReport};

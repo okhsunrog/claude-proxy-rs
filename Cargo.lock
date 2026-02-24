@@ -1577,9 +1577,9 @@ checksum = "6373607a59f0be73a39b6fe456b8192fcc3585f602af20751600e974dd455e77"
 
 [[package]]
 name = "llm-relay"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81f2ddd84456041619343a24669ee61fc08af6440d6a5d703fa2c15555bb1240"
+checksum = "bc6bdb929a350d5a2b03d85ae31141a4a6b02768621780dfe03e9f3d1fdf6acd"
 dependencies = [
  "serde",
  "serde_json",

@@ -1,3 +1,4 @@
+use llm_relay::Usage;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 use turso::Connection;
@@ -6,7 +7,6 @@ use utoipa::ToSchema;
 use super::client_keys::{
     ClientKeysStore, TokenLimits, TokenUsage, UsageResetType, get_u64, opt_u64, timestamp_millis,
 };
-use super::usage::TokenUsageReport;
 use crate::SubscriptionState;
 use crate::db;
 use crate::error::ProxyError;
@@ -232,7 +232,7 @@ async fn query_model_cost(
 
 /// Look up model pricing and compute cost in microdollars.
 /// Returns 0 if model is not found in the models table.
-async fn compute_cost(conn: &Connection, model: &str, report: &TokenUsageReport) -> u64 {
+async fn compute_cost(conn: &Connection, model: &str, report: &Usage) -> u64 {
     let Ok(mut rows) = conn
         .query(
             "SELECT input_price, output_price, cache_read_price, cache_write_price FROM models WHERE id = ?",
@@ -256,8 +256,8 @@ async fn compute_cost(conn: &Connection, model: &str, report: &TokenUsageReport)
 
     let cost = report.input_tokens as f64 * input_price
         + report.output_tokens as f64 * output_price
-        + report.cache_read_tokens as f64 * cache_read_price
-        + report.cache_creation_tokens as f64 * cache_write_price;
+        + report.cache_read_input_tokens.unwrap_or(0) as f64 * cache_read_price
+        + report.cache_creation_input_tokens.unwrap_or(0) as f64 * cache_write_price;
 
     cost.round() as u64
 }
@@ -347,7 +347,7 @@ impl ClientKeysStore {
         &self,
         key_id: &str,
         model: &str,
-        report: &TokenUsageReport,
+        report: &Usage,
         window_resets: &SubscriptionState,
     ) -> Result<(), ProxyError> {
         let now = timestamp_millis();
@@ -414,8 +414,8 @@ impl ClientKeysStore {
                 model,
                 report.input_tokens as i64,
                 report.output_tokens as i64,
-                report.cache_read_tokens as i64,
-                report.cache_creation_tokens as i64,
+                report.cache_read_input_tokens.unwrap_or(0) as i64,
+                report.cache_creation_input_tokens.unwrap_or(0) as i64,
                 cost as i64,
                 now as i64,
             ),
