@@ -51,8 +51,18 @@ pub fn prepare_anthropic_request(body: Value, cloak: bool) -> PreparedRequest {
         sanitize_system_only(body)
     };
     let body = ensure_cache_control(body);
+    let body = strip_unsupported_fields(body);
 
     PreparedRequest { body, betas }
+}
+
+/// Strip fields not supported by the Anthropic OAuth API endpoint.
+/// Claude Code may send newer fields that the OAuth backend rejects.
+fn strip_unsupported_fields(mut body: Value) -> Value {
+    if let Some(obj) = body.as_object_mut() {
+        obj.remove("context_management");
+    }
+    body
 }
 
 /// Prepare a count_tokens request for the Anthropic API.

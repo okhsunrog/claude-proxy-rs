@@ -45,6 +45,12 @@ pub async fn messages(
     // Apply all transformations via unified pipeline
     let prepared = prepare_anthropic_request(body, cloak);
 
+    // Log outgoing request body keys for debugging
+    if let Some(obj) = prepared.body.as_object() {
+        let keys: Vec<&String> = obj.keys().collect();
+        tracing::debug!(model = %model, stream = %stream, "Forwarding to Anthropic with body keys: {keys:?}");
+    }
+
     let req_builder = build_anthropic_request(
         &state.http_client,
         ANTHROPIC_API_URL,
@@ -64,6 +70,10 @@ pub async fn messages(
     if !response.status().is_success() {
         let status = response.status();
         let text: String = response.text().await.unwrap_or_default();
+        tracing::warn!(
+            status = %status, model = %model,
+            "Anthropic API error: {text}"
+        );
         return (
             StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY),
             text,
