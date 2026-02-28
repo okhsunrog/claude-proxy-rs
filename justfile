@@ -35,8 +35,9 @@ lint:
     cargo clippy -- -D warnings
     cd admin-ui && bun run lint
 
-# Regenerate OpenAPI TypeScript client (backend must be running)
+# Regenerate OpenAPI TypeScript client (no running backend needed)
 openapi:
+    cargo run -- --openapi > admin-ui/openapi.json
     cd admin-ui && bun run openapi-ts
 
 # Run OpenAI compatibility test

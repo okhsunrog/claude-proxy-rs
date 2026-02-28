@@ -149,6 +149,10 @@ struct Args {
     /// Port to bind to
     #[arg(short, long, env = "CLAUDE_PROXY_PORT")]
     port: Option<u16>,
+
+    /// Dump OpenAPI spec as JSON and exit (no config/DB needed)
+    #[arg(long)]
+    openapi: bool,
 }
 
 /// Parse a named cookie from the Cookie header
@@ -227,8 +231,76 @@ fn unauthorized_response() -> Response {
     (StatusCode::UNAUTHORIZED, "Unauthorized").into_response()
 }
 
+fn openapi_router() -> OpenApiRouter<Arc<AppState>> {
+    OpenApiRouter::with_openapi(
+        utoipa::openapi::OpenApiBuilder::new()
+            .info(
+                utoipa::openapi::InfoBuilder::new()
+                    .title("Claude Proxy Admin API")
+                    .description(Some("Admin API for Claude Proxy"))
+                    .version(VERSION)
+                    .build(),
+            )
+            .build(),
+    )
+    // OAuth
+    .routes(routes!(routes::admin::get_oauth_status))
+    .routes(routes!(routes::admin::start_oauth_flow))
+    .routes(routes!(routes::admin::exchange_oauth_code))
+    .routes(routes!(routes::admin::delete_oauth))
+    .routes(routes!(routes::admin::get_subscription_usage))
+    // Keys
+    .routes(routes!(routes::admin::create_key))
+    .routes(routes!(routes::admin::list_keys))
+    .routes(routes!(routes::admin::delete_key))
+    .routes(routes!(routes::admin::set_key_enabled))
+    .routes(routes!(routes::admin::set_allow_extra_usage))
+    .routes(routes!(routes::admin::get_key_usage))
+    .routes(routes!(routes::admin::update_key_limits))
+    .routes(routes!(routes::admin::reset_key_usage))
+    // Models
+    .routes(routes!(routes::admin::list_models_admin))
+    .routes(routes!(routes::admin::add_model))
+    .routes(routes!(
+        routes::admin::delete_model,
+        routes::admin::update_model
+    ))
+    .routes(routes!(routes::admin::reorder_models))
+    // Per-key model access
+    .routes(routes!(
+        routes::admin::get_key_models,
+        routes::admin::set_key_models
+    ))
+    // Per-key per-model usage
+    .routes(routes!(routes::admin::get_key_model_usage))
+    .routes(routes!(
+        routes::admin::set_key_model_limits,
+        routes::admin::remove_key_model_limits
+    ))
+    .routes(routes!(routes::admin::reset_key_model_usage))
+    // Usage history (charts)
+    .routes(routes!(routes::admin::get_usage_history_timeseries))
+    .routes(routes!(routes::admin::get_usage_history_by_model))
+    .routes(routes!(routes::admin::get_usage_history_by_key))
+    .routes(routes!(routes::admin::delete_usage_history))
+}
+
+fn build_openapi() -> utoipa::openapi::OpenApi {
+    let (_, openapi) = openapi_router().split_for_parts();
+    openapi
+}
+
 #[tokio::main]
 async fn main() {
+    let args = Args::parse();
+
+    // Dump OpenAPI spec and exit (no config/DB needed)
+    if args.openapi {
+        let openapi = build_openapi();
+        println!("{}", openapi.to_pretty_json().unwrap());
+        return;
+    }
+
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -236,8 +308,6 @@ async fn main() {
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
-
-    let args = Args::parse();
     let config = Config::from_env();
 
     // Initialize database (before moving fields out of config)
@@ -333,54 +403,8 @@ async fn main() {
         CorsMode::AllowList(list) => info!("CORS: Allowing origins: {:?}", list),
     }
 
-    // Admin API routes with OpenAPI spec generation
-    let (api_router, openapi) = OpenApiRouter::with_openapi(Default::default())
-        // OAuth
-        .routes(routes!(routes::admin::get_oauth_status))
-        .routes(routes!(routes::admin::start_oauth_flow))
-        .routes(routes!(routes::admin::exchange_oauth_code))
-        .routes(routes!(routes::admin::delete_oauth))
-        .routes(routes!(routes::admin::get_subscription_usage))
-        // Keys
-        .routes(routes!(routes::admin::create_key))
-        .routes(routes!(routes::admin::list_keys))
-        .routes(routes!(routes::admin::delete_key))
-        .routes(routes!(routes::admin::set_key_enabled))
-        .routes(routes!(routes::admin::set_allow_extra_usage))
-        .routes(routes!(routes::admin::get_key_usage))
-        .routes(routes!(routes::admin::update_key_limits))
-        .routes(routes!(routes::admin::reset_key_usage))
-        // Models
-        .routes(routes!(routes::admin::list_models_admin))
-        .routes(routes!(routes::admin::add_model))
-        .routes(routes!(
-            routes::admin::delete_model,
-            routes::admin::update_model
-        ))
-        .routes(routes!(routes::admin::reorder_models))
-        // Per-key model access
-        .routes(routes!(
-            routes::admin::get_key_models,
-            routes::admin::set_key_models
-        ))
-        // Per-key per-model usage
-        .routes(routes!(routes::admin::get_key_model_usage))
-        .routes(routes!(
-            routes::admin::set_key_model_limits,
-            routes::admin::remove_key_model_limits
-        ))
-        .routes(routes!(routes::admin::reset_key_model_usage))
-        // Usage history (charts)
-        .routes(routes!(routes::admin::get_usage_history_timeseries))
-        .routes(routes!(routes::admin::get_usage_history_by_model))
-        .routes(routes!(routes::admin::get_usage_history_by_key))
-        .routes(routes!(routes::admin::delete_usage_history))
-        .split_for_parts();
-
-    // Swagger UI + OpenAPI spec (accessible without authentication)
-    let swagger_routes = Router::new().merge(
-        utoipa_swagger_ui::SwaggerUi::new("/swagger").url("/api-docs/openapi.json", openapi),
-    );
+    // Admin API routes
+    let (api_router, _) = openapi_router().split_for_parts();
 
     // Auth endpoints (accessible without authentication)
     let auth_routes = Router::new()
@@ -395,9 +419,8 @@ async fn main() {
         admin_auth_middleware,
     ));
 
-    // Combine: swagger (unprotected) + auth routes (unprotected) + protected API + static SPA
+    // Combine: auth routes (unprotected) + protected API + static SPA
     let admin_routes = Router::new()
-        .merge(swagger_routes)
         .merge(auth_routes)
         .merge(protected_routes)
         .merge(routes::admin::static_routes());
