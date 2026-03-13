@@ -61,7 +61,10 @@ const tokenAreaCategories = computed(() => ({
 }))
 
 function formatTime(tick: number | Date) {
-  const d = new Date(typeof tick === 'number' ? tick : tick.getTime())
+  const idx = typeof tick === 'number' ? Math.round(tick) : 0
+  const point = timeseries.value[idx]
+  if (!point) return ''
+  const d = new Date(point.timestamp)
   if (period.value === '24h') {
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   }
