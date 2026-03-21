@@ -32,8 +32,8 @@ use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
-/// Session TTL: 24 hours (matches cookie Max-Age)
-const SESSION_TTL_SECS: u64 = 86400;
+/// Session TTL: 30 days (with sliding expiration on each request)
+const SESSION_TTL_SECS: u64 = 30 * 24 * 3600;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const GIT_HASH: &str = env!("GIT_HASH");
@@ -91,7 +91,8 @@ pub async fn save_session(token: &str, expires_at: u64) {
     }
 }
 
-/// Validate a session token, returns true if valid and not expired
+/// Validate a session token, returns true if valid and not expired.
+/// Also extends the session (sliding expiration) if it's valid.
 pub async fn validate_session(token: &str) -> bool {
     let Ok(conn) = db::get_conn().await else {
         return false;
@@ -112,14 +113,24 @@ pub async fn validate_session(token: &str) -> bool {
         return false;
     };
     let now = now_secs() as i64;
-    if now < expires_at {
-        return true;
+    if now >= expires_at {
+        // Expired — clean it up
+        let _ = conn
+            .execute("DELETE FROM admin_sessions WHERE token = ?", [token])
+            .await;
+        return false;
     }
-    // Expired — clean it up
-    let _ = conn
-        .execute("DELETE FROM admin_sessions WHERE token = ?", [token])
-        .await;
-    false
+    // Sliding expiration: renew if more than 1 day has passed since last renewal
+    let new_expires = now + SESSION_TTL_SECS as i64;
+    if new_expires - expires_at > 24 * 3600 {
+        let _ = conn
+            .execute(
+                "UPDATE admin_sessions SET expires_at = ? WHERE token = ?",
+                (new_expires, token),
+            )
+            .await;
+    }
+    true
 }
 
 /// Remove a session token from the database
@@ -187,7 +198,17 @@ async fn admin_auth_middleware(
         && let Some(token) = parse_cookie(cookie_header, "admin_session")
         && validate_session(&token).await
     {
-        return next.run(request).await;
+        let mut response = next.run(request).await;
+        // Refresh cookie Max-Age to keep browser cookie in sync with sliding expiration
+        let secure_flag = if state.secure_cookies { "; Secure" } else { "" };
+        let cookie = format!(
+            "admin_session={}; HttpOnly; SameSite=Strict; Path=/admin; Max-Age={}{}",
+            token, SESSION_TTL_SECS, secure_flag
+        );
+        if let Ok(value) = cookie.parse() {
+            response.headers_mut().insert(header::SET_COOKIE, value);
+        }
+        return response;
     }
 
     // Fall through to Basic Auth check
