@@ -1859,6 +1859,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
+name = "pastey"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b867cad97c0791bbd3aaa6472142568c6c9e8f71937e98379f584cfb0cf35bec"
+
+[[package]]
 name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3029,9 +3035,9 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "turso"
-version = "0.5.1"
+version = "0.6.0-pre.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7adb377630e2cfc1aa10d44cff1a05edfca9dea1bcf500211a24917f37dbf492"
+checksum = "0df5e3b4003a7411fb8f4acc5cf4c7f9a93767d0db7be032dcc279e842701bae"
 dependencies = [
  "mimalloc",
  "thiserror 2.0.18",
@@ -3043,9 +3049,9 @@ dependencies = [
 
 [[package]]
 name = "turso_core"
-version = "0.5.1"
+version = "0.6.0-pre.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34b2f28e920d1d893fdd5bf4a9bf666dc31f3f0c99832611a6e119b93501707f"
+checksum = "307c82f732c37db94891a95adc4f5faa2c7910f3310573b43eb7261594b1f9ab"
 dependencies = [
  "aegis",
  "aes",
@@ -3077,7 +3083,7 @@ dependencies = [
  "num-traits",
  "pack1",
  "parking_lot",
- "paste",
+ "pastey",
  "polling",
  "rand 0.9.2",
  "rapidhash",
@@ -3108,9 +3114,9 @@ dependencies = [
 
 [[package]]
 name = "turso_ext"
-version = "0.5.1"
+version = "0.6.0-pre.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07064bc2fefab2f90478d30fc8fae48d8526f590b70b303a1092081e8ee42a3f"
+checksum = "41e18725c7f9dd3fbb1c6a4a4ebe255fb1654d5b1d9a97bf63aaaf43f994100f"
 dependencies = [
  "chrono",
  "getrandom 0.3.4",
@@ -3119,9 +3125,9 @@ dependencies = [
 
 [[package]]
 name = "turso_macros"
-version = "0.5.1"
+version = "0.6.0-pre.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ab0703506127013dc1fc7e115b2055aeb16ac8aed7b972a9156abd08406c74c"
+checksum = "75bffeb44d4fc4d6ada6b7cb9fc9e9e64fe7af45dee2ade6a8140ba8e2079f47"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3130,9 +3136,9 @@ dependencies = [
 
 [[package]]
 name = "turso_parser"
-version = "0.5.1"
+version = "0.6.0-pre.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "770c38bab784693915ad996c28decbddecb563388ffb5038a4dfe16f4a446a86"
+checksum = "169805a992269c24cb2905eaac10101072ef90b93596a6065dc6bc72f3f4ec1d"
 dependencies = [
  "bitflags",
  "memchr",
@@ -3145,9 +3151,9 @@ dependencies = [
 
 [[package]]
 name = "turso_sdk_kit"
-version = "0.5.1"
+version = "0.6.0-pre.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16574ba104b802e2faa7654099d4aa00e769b9baaab347d6d98e9eef2a8d1f8c"
+checksum = "5f863d0ed6386d61f5894d044de4a0b6053bdac8e953c81995c5b1b533ec91ca"
 dependencies = [
  "bindgen",
  "env_logger",
@@ -3161,9 +3167,9 @@ dependencies = [
 
 [[package]]
 name = "turso_sdk_kit_macros"
-version = "0.5.1"
+version = "0.6.0-pre.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e92557fe426adaaa096bc33b7953a137020645cf43127ff81a77cea74d37cd4"
+checksum = "942e7cecaebdd15048301d3d33963d2526474aa09567466144acfb82a9cb4b54"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3172,9 +3178,9 @@ dependencies = [
 
 [[package]]
 name = "turso_sync_engine"
-version = "0.5.1"
+version = "0.6.0-pre.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18182aacf9550e0e56cc567d2501d7b999a0eaee072f5623fb9ffd74c34a056a"
+checksum = "6a6855e4cfa5bf79bdf75ba1c4bb82fe9f31bfc92fbb008d61b8dd6644838161"
 dependencies = [
  "base64",
  "bytes",
@@ -3194,9 +3200,9 @@ dependencies = [
 
 [[package]]
 name = "turso_sync_sdk_kit"
-version = "0.5.1"
+version = "0.6.0-pre.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69cd8cceccd7b2428a3bf81a9f08cf27138a1a02c831a3599bd277c4dff2f06c"
+checksum = "39ed27f22f8b427a06403da7c28dcdcfb1ef500c2a2a57724b96a924ac1caf25"
 dependencies = [
  "bindgen",
  "env_logger",

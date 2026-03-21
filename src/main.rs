@@ -442,6 +442,7 @@ async fn main() {
             .nest("/admin", admin_routes)
             .nest("/v1", api_routes)
             .layer(cors)
+            .layer(axum::extract::DefaultBodyLimit::max(100 * 1024 * 1024)) // 100 MB
             .with_state(state),
     );
 
