@@ -207,8 +207,9 @@ All data (OAuth credentials, API keys, usage counters) is stored in a [Turso](ht
 
 ### Requirements
 
-- Rust 2024 edition (1.93.0+)
+- [Rust](https://www.rust-lang.org/) >= 1.85.0 (edition 2024)
 - [Bun](https://bun.sh/) >= 1.3.0
+- [Vite+](https://viteplus.dev/) (`vp` CLI) — unified frontend toolchain
 - [just](https://github.com/casey/just) command runner
 
 ### Running locally
@@ -219,7 +220,7 @@ just run                     # Start backend (cargo run)
 
 For frontend hot reload, also run in a second terminal:
 ```bash
-cd admin-ui && bun install && bun run dev
+cd admin-ui && vp install && vp dev
 # Open http://localhost:5173/admin/
 ```
 

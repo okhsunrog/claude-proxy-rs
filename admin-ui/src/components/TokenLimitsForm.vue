@@ -74,7 +74,10 @@ const resetItems = [
 async function handleReset(type: 'fiveHour' | 'weekly' | 'total' | 'all') {
   try {
     await props.resetUsage(props.keyId, type)
-    toast.add({ title: `${type.charAt(0).toUpperCase() + type.slice(1)} usage reset`, color: 'success' })
+    toast.add({
+      title: `${type.charAt(0).toUpperCase() + type.slice(1)} usage reset`,
+      color: 'success',
+    })
   } catch (e: unknown) {
     toast.add({ title: 'Failed to reset usage', description: errorMessage(e), color: 'error' })
   }
@@ -96,7 +99,9 @@ async function handleToggleExtraUsage(value: boolean) {
       <UFormField label="5-Hour ($)" class="w-32">
         <UInput
           :model-value="fiveHourDollars ?? undefined"
-          @update:model-value="(v: string | number) => fiveHourDollars = v == null || v === '' ? null : Number(v)"
+          @update:model-value="
+            (v: string | number) => (fiveHourDollars = v == null || v === '' ? null : Number(v))
+          "
           type="number"
           placeholder="Unlimited"
           step="0.01"
@@ -107,7 +112,9 @@ async function handleToggleExtraUsage(value: boolean) {
       <UFormField label="Weekly ($)" class="w-32">
         <UInput
           :model-value="weeklyDollars ?? undefined"
-          @update:model-value="(v: string | number) => weeklyDollars = v == null || v === '' ? null : Number(v)"
+          @update:model-value="
+            (v: string | number) => (weeklyDollars = v == null || v === '' ? null : Number(v))
+          "
           type="number"
           placeholder="Unlimited"
           step="0.01"
@@ -118,7 +125,9 @@ async function handleToggleExtraUsage(value: boolean) {
       <UFormField label="Total ($)" class="w-32">
         <UInput
           :model-value="totalDollars ?? undefined"
-          @update:model-value="(v: string | number) => totalDollars = v == null || v === '' ? null : Number(v)"
+          @update:model-value="
+            (v: string | number) => (totalDollars = v == null || v === '' ? null : Number(v))
+          "
           type="number"
           placeholder="Unlimited"
           step="0.01"
@@ -136,10 +145,7 @@ async function handleToggleExtraUsage(value: boolean) {
       </UDropdownMenu>
     </div>
     <div class="flex items-center gap-2 mt-3">
-      <USwitch
-        :model-value="allowExtraUsage"
-        @update:model-value="handleToggleExtraUsage"
-      />
+      <USwitch :model-value="allowExtraUsage" @update:model-value="handleToggleExtraUsage" />
       <span class="text-sm">Allow extra usage</span>
       <span class="text-xs text-muted">— use paid credits when subscription limits are full</span>
     </div>

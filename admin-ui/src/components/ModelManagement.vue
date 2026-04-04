@@ -153,16 +153,21 @@ async function handleDelete() {
         <div class="flex-1 min-w-0">
           <div class="font-mono text-sm truncate">{{ model.id }}</div>
           <div class="text-xs text-muted mt-0.5">
-            In: {{ formatPrice(model.inputPrice) }} |
-            Out: {{ formatPrice(model.outputPrice) }} |
-            Cache R: {{ formatPrice(model.cacheReadPrice) }} |
-            Cache W: {{ formatPrice(model.cacheWritePrice) }}
+            In: {{ formatPrice(model.inputPrice) }} | Out: {{ formatPrice(model.outputPrice) }} |
+            Cache R: {{ formatPrice(model.cacheReadPrice) }} | Cache W:
+            {{ formatPrice(model.cacheWritePrice) }}
             <span class="ml-1">($/MTok)</span>
           </div>
         </div>
         <div class="flex gap-1.5">
           <UButton size="xs" variant="ghost" icon="i-lucide-pencil" @click="openEdit(model)" />
-          <UButton size="xs" variant="ghost" color="error" icon="i-lucide-trash-2" @click="confirmDelete(model)" />
+          <UButton
+            size="xs"
+            variant="ghost"
+            color="error"
+            icon="i-lucide-trash-2"
+            @click="confirmDelete(model)"
+          />
         </div>
       </div>
     </div>
@@ -176,16 +181,40 @@ async function handleDelete() {
           </UFormField>
           <div class="grid grid-cols-2 gap-3">
             <UFormField label="Input ($/MTok)">
-              <UInput v-model.number="newInputPrice" type="number" step="0.01" :min="0" class="no-spinners" />
+              <UInput
+                v-model.number="newInputPrice"
+                type="number"
+                step="0.01"
+                :min="0"
+                class="no-spinners"
+              />
             </UFormField>
             <UFormField label="Output ($/MTok)">
-              <UInput v-model.number="newOutputPrice" type="number" step="0.01" :min="0" class="no-spinners" />
+              <UInput
+                v-model.number="newOutputPrice"
+                type="number"
+                step="0.01"
+                :min="0"
+                class="no-spinners"
+              />
             </UFormField>
             <UFormField label="Cache Read ($/MTok)">
-              <UInput v-model.number="newCacheReadPrice" type="number" step="0.01" :min="0" class="no-spinners" />
+              <UInput
+                v-model.number="newCacheReadPrice"
+                type="number"
+                step="0.01"
+                :min="0"
+                class="no-spinners"
+              />
             </UFormField>
             <UFormField label="Cache Write ($/MTok)">
-              <UInput v-model.number="newCacheWritePrice" type="number" step="0.01" :min="0" class="no-spinners" />
+              <UInput
+                v-model.number="newCacheWritePrice"
+                type="number"
+                step="0.01"
+                :min="0"
+                class="no-spinners"
+              />
             </UFormField>
           </div>
         </div>
@@ -199,20 +228,48 @@ async function handleDelete() {
     </UModal>
 
     <!-- Edit Model Modal -->
-    <UModal v-model:open="showEditModal" :title="`Edit ${editModel?.id}`" :ui="{ width: 'max-w-md' }">
+    <UModal
+      v-model:open="showEditModal"
+      :title="`Edit ${editModel?.id}`"
+      :ui="{ width: 'max-w-md' }"
+    >
       <template #body>
         <div class="grid grid-cols-2 gap-3">
           <UFormField label="Input ($/MTok)">
-            <UInput v-model.number="editInputPrice" type="number" step="0.01" :min="0" class="no-spinners" />
+            <UInput
+              v-model.number="editInputPrice"
+              type="number"
+              step="0.01"
+              :min="0"
+              class="no-spinners"
+            />
           </UFormField>
           <UFormField label="Output ($/MTok)">
-            <UInput v-model.number="editOutputPrice" type="number" step="0.01" :min="0" class="no-spinners" />
+            <UInput
+              v-model.number="editOutputPrice"
+              type="number"
+              step="0.01"
+              :min="0"
+              class="no-spinners"
+            />
           </UFormField>
           <UFormField label="Cache Read ($/MTok)">
-            <UInput v-model.number="editCacheReadPrice" type="number" step="0.01" :min="0" class="no-spinners" />
+            <UInput
+              v-model.number="editCacheReadPrice"
+              type="number"
+              step="0.01"
+              :min="0"
+              class="no-spinners"
+            />
           </UFormField>
           <UFormField label="Cache Write ($/MTok)">
-            <UInput v-model.number="editCacheWritePrice" type="number" step="0.01" :min="0" class="no-spinners" />
+            <UInput
+              v-model.number="editCacheWritePrice"
+              type="number"
+              step="0.01"
+              :min="0"
+              class="no-spinners"
+            />
           </UFormField>
         </div>
       </template>
@@ -227,7 +284,10 @@ async function handleDelete() {
     <!-- Delete Confirmation Modal -->
     <UModal v-model:open="showDeleteModal" title="Confirm Delete" :ui="{ width: 'max-w-md' }">
       <template #body>
-        <p>Are you sure you want to delete model "<strong>{{ deleteTarget?.id }}</strong>"?</p>
+        <p>
+          Are you sure you want to delete model "<strong>{{ deleteTarget?.id }}</strong
+          >"?
+        </p>
       </template>
       <template #footer>
         <div class="flex justify-end gap-2">

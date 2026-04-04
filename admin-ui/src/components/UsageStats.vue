@@ -64,16 +64,22 @@ const items = computed<UsageItem[]>(() => {
 <template>
   <div v-if="!usage" class="text-sm text-muted">Loading usage...</div>
   <div v-else class="grid grid-cols-3 gap-3">
-    <div
-      v-for="item in items"
-      :key="item.label"
-      class="rounded-lg bg-elevated p-3"
-    >
+    <div v-for="item in items" :key="item.label" class="rounded-lg bg-elevated p-3">
       <div class="text-xs text-muted uppercase">{{ item.label }}</div>
       <div class="text-xl font-semibold mt-1">{{ formatCost(item.used) }}</div>
       <div class="text-xs text-muted flex items-baseline gap-1">
         <span>/ {{ item.limit ? formatCost(item.limit) : 'Unlimited' }}</span>
-        <span v-if="item.limit" class="font-semibold" :class="(item.used / item.limit) * 100 >= 90 ? 'text-red-500' : (item.used / item.limit) * 100 >= 70 ? 'text-yellow-500' : 'text-green-500'">
+        <span
+          v-if="item.limit"
+          class="font-semibold"
+          :class="
+            (item.used / item.limit) * 100 >= 90
+              ? 'text-red-500'
+              : (item.used / item.limit) * 100 >= 70
+                ? 'text-yellow-500'
+                : 'text-green-500'
+          "
+        >
           ({{ ((item.used / item.limit) * 100).toFixed(1) }}%)
         </span>
       </div>

@@ -36,13 +36,9 @@ onMounted(() => {
   <div class="space-y-4">
     <CreateKeyForm :create-key="createKey" />
 
-    <div v-if="isLoading && keys.length === 0" class="text-center py-8 text-muted">
-      Loading...
-    </div>
+    <div v-if="isLoading && keys.length === 0" class="text-center py-8 text-muted">Loading...</div>
 
-    <div v-else-if="keys.length === 0" class="text-center py-8 text-muted">
-      No API keys yet
-    </div>
+    <div v-else-if="keys.length === 0" class="text-center py-8 text-muted">No API keys yet</div>
 
     <div v-else class="space-y-2">
       <KeyCard

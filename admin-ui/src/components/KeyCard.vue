@@ -2,7 +2,11 @@
 import { ref, computed } from 'vue'
 import { errorMessage, formatCost } from '../utils/format'
 import type { ClientKey, Model, UpdateLimitsRequest } from '../client'
-import type { KeyUsageResponse, KeyModelsResponse, KeyModelUsageResponse } from '../composables/useKeys'
+import type {
+  KeyUsageResponse,
+  KeyModelsResponse,
+  KeyModelUsageResponse,
+} from '../composables/useKeys'
 import UsageStats from './UsageStats.vue'
 import TokenLimitsForm from './TokenLimitsForm.vue'
 import KeyModelAccess from './KeyModelAccess.vue'
@@ -22,7 +26,11 @@ const props = defineProps<{
   loadKeyModelUsage: (id: string) => Promise<KeyModelUsageResponse>
   setModelLimits: (keyId: string, model: string, limits: UpdateLimitsRequest) => Promise<void>
   removeModelLimits: (keyId: string, model: string) => Promise<void>
-  resetModelUsage: (keyId: string, model: string, type: 'fiveHour' | 'weekly' | 'total' | 'all') => Promise<void>
+  resetModelUsage: (
+    keyId: string,
+    model: string,
+    type: 'fiveHour' | 'weekly' | 'total' | 'all',
+  ) => Promise<void>
 }>()
 
 const emit = defineEmits<{
@@ -119,14 +127,28 @@ const usageSummary = computed<UsageSummaryItem[]>(() => {
         :name="isExpanded ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
         class="w-4 h-4 shrink-0 text-muted"
       />
-      <span class="font-semibold truncate" :class="{ 'text-muted line-through': !keyData.enabled }">{{ keyData.name }}</span>
-      <span class="font-mono text-xs text-muted hidden sm:inline">{{ maskedKey(keyData.key) }}</span>
+      <span
+        class="font-semibold truncate"
+        :class="{ 'text-muted line-through': !keyData.enabled }"
+        >{{ keyData.name }}</span
+      >
+      <span class="font-mono text-xs text-muted hidden sm:inline">{{
+        maskedKey(keyData.key)
+      }}</span>
 
       <!-- Inline usage summary -->
-      <div v-if="usageSummary.length" class="flex items-center gap-3 ml-auto mr-2 text-xs text-muted whitespace-nowrap">
+      <div
+        v-if="usageSummary.length"
+        class="flex items-center gap-3 ml-auto mr-2 text-xs text-muted whitespace-nowrap"
+      >
         <span v-for="item in usageSummary" :key="item.label">
-          {{ item.label }}: <span class="font-mono">{{ formatCost(item.used) }}</span><template v-if="item.limit">/{{ formatCost(item.limit) }}
-            <span :class="percentColor(item.used, item.limit)" class="font-semibold">{{ ((item.used / item.limit) * 100).toFixed(0) }}%</span></template>
+          {{ item.label }}: <span class="font-mono">{{ formatCost(item.used) }}</span
+          ><template v-if="item.limit"
+            >/{{ formatCost(item.limit) }}
+            <span :class="percentColor(item.used, item.limit)" class="font-semibold"
+              >{{ ((item.used / item.limit) * 100).toFixed(0) }}%</span
+            ></template
+          >
         </span>
       </div>
       <div v-else class="ml-auto" />
@@ -139,9 +161,12 @@ const usageSummary = computed<UsageSummaryItem[]>(() => {
           :color="keyData.enabled ? 'warning' : 'success'"
           :loading="isToggling"
           @click="handleToggle"
-        >{{ keyData.enabled ? 'Disable' : 'Enable' }}</UButton>
+          >{{ keyData.enabled ? 'Disable' : 'Enable' }}</UButton
+        >
         <UButton size="xs" variant="soft" @click="copyKey">Copy Key</UButton>
-        <UButton size="xs" color="error" variant="soft" @click="showDeleteModal = true">Delete</UButton>
+        <UButton size="xs" color="error" variant="soft" @click="showDeleteModal = true"
+          >Delete</UButton
+        >
       </div>
     </div>
 
@@ -150,8 +175,8 @@ const usageSummary = computed<UsageSummaryItem[]>(() => {
       <div class="font-mono text-xs text-muted mt-3 mb-2 break-all">{{ keyData.key }}</div>
 
       <div class="text-xs text-muted mb-3">
-        Created: {{ formatDate(keyData.createdAt) }} |
-        Last used: {{ keyData.lastUsedAt ? formatDate(keyData.lastUsedAt) : 'Never' }}
+        Created: {{ formatDate(keyData.createdAt) }} | Last used:
+        {{ keyData.lastUsedAt ? formatDate(keyData.lastUsedAt) : 'Never' }}
       </div>
 
       <UsageStats :usage="usage" />
@@ -185,7 +210,10 @@ const usageSummary = computed<UsageSummaryItem[]>(() => {
 
     <UModal v-model:open="showDeleteModal" title="Confirm Delete" :ui="{ width: 'max-w-md' }">
       <template #body>
-        <p>Are you sure you want to delete key "<strong>{{ keyData.name }}</strong>"?</p>
+        <p>
+          Are you sure you want to delete key "<strong>{{ keyData.name }}</strong
+          >"?
+        </p>
       </template>
       <template #footer>
         <div class="flex justify-end gap-2">

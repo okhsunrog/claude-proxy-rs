@@ -76,10 +76,7 @@ function formatDollars(dollars: number): string {
 }
 
 // Total cost for a window period
-function windowCost(
-  entry: ModelUsageEntry,
-  window: 'fiveHour' | 'weekly' | 'total',
-): string {
+function windowCost(entry: ModelUsageEntry, window: 'fiveHour' | 'weekly' | 'total'): string {
   const model = priceMap.value[entry.model]
   if (!model) return ''
   const w = entry[window]
@@ -163,17 +160,27 @@ function resetItems(model: string) {
     ],
   ]
 }
+
+function toggleExpanded() {
+  isExpanded.value = !isExpanded.value
+  if (isExpanded.value && entries.value.length === 0) loadData()
+}
 </script>
 
 <template>
   <div class="border-t border-default pt-3 mt-3">
     <button
       class="flex items-center gap-1 text-sm font-semibold text-muted hover:text-default cursor-pointer w-full text-left"
-      @click="isExpanded = !isExpanded; if (isExpanded && entries.length === 0) loadData()"
+      @click="toggleExpanded()"
     >
-      <UIcon :name="isExpanded ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'" class="w-4 h-4" />
+      <UIcon
+        :name="isExpanded ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
+        class="w-4 h-4"
+      />
       Per-Model Usage
-      <span v-if="entries.length > 0" class="text-xs font-normal ml-1">({{ entries.length }} models)</span>
+      <span v-if="entries.length > 0" class="text-xs font-normal ml-1"
+        >({{ entries.length }} models)</span
+      >
     </button>
 
     <div v-if="isExpanded" class="mt-3 space-y-3">
@@ -207,19 +214,73 @@ function resetItems(model: string) {
 
         <!-- Token breakdown -->
         <div class="grid grid-cols-3 gap-2 text-xs">
-          <div v-for="window in ['fiveHour', 'weekly', 'total'] as const" :key="window" class="rounded bg-elevated p-2">
+          <div
+            v-for="window in ['fiveHour', 'weekly', 'total'] as const"
+            :key="window"
+            class="rounded bg-elevated p-2"
+          >
             <div class="flex items-baseline justify-between mb-1">
-              <span class="text-muted uppercase">{{ window === 'fiveHour' ? '5-HOUR' : window }}</span>
-              <span v-if="windowCost(entry, window)" class="font-mono font-semibold text-primary">{{ windowCost(entry, window) }}</span>
+              <span class="text-muted uppercase">{{
+                window === 'fiveHour' ? '5-HOUR' : window
+              }}</span>
+              <span v-if="windowCost(entry, window)" class="font-mono font-semibold text-primary">{{
+                windowCost(entry, window)
+              }}</span>
             </div>
             <div class="space-y-0.5">
-              <div>In: <span class="font-mono">{{ formatTokens(entry[window].input) }}</span><span v-if="lineCost(entry[window].input, priceMap[entry.model]?.inputPrice ?? 0)" class="text-muted ml-1">({{ lineCost(entry[window].input, priceMap[entry.model]?.inputPrice ?? 0) }})</span></div>
-              <div>Out: <span class="font-mono">{{ formatTokens(entry[window].output) }}</span><span v-if="lineCost(entry[window].output, priceMap[entry.model]?.outputPrice ?? 0)" class="text-muted ml-1">({{ lineCost(entry[window].output, priceMap[entry.model]?.outputPrice ?? 0) }})</span></div>
-              <div>Cache R: <span class="font-mono">{{ formatTokens(entry[window].cacheRead) }}</span><span v-if="lineCost(entry[window].cacheRead, priceMap[entry.model]?.cacheReadPrice ?? 0)" class="text-muted ml-1">({{ lineCost(entry[window].cacheRead, priceMap[entry.model]?.cacheReadPrice ?? 0) }})</span></div>
-              <div>Cache W: <span class="font-mono">{{ formatTokens(entry[window].cacheWrite) }}</span><span v-if="lineCost(entry[window].cacheWrite, priceMap[entry.model]?.cacheWritePrice ?? 0)" class="text-muted ml-1">({{ lineCost(entry[window].cacheWrite, priceMap[entry.model]?.cacheWritePrice ?? 0) }})</span></div>
+              <div>
+                In: <span class="font-mono">{{ formatTokens(entry[window].input) }}</span
+                ><span
+                  v-if="lineCost(entry[window].input, priceMap[entry.model]?.inputPrice ?? 0)"
+                  class="text-muted ml-1"
+                  >({{
+                    lineCost(entry[window].input, priceMap[entry.model]?.inputPrice ?? 0)
+                  }})</span
+                >
+              </div>
+              <div>
+                Out: <span class="font-mono">{{ formatTokens(entry[window].output) }}</span
+                ><span
+                  v-if="lineCost(entry[window].output, priceMap[entry.model]?.outputPrice ?? 0)"
+                  class="text-muted ml-1"
+                  >({{
+                    lineCost(entry[window].output, priceMap[entry.model]?.outputPrice ?? 0)
+                  }})</span
+                >
+              </div>
+              <div>
+                Cache R: <span class="font-mono">{{ formatTokens(entry[window].cacheRead) }}</span
+                ><span
+                  v-if="
+                    lineCost(entry[window].cacheRead, priceMap[entry.model]?.cacheReadPrice ?? 0)
+                  "
+                  class="text-muted ml-1"
+                  >({{
+                    lineCost(entry[window].cacheRead, priceMap[entry.model]?.cacheReadPrice ?? 0)
+                  }})</span
+                >
+              </div>
+              <div>
+                Cache W: <span class="font-mono">{{ formatTokens(entry[window].cacheWrite) }}</span
+                ><span
+                  v-if="
+                    lineCost(entry[window].cacheWrite, priceMap[entry.model]?.cacheWritePrice ?? 0)
+                  "
+                  class="text-muted ml-1"
+                  >({{
+                    lineCost(entry[window].cacheWrite, priceMap[entry.model]?.cacheWritePrice ?? 0)
+                  }})</span
+                >
+              </div>
             </div>
-            <div v-if="entry.limits[`${window}Limit` as keyof typeof entry.limits]" class="mt-1 pt-1 border-t border-default">
-              Limit: <span class="font-semibold">{{ formatCost(entry.limits[`${window}Limit` as keyof typeof entry.limits] as number) }}</span>
+            <div
+              v-if="entry.limits[`${window}Limit` as keyof typeof entry.limits]"
+              class="mt-1 pt-1 border-t border-default"
+            >
+              Limit:
+              <span class="font-semibold">{{
+                formatCost(entry.limits[`${window}Limit` as keyof typeof entry.limits] as number)
+              }}</span>
             </div>
           </div>
         </div>
@@ -231,7 +292,9 @@ function resetItems(model: string) {
             <UFormField label="5-Hour ($)" class="w-28">
               <UInput
                 :model-value="editFiveHour ?? undefined"
-                @update:model-value="(v: string | number) => editFiveHour = v == null || v === '' ? null : Number(v)"
+                @update:model-value="
+                  (v: string | number) => (editFiveHour = v == null || v === '' ? null : Number(v))
+                "
                 type="number"
                 placeholder="None"
                 step="0.01"
@@ -243,7 +306,9 @@ function resetItems(model: string) {
             <UFormField label="Weekly ($)" class="w-28">
               <UInput
                 :model-value="editWeekly ?? undefined"
-                @update:model-value="(v: string | number) => editWeekly = v == null || v === '' ? null : Number(v)"
+                @update:model-value="
+                  (v: string | number) => (editWeekly = v == null || v === '' ? null : Number(v))
+                "
                 type="number"
                 placeholder="None"
                 step="0.01"
@@ -255,7 +320,9 @@ function resetItems(model: string) {
             <UFormField label="Total ($)" class="w-28">
               <UInput
                 :model-value="editTotal ?? undefined"
-                @update:model-value="(v: string | number) => editTotal = v == null || v === '' ? null : Number(v)"
+                @update:model-value="
+                  (v: string | number) => (editTotal = v == null || v === '' ? null : Number(v))
+                "
                 type="number"
                 placeholder="None"
                 step="0.01"
@@ -266,7 +333,9 @@ function resetItems(model: string) {
             </UFormField>
           </div>
           <div class="flex gap-2 mt-2">
-            <UButton size="xs" color="primary" :loading="isSaving" @click="saveEdit(entry.model)">Save</UButton>
+            <UButton size="xs" color="primary" :loading="isSaving" @click="saveEdit(entry.model)"
+              >Save</UButton
+            >
             <UButton size="xs" variant="ghost" @click="cancelEdit">Cancel</UButton>
           </div>
         </div>

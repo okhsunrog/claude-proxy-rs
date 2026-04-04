@@ -108,7 +108,7 @@ async function toggleModel(modelId: string) {
 
     <div v-else-if="!allowAll" class="flex flex-wrap gap-1.5 mt-2">
       <UButton
-        v-for="model in availableModels.filter(m => m.enabled)"
+        v-for="model in availableModels.filter((m) => m.enabled)"
         :key="model.id"
         size="xs"
         :variant="isModelSelected(model.id) ? 'solid' : 'outline'"

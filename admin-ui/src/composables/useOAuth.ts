@@ -23,7 +23,7 @@ export function useOAuth() {
       isConnected.value = data?.authenticated ?? false
       planName.value = data?.plan ?? null
       if (isConnected.value) {
-        loadUsage()
+        void loadUsage()
       } else {
         subscriptionUsage.value = null
         planName.value = null

@@ -12,7 +12,7 @@ run:
 
 # Build admin UI
 build-ui:
-    cd admin-ui && bun install && bun run build
+    cd admin-ui && vp install && vp exec vue-tsc --build && vp build
 
 # Build release binary (includes embedded UI)
 build: build-ui
@@ -27,7 +27,7 @@ check:
     cargo fmt --check
     cargo clippy -- -D warnings
     cargo test
-    cd admin-ui && bun run type-check && bun run lint
+    cd admin-ui && vp check
 
 # Format code
 fmt:
@@ -36,12 +36,12 @@ fmt:
 # Lint
 lint:
     cargo clippy -- -D warnings
-    cd admin-ui && bun run lint
+    cd admin-ui && vp lint
 
 # Regenerate OpenAPI TypeScript client (no running backend needed)
 openapi:
     cargo run -- --openapi > admin-ui/openapi.json
-    cd admin-ui && bun run openapi-ts
+    cd admin-ui && vp exec openapi-ts
 
 # Run OpenAI compatibility test
 test-openai:

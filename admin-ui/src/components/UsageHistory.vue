@@ -181,7 +181,11 @@ const tokenChartOptions = computed(() => ({
     ...baseChartOptions.value.plugins,
     legend: {
       display: true,
-      labels: { color: isDark.value ? '#9ca3af' : '#6b7280', usePointStyle: true, pointStyle: 'circle' },
+      labels: {
+        color: isDark.value ? '#9ca3af' : '#6b7280',
+        usePointStyle: true,
+        pointStyle: 'circle',
+      },
     },
     tooltip: {
       callbacks: {
@@ -401,6 +405,5 @@ onMounted(() => fetchAll())
         />
       </UCard>
     </div>
-
   </div>
 </template>

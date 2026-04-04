@@ -41,13 +41,9 @@ const isLoading = ref(false)
 const granularity = ref('hour')
 
 export function useUsageHistory() {
-  const totalCost = computed(() =>
-    timeseries.value.reduce((sum, p) => sum + p.costMicrodollars, 0),
-  )
+  const totalCost = computed(() => timeseries.value.reduce((sum, p) => sum + p.costMicrodollars, 0))
 
-  const totalRequests = computed(() =>
-    timeseries.value.reduce((sum, p) => sum + p.requestCount, 0),
-  )
+  const totalRequests = computed(() => timeseries.value.reduce((sum, p) => sum + p.requestCount, 0))
 
   const avgCostPerRequest = computed(() =>
     totalRequests.value > 0 ? totalCost.value / totalRequests.value : 0,

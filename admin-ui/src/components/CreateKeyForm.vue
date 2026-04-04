@@ -45,9 +45,7 @@ async function handleCreate() {
         class="flex-1"
         @keyup.enter="handleCreate"
       />
-      <UButton color="primary" :loading="isCreating" @click="handleCreate">
-        Generate Key
-      </UButton>
+      <UButton color="primary" :loading="isCreating" @click="handleCreate"> Generate Key </UButton>
     </div>
   </div>
 </template>

@@ -67,7 +67,11 @@ const activePrimaryValue = computed(() => {
         v-for="(seg, i) in segments.filter((s) => !s.isExcluded)"
         :key="i"
         class="h-full rounded-full transition-all duration-300"
-        :style="{ width: `${seg.percentage}%`, backgroundColor: seg.color, minWidth: seg.percentage > 0 ? '4px' : '0' }"
+        :style="{
+          width: `${seg.percentage}%`,
+          backgroundColor: seg.color,
+          minWidth: seg.percentage > 0 ? '4px' : '0',
+        }"
       />
     </div>
     <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
@@ -87,8 +91,13 @@ const activePrimaryValue = computed(() => {
         />
         <span
           class="truncate"
-          :class="seg.isExcluded ? 'line-through text-gray-400 dark:text-gray-500' : 'text-gray-500 dark:text-gray-400'"
-        >{{ seg.label }}</span>
+          :class="
+            seg.isExcluded
+              ? 'line-through text-gray-400 dark:text-gray-500'
+              : 'text-gray-500 dark:text-gray-400'
+          "
+          >{{ seg.label }}</span
+        >
         <span v-if="!seg.isExcluded" class="font-medium">{{ seg.percentage.toFixed(1) }}%</span>
       </div>
     </div>

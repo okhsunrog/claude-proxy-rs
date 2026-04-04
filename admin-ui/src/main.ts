@@ -9,7 +9,7 @@ import { client } from './client/client.gen'
 // Redirect to login on 401 responses from the API
 client.interceptors.response.use((response) => {
   if (response.status === 401) {
-    router.push({ name: 'login' })
+    void router.push({ name: 'login' })
   }
   return response
 })

@@ -166,11 +166,7 @@ function getUsageItems(): UsageDisplayItem[] {
       <div v-if="isConnected && subscriptionUsage && getUsageItems().length > 0">
         <div class="text-xs text-muted uppercase mb-2">Subscription Limits</div>
         <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div
-            v-for="item in getUsageItems()"
-            :key="item.label"
-            class="rounded-lg bg-elevated p-3"
-          >
+          <div v-for="item in getUsageItems()" :key="item.label" class="rounded-lg bg-elevated p-3">
             <div class="text-xs text-muted uppercase">{{ item.label }}</div>
             <div class="text-lg font-semibold mt-1">{{ Math.floor(item.utilization) }}%</div>
             <UProgress
@@ -213,11 +209,19 @@ function getUsageItems(): UsageDisplayItem[] {
         color="error"
         title="Error"
         :description="error"
-        :close="{ onClick: () => { error = null } }"
+        :close="{
+          onClick: () => {
+            error = null
+          },
+        }"
       />
     </div>
 
-    <UModal v-model:open="showDisconnectModal" title="Confirm Disconnect" :ui="{ width: 'max-w-md' }">
+    <UModal
+      v-model:open="showDisconnectModal"
+      title="Confirm Disconnect"
+      :ui="{ width: 'max-w-md' }"
+    >
       <template #body>
         <p>Are you sure you want to disconnect?</p>
       </template>

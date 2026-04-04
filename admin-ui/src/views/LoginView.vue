@@ -44,14 +44,17 @@ async function handleLogin() {
         </UFormField>
 
         <UFormField label="Password">
-          <UInput v-model="password" type="password" autocomplete="current-password" class="w-full" />
+          <UInput
+            v-model="password"
+            type="password"
+            autocomplete="current-password"
+            class="w-full"
+          />
         </UFormField>
 
         <UAlert v-if="error" color="error" :title="error" />
 
-        <UButton type="submit" color="primary" block :loading="isLoading">
-          Log in
-        </UButton>
+        <UButton type="submit" color="primary" block :loading="isLoading"> Log in </UButton>
       </form>
     </UCard>
   </div>
