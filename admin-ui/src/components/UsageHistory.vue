@@ -1,9 +1,22 @@
 <script setup lang="ts">
 import { onMounted, computed } from 'vue'
-import { AreaChart } from 'vue-chrts'
+import { Line } from 'vue-chartjs'
+import {
+  Chart as ChartJS,
+  LineElement,
+  PointElement,
+  LinearScale,
+  CategoryScale,
+  Filler,
+  Tooltip,
+  Legend,
+  type TooltipItem,
+} from 'chart.js'
 import CategoryDistribution from './CategoryDistribution.vue'
 import { useUsageHistory, type Period } from '../composables/useUsageHistory'
 import { formatCost } from '../utils/format'
+
+ChartJS.register(LineElement, PointElement, LinearScale, CategoryScale, Filler, Tooltip, Legend)
 
 const {
   period,
@@ -30,56 +43,21 @@ const periods: { label: string; value: Period }[] = [
   { label: '30d', value: '30d' },
 ]
 
-// Area chart data: cost over time
-const areaData = computed(() =>
-  timeseries.value.map((p) => ({
-    x: p.timestamp,
-    cost: p.costMicrodollars / 1_000_000,
-  })),
-)
-
-const areaCategories = computed(() => ({
-  cost: { name: 'Cost ($)', color: '#22c55e' },
-}))
-
-// Area chart data: tokens over time
-const tokenAreaData = computed(() =>
-  timeseries.value.map((p) => ({
-    x: p.timestamp,
-    input: p.inputTokens,
-    output: p.outputTokens,
-    cacheRead: p.cacheReadTokens,
-    cacheWrite: p.cacheWriteTokens,
-  })),
-)
-
-const tokenAreaCategories = computed(() => ({
-  input: { name: 'Input', color: '#3b82f6' },
-  output: { name: 'Output', color: '#22c55e' },
-  cacheRead: { name: 'Cache Read', color: '#f59e0b' },
-  cacheWrite: { name: 'Cache Write', color: '#8b5cf6' },
-}))
-
-function formatTime(tick: number | Date) {
-  const idx = typeof tick === 'number' ? Math.round(tick) : 0
-  const point = timeseries.value[idx]
-  if (!point) return ''
-  const d = new Date(point.timestamp)
+function formatTimeLabel(timestamp: number): string {
+  const d = new Date(timestamp)
   if (period.value === '24h') {
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   }
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
-function formatDollars(tick: number | Date) {
-  const v = typeof tick === 'number' ? tick : 0
+function formatDollars(v: number): string {
   if (v >= 1) return `$${v.toFixed(1)}`
   if (v >= 0.01) return `$${v.toFixed(2)}`
   return `$${v.toFixed(3)}`
 }
 
-function formatTokenCount(tick: number | Date) {
-  const v = typeof tick === 'number' ? tick : 0
+function formatTokenCount(v: number): string {
   if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`
   if (v >= 1_000) return `${(v / 1_000).toFixed(0)}K`
   return v.toFixed(0)
@@ -90,6 +68,139 @@ function formatTokens(n: number): string {
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
   return n.toLocaleString()
 }
+
+const isDark = computed(() => document.documentElement.classList.contains('dark'))
+
+const gridColor = computed(() =>
+  isDark.value ? 'rgba(108, 119, 140, 0.25)' : 'rgba(200, 200, 210, 0.3)',
+)
+
+const baseChartOptions = computed(() => ({
+  responsive: true,
+  maintainAspectRatio: false,
+  interaction: { intersect: false, mode: 'index' as const },
+  plugins: {
+    legend: { display: false },
+  },
+  scales: {
+    x: {
+      grid: { color: gridColor.value },
+      ticks: {
+        color: isDark.value ? '#9ca3af' : '#6b7280',
+        maxTicksLimit: 6,
+      },
+    },
+    y: {
+      grid: { color: gridColor.value },
+      ticks: {
+        color: isDark.value ? '#9ca3af' : '#6b7280',
+        maxTicksLimit: 4,
+      },
+    },
+  },
+  elements: {
+    point: { radius: 0, hoverRadius: 4 },
+    line: { tension: 0.3 },
+  },
+}))
+
+// Cost chart
+const costChartData = computed(() => ({
+  labels: timeseries.value.map((p) => formatTimeLabel(p.timestamp)),
+  datasets: [
+    {
+      label: 'Cost ($)',
+      data: timeseries.value.map((p) => p.costMicrodollars / 1_000_000),
+      borderColor: '#22c55e',
+      backgroundColor: 'rgba(34, 197, 94, 0.15)',
+      fill: true,
+    },
+  ],
+}))
+
+const costChartOptions = computed(() => ({
+  ...baseChartOptions.value,
+  plugins: {
+    ...baseChartOptions.value.plugins,
+    tooltip: {
+      callbacks: {
+        label: (ctx: TooltipItem<'line'>) => formatDollars(ctx.parsed.y ?? 0),
+      },
+    },
+  },
+  scales: {
+    ...baseChartOptions.value.scales,
+    y: {
+      ...baseChartOptions.value.scales.y,
+      ticks: {
+        ...baseChartOptions.value.scales.y.ticks,
+        callback: (v: string | number) => formatDollars(Number(v)),
+      },
+    },
+  },
+}))
+
+// Token chart
+const tokenChartData = computed(() => ({
+  labels: timeseries.value.map((p) => formatTimeLabel(p.timestamp)),
+  datasets: [
+    {
+      label: 'Input',
+      data: timeseries.value.map((p) => p.inputTokens),
+      borderColor: '#3b82f6',
+      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+      fill: true,
+    },
+    {
+      label: 'Output',
+      data: timeseries.value.map((p) => p.outputTokens),
+      borderColor: '#22c55e',
+      backgroundColor: 'rgba(34, 197, 94, 0.1)',
+      fill: true,
+    },
+    {
+      label: 'Cache Read',
+      data: timeseries.value.map((p) => p.cacheReadTokens),
+      borderColor: '#f59e0b',
+      backgroundColor: 'rgba(245, 158, 11, 0.1)',
+      fill: true,
+    },
+    {
+      label: 'Cache Write',
+      data: timeseries.value.map((p) => p.cacheWriteTokens),
+      borderColor: '#8b5cf6',
+      backgroundColor: 'rgba(139, 92, 246, 0.1)',
+      fill: true,
+    },
+  ],
+}))
+
+const tokenChartOptions = computed(() => ({
+  ...baseChartOptions.value,
+  plugins: {
+    ...baseChartOptions.value.plugins,
+    legend: {
+      display: true,
+      labels: { color: isDark.value ? '#9ca3af' : '#6b7280', usePointStyle: true, pointStyle: 'circle' },
+    },
+    tooltip: {
+      callbacks: {
+        label: (ctx: TooltipItem<'line'>) =>
+          `${ctx.dataset.label ?? ''}: ${formatTokenCount(ctx.parsed.y ?? 0)}`,
+      },
+    },
+  },
+  scales: {
+    ...baseChartOptions.value.scales,
+    y: {
+      ...baseChartOptions.value.scales.y,
+      ticks: {
+        ...baseChartOptions.value.scales.y.ticks,
+        callback: (v: string | number) => formatTokenCount(Number(v)),
+      },
+    },
+  },
+}))
 
 const categoryColors = [
   '#22c55e', // green
@@ -218,38 +329,23 @@ onMounted(() => fetchAll())
     />
 
     <!-- Area chart: cost over time -->
-    <UCard v-if="areaData.length > 0">
+    <UCard v-if="timeseries.length > 0">
       <template #header>
         <span class="text-sm font-medium">Cost over time</span>
       </template>
-      <AreaChart
-        :data="areaData"
-        :height="250"
-        :categories="areaCategories"
-        :x-formatter="formatTime"
-        :y-formatter="formatDollars"
-        :y-grid-line="true"
-        :hide-legend="true"
-        :x-num-ticks="6"
-        :y-num-ticks="4"
-      />
+      <div style="height: 250px">
+        <Line :data="costChartData" :options="costChartOptions" />
+      </div>
     </UCard>
 
     <!-- Area chart: tokens over time -->
-    <UCard v-if="tokenAreaData.length > 0 && totalTokens > 0">
+    <UCard v-if="timeseries.length > 0 && totalTokens > 0">
       <template #header>
         <span class="text-sm font-medium">Tokens over time</span>
       </template>
-      <AreaChart
-        :data="tokenAreaData"
-        :height="250"
-        :categories="tokenAreaCategories"
-        :x-formatter="formatTime"
-        :y-formatter="formatTokenCount"
-        :y-grid-line="true"
-        :x-num-ticks="6"
-        :y-num-ticks="4"
-      />
+      <div style="height: 250px">
+        <Line :data="tokenChartData" :options="tokenChartOptions" />
+      </div>
     </UCard>
 
     <!-- Breakdown: cost by model + key -->
@@ -273,6 +369,8 @@ onMounted(() => fetchAll())
           :primary-value="formatCost(totalCost)"
           :categories="keyCostCategories"
           :gap="2"
+          :interactive="true"
+          :format-value="(v: number) => formatCost(v)"
         />
       </UCard>
     </div>
@@ -298,15 +396,11 @@ onMounted(() => fetchAll())
           :primary-value="formatTokens(totalTokens)"
           :categories="keyTokenCategories"
           :gap="2"
+          :interactive="true"
+          :format-value="(v: number) => formatTokens(v)"
         />
       </UCard>
     </div>
+
   </div>
 </template>
-
-<style scoped>
-:deep() {
-  --vis-dark-axis-grid-color: rgba(108, 119, 140, 0.25);
-  --vis-axis-grid-color: rgba(200, 200, 210, 0.3);
-}
-</style>
