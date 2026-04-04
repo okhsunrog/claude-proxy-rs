@@ -3,7 +3,7 @@ set dotenv-load
 # Use clang 18 for building (clang 22 breaks aegis crate's AVX-512 code)
 export PATH := "/usr/lib/llvm18/bin:" + env("PATH")
 
-server := "root@mira.local"
+server := "root@" + env("HOME_SRV_IP", "mira.local")
 deploy_dir := "/opt/claude-proxy"
 
 # Run the proxy server
