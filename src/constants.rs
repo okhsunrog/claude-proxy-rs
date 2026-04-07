@@ -14,6 +14,9 @@ pub const ANTHROPIC_PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/pro
 /// Anthropic API version header value
 pub const ANTHROPIC_VERSION: &str = "2023-06-01";
 
+/// Beta header for usage/profile API calls — only the OAuth beta, matching Claude Code exactly.
+pub const OAUTH_USAGE_BETA: &str = "oauth-2025-04-20";
+
 /// OAuth beta features header value (matches Claude Code 2.1.32)
 /// Includes adaptive-thinking for Opus 4.6 support
 pub const OAUTH_BETA_HEADER: &str = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14,prompt-caching-scope-2026-01-05,adaptive-thinking-2026-01-28";

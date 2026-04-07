@@ -5,7 +5,7 @@ use utoipa::ToSchema;
 
 use crate::AppState;
 use crate::constants::{
-    ANTHROPIC_PROFILE_URL, ANTHROPIC_USAGE_URL, ANTHROPIC_VERSION, OAUTH_BETA_HEADER, USER_AGENT,
+    ANTHROPIC_PROFILE_URL, ANTHROPIC_USAGE_URL, ANTHROPIC_VERSION, OAUTH_USAGE_BETA, USER_AGENT,
 };
 
 /// Cached subscription state: window reset times (epoch ms) and utilization percentages.
@@ -43,6 +43,7 @@ pub struct ExtraUsage {
 pub struct SubscriptionUsageResponse {
     pub five_hour: Option<UsageLimit>,
     pub seven_day: Option<UsageLimit>,
+    pub seven_day_oauth_apps: Option<UsageLimit>,
     pub seven_day_opus: Option<UsageLimit>,
     pub seven_day_sonnet: Option<UsageLimit>,
     pub extra_usage: Option<ExtraUsage>,
@@ -65,6 +66,7 @@ pub async fn fetch_plan_name(state: &AppState) -> Option<String> {
         .http_client
         .get(ANTHROPIC_PROFILE_URL)
         .header("authorization", format!("Bearer {token}"))
+        .header("anthropic-beta", OAUTH_USAGE_BETA)
         .header("content-type", "application/json")
         .timeout(std::time::Duration::from_secs(5))
         .send()
@@ -94,7 +96,7 @@ async fn fetch_window_resets(state: &AppState) -> SubscriptionState {
         .get(ANTHROPIC_USAGE_URL)
         .header("authorization", format!("Bearer {token}"))
         .header("anthropic-version", ANTHROPIC_VERSION)
-        .header("anthropic-beta", OAUTH_BETA_HEADER)
+        .header("anthropic-beta", OAUTH_USAGE_BETA)
         .header("content-type", "application/json")
         .header("user-agent", USER_AGENT)
         .header("accept", "application/json")
@@ -167,6 +169,57 @@ pub async fn get_or_refresh_window_resets(state: &AppState) -> SubscriptionState
         }
     }
     cached
+}
+
+/// Update the cached window resets from Anthropic rate-limit response headers.
+///
+/// Anthropic returns these headers on every successful inference response:
+///   anthropic-ratelimit-unified-5h-utilization  (0.0–1.0 fraction)
+///   anthropic-ratelimit-unified-5h-reset         (unix epoch seconds)
+///   anthropic-ratelimit-unified-7d-utilization
+///   anthropic-ratelimit-unified-7d-reset
+///
+/// This matches how Claude Code keeps its utilization state continuously fresh
+/// without needing to poll the usage API on every request.
+pub async fn update_window_resets_from_headers(
+    headers: &reqwest::header::HeaderMap,
+    state: &AppState,
+) {
+    let get_f64 = |name: &str| -> Option<f64> {
+        headers.get(name)?.to_str().ok()?.parse().ok()
+    };
+    let get_u64 = |name: &str| -> Option<u64> {
+        headers.get(name)?.to_str().ok()?.parse().ok()
+    };
+
+    // Headers send reset as epoch seconds; we store epoch ms.
+    // Utilization is a 0-1 fraction; we store as 0-100 percentage.
+    let five_hour_reset_at = get_u64("anthropic-ratelimit-unified-5h-reset").map(|s| s * 1000);
+    let seven_day_reset_at = get_u64("anthropic-ratelimit-unified-7d-reset").map(|s| s * 1000);
+    let five_hour_utilization =
+        get_f64("anthropic-ratelimit-unified-5h-utilization").map(|u| u * 100.0);
+    let seven_day_utilization =
+        get_f64("anthropic-ratelimit-unified-7d-utilization").map(|u| u * 100.0);
+
+    // Only update if at least the 5h reset is present — otherwise headers weren't included.
+    if five_hour_reset_at.is_none() {
+        return;
+    }
+
+    let fresh = SubscriptionState {
+        five_hour_reset_at,
+        seven_day_reset_at,
+        five_hour_utilization,
+        seven_day_utilization,
+    };
+
+    info!(
+        "Updated subscription state from response headers: 5h_reset={:?} 7d_reset={:?} 5h_util={:?} 7d_util={:?}",
+        fresh.five_hour_reset_at, fresh.seven_day_reset_at,
+        fresh.five_hour_utilization, fresh.seven_day_utilization,
+    );
+
+    *state.window_resets.write().await = fresh;
 }
 
 /// Always fetch fresh subscription state from Anthropic and update cache.

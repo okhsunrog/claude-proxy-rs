@@ -117,6 +117,9 @@ pub async fn messages(
             .into_response();
     }
 
+    // Update window resets from rate-limit headers on every successful response.
+    crate::subscription::update_window_resets_from_headers(response.headers(), &state).await;
+
     if stream {
         let body_stream = response.bytes_stream();
         let key_id = auth.client_key.id.clone();
