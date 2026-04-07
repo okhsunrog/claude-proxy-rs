@@ -185,12 +185,8 @@ pub async fn update_window_resets_from_headers(
     headers: &reqwest::header::HeaderMap,
     state: &AppState,
 ) {
-    let get_f64 = |name: &str| -> Option<f64> {
-        headers.get(name)?.to_str().ok()?.parse().ok()
-    };
-    let get_u64 = |name: &str| -> Option<u64> {
-        headers.get(name)?.to_str().ok()?.parse().ok()
-    };
+    let get_f64 = |name: &str| -> Option<f64> { headers.get(name)?.to_str().ok()?.parse().ok() };
+    let get_u64 = |name: &str| -> Option<u64> { headers.get(name)?.to_str().ok()?.parse().ok() };
 
     // Headers send reset as epoch seconds; we store epoch ms.
     // Utilization is a 0-1 fraction; we store as 0-100 percentage.
@@ -215,8 +211,10 @@ pub async fn update_window_resets_from_headers(
 
     info!(
         "Updated subscription state from response headers: 5h_reset={:?} 7d_reset={:?} 5h_util={:?} 7d_util={:?}",
-        fresh.five_hour_reset_at, fresh.seven_day_reset_at,
-        fresh.five_hour_utilization, fresh.seven_day_utilization,
+        fresh.five_hour_reset_at,
+        fresh.seven_day_reset_at,
+        fresh.five_hour_utilization,
+        fresh.seven_day_utilization,
     );
 
     *state.window_resets.write().await = fresh;

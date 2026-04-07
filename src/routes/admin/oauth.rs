@@ -15,9 +15,9 @@ use crate::subscription::{
 /// Build a partial SubscriptionUsageResponse from cached window_resets state.
 /// Used as fallback when Anthropic's usage API is rate-limited but we have
 /// fresh data from inference response headers.
-fn usage_from_window_resets(resets: &SubscriptionState) -> SubscriptionUsageResponse {    let to_iso = |epoch_ms: u64| -> Option<String> {
-        chrono::DateTime::from_timestamp_millis(epoch_ms as i64)
-            .map(|dt| dt.to_rfc3339())
+fn usage_from_window_resets(resets: &SubscriptionState) -> SubscriptionUsageResponse {
+    let to_iso = |epoch_ms: u64| -> Option<String> {
+        chrono::DateTime::from_timestamp_millis(epoch_ms as i64).map(|dt| dt.to_rfc3339())
     };
 
     SubscriptionUsageResponse {
@@ -179,7 +179,7 @@ pub async fn get_subscription_usage(
                 Json(ErrorResponse {
                     error: "Not authenticated".into(),
                 }),
-            ))
+            ));
         }
         Err(e) => {
             return Err((
@@ -187,7 +187,7 @@ pub async fn get_subscription_usage(
                 Json(ErrorResponse {
                     error: format!("OAuth error: {e}"),
                 }),
-            ))
+            ));
         }
     };
 
@@ -212,7 +212,9 @@ pub async fn get_subscription_usage(
             if let Some((ref usage, _)) = *cached {
                 return Ok(Json(usage.clone()));
             }
-            return Ok(Json(usage_from_window_resets(&*state.window_resets.read().await)));
+            return Ok(Json(usage_from_window_resets(
+                &*state.window_resets.read().await,
+            )));
         }
     };
 
@@ -226,7 +228,9 @@ pub async fn get_subscription_usage(
         if let Some((ref usage, _)) = *cached {
             return Ok(Json(usage.clone()));
         }
-        return Ok(Json(usage_from_window_resets(&*state.window_resets.read().await)));
+        return Ok(Json(usage_from_window_resets(
+            &*state.window_resets.read().await,
+        )));
     }
 
     let body = resp.text().await.unwrap_or_default();
@@ -238,7 +242,9 @@ pub async fn get_subscription_usage(
             if let Some((ref usage, _)) = *cached {
                 return Ok(Json(usage.clone()));
             }
-            return Ok(Json(usage_from_window_resets(&*state.window_resets.read().await)));
+            return Ok(Json(usage_from_window_resets(
+                &*state.window_resets.read().await,
+            )));
         }
     };
 
