@@ -1,0 +1,2133 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Claude Proxy Admin API",
+    "description": "Admin API for Claude Proxy",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/keys": {
+      "post": {
+        "tags": ["keys"],
+        "summary": "Create a new API key",
+        "operationId": "create_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateKeyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/keys/list": {
+      "get": {
+        "tags": ["keys"],
+        "summary": "List all API keys",
+        "operationId": "list_keys",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListKeysResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/keys/{id}": {
+      "delete": {
+        "tags": ["keys"],
+        "summary": "Delete an API key",
+        "operationId": "delete_key",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Key ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/keys/{id}/allow-extra-usage": {
+      "put": {
+        "tags": ["keys"],
+        "summary": "Toggle allow_extra_usage for a key",
+        "operationId": "set_allow_extra_usage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Key ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetAllowExtraUsageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/keys/{id}/enabled": {
+      "put": {
+        "tags": ["keys"],
+        "summary": "Toggle a key enabled/disabled",
+        "operationId": "set_key_enabled",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Key ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetKeyEnabledRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/keys/{id}/limits": {
+      "put": {
+        "tags": ["keys"],
+        "summary": "Update limits for a key",
+        "operationId": "update_key_limits",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Key ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateLimitsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/keys/{id}/model-usage": {
+      "get": {
+        "tags": ["keys"],
+        "summary": "Get per-model usage for a key",
+        "operationId": "get_key_model_usage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Key ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyModelUsageResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/keys/{id}/model-usage/{model}/limits": {
+      "put": {
+        "tags": ["keys"],
+        "summary": "Set per-model limits for a key",
+        "operationId": "set_key_model_limits",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Key ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "model",
+            "in": "path",
+            "description": "Model ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateLimitsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["keys"],
+        "summary": "Remove per-model limits for a key",
+        "operationId": "remove_key_model_limits",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Key ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "model",
+            "in": "path",
+            "description": "Model ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/keys/{id}/model-usage/{model}/reset": {
+      "post": {
+        "tags": ["keys"],
+        "summary": "Reset per-model usage counters for a key",
+        "operationId": "reset_key_model_usage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Key ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "model",
+            "in": "path",
+            "description": "Model ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetUsageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/keys/{id}/models": {
+      "get": {
+        "tags": ["keys"],
+        "summary": "Get allowed models for a key",
+        "operationId": "get_key_models",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Key ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyModelsResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": ["keys"],
+        "summary": "Set allowed models for a key (empty = allow all)",
+        "operationId": "set_key_models",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Key ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetKeyModelsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/keys/{id}/usage": {
+      "get": {
+        "tags": ["keys"],
+        "summary": "Get usage statistics for a key",
+        "operationId": "get_key_usage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Key ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyUsageResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/keys/{id}/usage/reset": {
+      "post": {
+        "tags": ["keys"],
+        "summary": "Reset usage counters for a key",
+        "operationId": "reset_key_usage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Key ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetUsageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/models": {
+      "get": {
+        "tags": ["models"],
+        "summary": "List all models (admin sees enabled + disabled)",
+        "operationId": "list_models_admin",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListModelsResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["models"],
+        "summary": "Add a new model",
+        "operationId": "add_model",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddModelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/models/reorder": {
+      "put": {
+        "tags": ["models"],
+        "summary": "Reorder models",
+        "operationId": "reorder_models",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderModelsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/models/{id}": {
+      "put": {
+        "tags": ["models"],
+        "summary": "Update a model (prices, enabled)",
+        "operationId": "update_model",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Model ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateModelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["models"],
+        "summary": "Delete a model",
+        "operationId": "delete_model",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Model ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth": {
+      "delete": {
+        "tags": ["oauth"],
+        "summary": "Delete OAuth credentials",
+        "operationId": "delete_oauth",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/exchange": {
+      "post": {
+        "tags": ["oauth"],
+        "summary": "Exchange OAuth code",
+        "operationId": "exchange_oauth_code",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExchangeCodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/start-flow": {
+      "post": {
+        "tags": ["oauth"],
+        "summary": "Start OAuth flow",
+        "operationId": "start_oauth_flow",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthUrlResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/status": {
+      "get": {
+        "tags": ["oauth"],
+        "summary": "Get OAuth connection status",
+        "operationId": "get_oauth_status",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/usage": {
+      "get": {
+        "tags": ["oauth"],
+        "summary": "Get Claude subscription usage from Anthropic API",
+        "operationId": "get_subscription_usage",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionUsageResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/usage-history": {
+      "delete": {
+        "operationId": "delete_usage_history",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/usage-history/by-key": {
+      "get": {
+        "operationId": "get_usage_history_by_key",
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "description": "Period: 24h, 7d, or 30d",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyBreakdownResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/usage-history/by-model": {
+      "get": {
+        "operationId": "get_usage_history_by_model",
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "description": "Period: 24h, 7d, or 30d",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelBreakdownResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/usage-history/timeseries": {
+      "get": {
+        "operationId": "get_usage_history_timeseries",
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "description": "Period: 24h, 7d, or 30d",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeseriesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/usage/history/by-model": {
+      "get": {
+        "tags": ["user-usage"],
+        "summary": "Get per-model breakdown for the authenticated key",
+        "operationId": "get_my_by_model",
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "description": "Period: 24h, 7d, or 30d",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelBreakdownResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_key": []
+          }
+        ]
+      }
+    },
+    "/usage/history/timeseries": {
+      "get": {
+        "tags": ["user-usage"],
+        "summary": "Get cost/token timeseries for the authenticated key",
+        "operationId": "get_my_timeseries",
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "description": "Period: 24h, 7d, or 30d",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeseriesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_key": []
+          }
+        ]
+      }
+    },
+    "/usage/me": {
+      "get": {
+        "tags": ["user-usage"],
+        "summary": "Get current usage and limits for the authenticated key",
+        "operationId": "get_my_usage",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserUsageResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_key": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AddModelRequest": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "cacheReadPrice": {
+            "type": "number",
+            "format": "double"
+          },
+          "cacheWritePrice": {
+            "type": "number",
+            "format": "double"
+          },
+          "id": {
+            "type": "string"
+          },
+          "inputPrice": {
+            "type": "number",
+            "format": "double"
+          },
+          "outputPrice": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "ClientKey": {
+        "type": "object",
+        "required": ["id", "key", "name", "createdAt", "enabled", "allowExtraUsage"],
+        "properties": {
+          "allowExtraUsage": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "lastUsedAt": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "minimum": 0
+          },
+          "limits": {
+            "$ref": "#/components/schemas/TokenLimits"
+          },
+          "name": {
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/TokenUsage"
+          }
+        }
+      },
+      "CreateKeyRequest": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateKeyResponse": {
+        "type": "object",
+        "required": ["key", "id"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          }
+        }
+      },
+      "ErrorBody": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "ExchangeCodeRequest": {
+        "type": "object",
+        "required": ["code"],
+        "properties": {
+          "code": {
+            "type": "string"
+          }
+        }
+      },
+      "ExtraUsage": {
+        "type": "object",
+        "required": ["is_enabled"],
+        "properties": {
+          "is_enabled": {
+            "type": "boolean"
+          },
+          "monthly_limit": {
+            "type": ["number", "null"],
+            "format": "double"
+          },
+          "used_credits": {
+            "type": ["number", "null"],
+            "format": "double"
+          },
+          "utilization": {
+            "type": ["number", "null"],
+            "format": "double"
+          }
+        }
+      },
+      "KeyBreakdown": {
+        "type": "object",
+        "required": [
+          "keyId",
+          "requestCount",
+          "costMicrodollars",
+          "inputTokens",
+          "outputTokens",
+          "cacheReadTokens",
+          "cacheWriteTokens"
+        ],
+        "properties": {
+          "cacheReadTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "cacheWriteTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "costMicrodollars": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "inputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "keyId": {
+            "type": "string"
+          },
+          "keyName": {
+            "type": ["string", "null"]
+          },
+          "outputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "requestCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "KeyBreakdownResponse": {
+        "type": "object",
+        "required": ["period", "keys"],
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KeyBreakdown"
+            }
+          },
+          "period": {
+            "type": "string"
+          }
+        }
+      },
+      "KeyModelUsageResponse": {
+        "type": "object",
+        "required": ["entries"],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelUsageEntry"
+            }
+          }
+        }
+      },
+      "KeyModelsResponse": {
+        "type": "object",
+        "required": ["allowAll", "models"],
+        "properties": {
+          "allowAll": {
+            "type": "boolean"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "KeyUsageResponse": {
+        "type": "object",
+        "required": ["limits", "usage"],
+        "properties": {
+          "limits": {
+            "$ref": "#/components/schemas/TokenLimits"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/TokenUsage"
+          }
+        }
+      },
+      "ListKeysResponse": {
+        "type": "object",
+        "required": ["keys"],
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClientKey"
+            }
+          }
+        }
+      },
+      "ListModelsResponse": {
+        "type": "object",
+        "required": ["models"],
+        "properties": {
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Model"
+            }
+          }
+        }
+      },
+      "Model": {
+        "type": "object",
+        "description": "A model entry from the database",
+        "required": [
+          "id",
+          "sortOrder",
+          "enabled",
+          "inputPrice",
+          "outputPrice",
+          "cacheReadPrice",
+          "cacheWritePrice"
+        ],
+        "properties": {
+          "cacheReadPrice": {
+            "type": "number",
+            "format": "double"
+          },
+          "cacheWritePrice": {
+            "type": "number",
+            "format": "double"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "inputPrice": {
+            "type": "number",
+            "format": "double"
+          },
+          "outputPrice": {
+            "type": "number",
+            "format": "double"
+          },
+          "sortOrder": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "ModelBreakdown": {
+        "type": "object",
+        "required": [
+          "model",
+          "requestCount",
+          "costMicrodollars",
+          "inputTokens",
+          "outputTokens",
+          "cacheReadTokens",
+          "cacheWriteTokens"
+        ],
+        "properties": {
+          "cacheReadTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "cacheWriteTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "costMicrodollars": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "inputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "model": {
+            "type": "string"
+          },
+          "outputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "requestCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "ModelBreakdownResponse": {
+        "type": "object",
+        "required": ["period", "models"],
+        "properties": {
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelBreakdown"
+            }
+          },
+          "period": {
+            "type": "string"
+          }
+        }
+      },
+      "ModelUsageEntry": {
+        "type": "object",
+        "description": "Per-model usage entry with limits and token breakdowns",
+        "required": [
+          "model",
+          "limits",
+          "fiveHour",
+          "weekly",
+          "total",
+          "fiveHourResetAt",
+          "weeklyResetAt"
+        ],
+        "properties": {
+          "fiveHour": {
+            "$ref": "#/components/schemas/TokenBreakdown"
+          },
+          "fiveHourResetAt": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "limits": {
+            "$ref": "#/components/schemas/TokenLimits"
+          },
+          "model": {
+            "type": "string"
+          },
+          "total": {
+            "$ref": "#/components/schemas/TokenBreakdown"
+          },
+          "weekly": {
+            "$ref": "#/components/schemas/TokenBreakdown"
+          },
+          "weeklyResetAt": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "OAuthStatusResponse": {
+        "type": "object",
+        "required": ["authenticated"],
+        "properties": {
+          "authenticated": {
+            "type": "boolean"
+          },
+          "plan": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "OAuthUrlResponse": {
+        "type": "object",
+        "required": ["url"],
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "ReorderModelsRequest": {
+        "type": "object",
+        "required": ["ids"],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ResetUsageRequest": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Which counter to reset: \"hourly\", \"weekly\", \"total\", or \"all\""
+          }
+        }
+      },
+      "SetAllowExtraUsageRequest": {
+        "type": "object",
+        "required": ["allow_extra_usage"],
+        "properties": {
+          "allow_extra_usage": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SetKeyEnabledRequest": {
+        "type": "object",
+        "required": ["enabled"],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SetKeyModelsRequest": {
+        "type": "object",
+        "required": ["models"],
+        "properties": {
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "SubscriptionUsageResponse": {
+        "type": "object",
+        "properties": {
+          "extra_usage": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ExtraUsage"
+              }
+            ]
+          },
+          "five_hour": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UsageLimit"
+              }
+            ]
+          },
+          "seven_day": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UsageLimit"
+              }
+            ]
+          },
+          "seven_day_opus": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UsageLimit"
+              }
+            ]
+          },
+          "seven_day_sonnet": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UsageLimit"
+              }
+            ]
+          }
+        }
+      },
+      "SuccessResponse": {
+        "type": "object",
+        "required": ["success"],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TimeseriesPoint": {
+        "type": "object",
+        "required": [
+          "timestamp",
+          "requestCount",
+          "costMicrodollars",
+          "inputTokens",
+          "outputTokens",
+          "cacheReadTokens",
+          "cacheWriteTokens"
+        ],
+        "properties": {
+          "cacheReadTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "cacheWriteTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "costMicrodollars": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "inputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "outputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "requestCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "timestamp": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "TimeseriesResponse": {
+        "type": "object",
+        "required": ["period", "granularity", "points"],
+        "properties": {
+          "granularity": {
+            "type": "string"
+          },
+          "period": {
+            "type": "string"
+          },
+          "points": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TimeseriesPoint"
+            }
+          }
+        }
+      },
+      "TokenBreakdown": {
+        "type": "object",
+        "description": "4-type token breakdown for display",
+        "required": ["input", "output", "cacheRead", "cacheWrite"],
+        "properties": {
+          "cacheRead": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "cacheWrite": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "input": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "output": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "TokenLimits": {
+        "type": "object",
+        "description": "Token usage limits for a client key (all optional, in microdollars)",
+        "properties": {
+          "fiveHourLimit": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Maximum cost per 5-hour window (None = unlimited)",
+            "minimum": 0
+          },
+          "totalLimit": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Maximum total cost ever (None = unlimited)",
+            "minimum": 0
+          },
+          "weeklyLimit": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Maximum cost per week (None = unlimited)",
+            "minimum": 0
+          }
+        }
+      },
+      "TokenUsage": {
+        "type": "object",
+        "description": "Current token usage for a client key (derived from per-model aggregation)",
+        "properties": {
+          "fiveHourResetAt": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Timestamp when 5-hour counter resets (epoch ms)",
+            "default": 0,
+            "minimum": 0
+          },
+          "fiveHourTokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Cost in current 5-hour window (microdollars)",
+            "default": 0,
+            "minimum": 0
+          },
+          "totalTokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total cost (lifetime, microdollars)",
+            "default": 0,
+            "minimum": 0
+          },
+          "weeklyResetAt": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Timestamp when weekly counter resets (epoch ms)",
+            "default": 0,
+            "minimum": 0
+          },
+          "weeklyTokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Cost in current week (microdollars)",
+            "default": 0,
+            "minimum": 0
+          }
+        }
+      },
+      "UpdateLimitsRequest": {
+        "type": "object",
+        "properties": {
+          "fiveHourLimit": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "minimum": 0
+          },
+          "totalLimit": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "minimum": 0
+          },
+          "weeklyLimit": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "UpdateModelRequest": {
+        "type": "object",
+        "properties": {
+          "cacheReadPrice": {
+            "type": ["number", "null"],
+            "format": "double"
+          },
+          "cacheWritePrice": {
+            "type": ["number", "null"],
+            "format": "double"
+          },
+          "enabled": {
+            "type": ["boolean", "null"]
+          },
+          "inputPrice": {
+            "type": ["number", "null"],
+            "format": "double"
+          },
+          "outputPrice": {
+            "type": ["number", "null"],
+            "format": "double"
+          }
+        }
+      },
+      "UsageLimit": {
+        "type": "object",
+        "properties": {
+          "resets_at": {
+            "type": ["string", "null"]
+          },
+          "utilization": {
+            "type": ["number", "null"],
+            "format": "double"
+          }
+        }
+      },
+      "UserUsageResponse": {
+        "type": "object",
+        "required": ["keyName", "limits", "usage", "modelEntries"],
+        "properties": {
+          "keyName": {
+            "type": "string"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/TokenLimits"
+          },
+          "modelEntries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelUsageEntry"
+            }
+          },
+          "usage": {
+            "$ref": "#/components/schemas/TokenUsage"
+          }
+        }
+      }
+    }
+  }
+}

@@ -9,7 +9,7 @@
 //! - Injecting system message prefix
 //! - Auto-injecting cache_control breakpoints for optimal caching
 
-use rand::Rng;
+use rand::RngExt;
 use serde_json::{Value, json};
 use uuid::Uuid;
 

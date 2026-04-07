@@ -15,11 +15,11 @@ dotenvy = "0.15.7"
 futures-util = "0.3.31"
 llm-relay = { version = "0.2.1", default-features = false }
 memory-serve = "2.0.0-beta.0"
-rand = "0.9.2"
+rand = "0.10"
 reqwest = { version = "0.13.1", features = ["form", "json", "multipart", "stream"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-sha2 = "0.10.9"
+sha2 = "0.11"
 subtle = "2.6.1"
 thiserror = "2.0"
 tokio = { version = "1.49.0", features = ["full"] }
@@ -27,7 +27,7 @@ tower = { version = "0.5.3", features = ["limit", "timeout", "buffer"] }
 tower-http = { version = "0.6.8", features = ["cors", "normalize-path"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
-turso = "0.6.0-pre.5"
+turso = "0.6.0-pre.15"
 aegis = { version = "0.9.7", features = ["pure-rust"] }
 url = "2.5.8"
 urlencoding = "2.1.3"

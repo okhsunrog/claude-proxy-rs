@@ -252,7 +252,11 @@ fn unauthorized_response() -> Response {
     (StatusCode::UNAUTHORIZED, "Unauthorized").into_response()
 }
 
-fn openapi_router() -> OpenApiRouter<Arc<AppState>> {
+fn full_openapi_router() -> OpenApiRouter<Arc<AppState>> {
+    admin_openapi_router().merge(routes::user_usage::user_usage_router())
+}
+
+fn admin_openapi_router() -> OpenApiRouter<Arc<AppState>> {
     OpenApiRouter::with_openapi(
         utoipa::openapi::OpenApiBuilder::new()
             .info(
@@ -307,7 +311,7 @@ fn openapi_router() -> OpenApiRouter<Arc<AppState>> {
 }
 
 fn build_openapi() -> utoipa::openapi::OpenApi {
-    let (_, openapi) = openapi_router().split_for_parts();
+    let (_, openapi) = full_openapi_router().split_for_parts();
     openapi
 }
 
@@ -424,8 +428,11 @@ async fn main() {
         CorsMode::AllowList(list) => info!("CORS: Allowing origins: {:?}", list),
     }
 
-    // Admin API routes
-    let (api_router, _) = openapi_router().split_for_parts();
+    // Admin API routes (protected)
+    let (api_router, _) = admin_openapi_router().split_for_parts();
+
+    // User-facing usage routes (unprotected — Bearer key auth handled in handlers)
+    let (user_router, _) = routes::user_usage::user_usage_router().split_for_parts();
 
     // Auth endpoints (accessible without authentication)
     let auth_routes = Router::new()
@@ -440,9 +447,10 @@ async fn main() {
         admin_auth_middleware,
     ));
 
-    // Combine: auth routes (unprotected) + protected API + static SPA
+    // Combine: auth routes (unprotected) + user usage (unprotected) + protected API + static SPA
     let admin_routes = Router::new()
         .merge(auth_routes)
+        .merge(user_router)
         .merge(protected_routes)
         .merge(routes::admin::static_routes());
 

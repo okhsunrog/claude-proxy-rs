@@ -81,6 +81,10 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      '/admin/usage': {
+        target: 'http://localhost:4096',
+        changeOrigin: true,
+      },
       '/admin/auth': {
         target: 'http://localhost:4096',
         changeOrigin: true,
