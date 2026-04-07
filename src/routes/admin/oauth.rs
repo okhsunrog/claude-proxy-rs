@@ -6,7 +6,7 @@ use utoipa::ToSchema;
 
 use super::{ErrorResponse, SuccessResponse};
 use crate::AppState;
-use crate::constants::{ANTHROPIC_USAGE_URL, ANTHROPIC_VERSION, OAUTH_BETA_HEADER, USER_AGENT};
+use crate::constants::{ANTHROPIC_USAGE_URL, ANTHROPIC_VERSION, OAUTH_USAGE_BETA, USER_AGENT};
 use crate::subscription::{SubscriptionUsageResponse, extract_subscription_state, fetch_plan_name};
 
 // --- Types ---
@@ -125,54 +125,86 @@ pub async fn delete_oauth(
 pub async fn get_subscription_usage(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<SubscriptionUsageResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let token = state
-        .oauth
-        .refresh_if_needed()
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(ErrorResponse {
-                    error: format!("OAuth error: {e}"),
-                }),
-            )
-        })?
-        .ok_or_else(|| {
-            (
+    use crate::subscription::timestamp_millis;
+
+    const CACHE_TTL_MS: u64 = 5 * 60 * 1000; // 5 minutes
+
+    // Return cached response if it's still fresh.
+    // Invalidate when: TTL expired OR the 5-hour window has reset since we cached.
+    {
+        let cached = state.cached_usage.read().await;
+        if let Some((ref usage, cached_at)) = *cached {
+            let now = timestamp_millis();
+            let five_hour_reset_at = state.window_resets.read().await.five_hour_reset_at;
+            let window_reset_since_cache =
+                five_hour_reset_at.is_some_and(|r| r > cached_at && r <= now);
+            if now - cached_at < CACHE_TTL_MS && !window_reset_since_cache {
+                return Ok(Json(usage.clone()));
+            }
+        }
+    }
+
+    let token = match state.oauth.refresh_if_needed().await {
+        Ok(Some(t)) => t,
+        Ok(None) => {
+            return Err((
                 StatusCode::UNAUTHORIZED,
                 Json(ErrorResponse {
                     error: "Not authenticated".into(),
                 }),
-            )
-        })?;
+            ))
+        }
+        Err(e) => {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(ErrorResponse {
+                    error: format!("OAuth error: {e}"),
+                }),
+            ))
+        }
+    };
 
     let resp = state
         .http_client
         .get(ANTHROPIC_USAGE_URL)
         .header("authorization", format!("Bearer {token}"))
         .header("anthropic-version", ANTHROPIC_VERSION)
-        .header("anthropic-beta", OAUTH_BETA_HEADER)
+        .header("anthropic-beta", OAUTH_USAGE_BETA)
         .header("content-type", "application/json")
         .header("user-agent", USER_AGENT)
         .header("accept", "application/json")
         .timeout(std::time::Duration::from_secs(10))
         .send()
-        .await
-        .map_err(|e| {
+        .await;
+
+    let resp = match resp {
+        Ok(r) => r,
+        Err(e) => {
             warn!("Failed to contact Anthropic usage API: {e}");
-            (
+            // Return stale cache on network error rather than failing.
+            let cached = state.cached_usage.read().await;
+            if let Some((ref usage, _)) = *cached {
+                return Ok(Json(usage.clone()));
+            }
+            return Err((
                 StatusCode::BAD_GATEWAY,
                 Json(ErrorResponse {
                     error: format!("Failed to contact Anthropic: {e}"),
                 }),
-            )
-        })?;
+            ));
+        }
+    };
 
     let status = resp.status();
-    let body = resp.text().await.unwrap_or_default();
 
+    // On rate limit or server error, return stale cache if available.
     if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
         warn!("Anthropic usage API returned {status}: {body}");
+        let cached = state.cached_usage.read().await;
+        if let Some((ref usage, _)) = *cached {
+            return Ok(Json(usage.clone()));
+        }
         return Err((
             StatusCode::BAD_GATEWAY,
             Json(ErrorResponse {
@@ -181,21 +213,30 @@ pub async fn get_subscription_usage(
         ));
     }
 
-    let usage: SubscriptionUsageResponse = serde_json::from_str(&body).map_err(|e| {
-        warn!("Failed to parse usage response: {e}");
-        (
-            StatusCode::BAD_GATEWAY,
-            Json(ErrorResponse {
-                error: format!("Failed to parse usage response: {e}"),
-            }),
-        )
-    })?;
+    let body = resp.text().await.unwrap_or_default();
+    let usage: SubscriptionUsageResponse = match serde_json::from_str(&body) {
+        Ok(u) => u,
+        Err(e) => {
+            warn!("Failed to parse usage response: {e}");
+            let cached = state.cached_usage.read().await;
+            if let Some((ref usage, _)) = *cached {
+                return Ok(Json(usage.clone()));
+            }
+            return Err((
+                StatusCode::BAD_GATEWAY,
+                Json(ErrorResponse {
+                    error: format!("Failed to parse usage response: {e}"),
+                }),
+            ));
+        }
+    };
 
-    // Update window resets cache as side effect
+    // Update caches.
     let resets = extract_subscription_state(&usage);
     if resets.five_hour_reset_at.is_some() {
         *state.window_resets.write().await = resets;
     }
+    *state.cached_usage.write().await = Some((usage.clone(), timestamp_millis()));
 
     Ok(Json(usage))
 }

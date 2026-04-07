@@ -39,7 +39,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const GIT_HASH: &str = env!("GIT_HASH");
 pub const BUILD_TIME: &str = env!("BUILD_TIME");
 
-use subscription::SubscriptionState;
+use subscription::{SubscriptionState, SubscriptionUsageResponse};
 
 pub struct AdminCredentials {
     pub username: String,
@@ -61,6 +61,8 @@ pub struct AppState {
     pub cloak_mode: CloakMode,
     /// Cached subscription window reset times for syncing rate-limit windows
     pub window_resets: RwLock<SubscriptionState>,
+    /// Cached full subscription usage response (avoids hammering Anthropic's rate-limited endpoint)
+    pub cached_usage: RwLock<Option<(SubscriptionUsageResponse, u64)>>,
 }
 
 impl AppState {
@@ -383,6 +385,7 @@ async fn main() {
         disable_auth,
         cloak_mode,
         window_resets: RwLock::new(SubscriptionState::default()),
+        cached_usage: RwLock::new(None),
     });
 
     // CORS configuration based on environment

@@ -22,14 +22,14 @@ pub struct SubscriptionState {
 
 // --- API response types ---
 
-#[derive(Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct UsageLimit {
     pub utilization: Option<f64>,
     pub resets_at: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ExtraUsage {
     pub is_enabled: bool,
@@ -38,7 +38,7 @@ pub struct ExtraUsage {
     pub utilization: Option<f64>,
 }
 
-#[derive(Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct SubscriptionUsageResponse {
     pub five_hour: Option<UsageLimit>,
