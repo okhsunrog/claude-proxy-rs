@@ -25,7 +25,7 @@ pub const OPUS_4_6_MAX_OUTPUT: u32 = 128000;
 pub const DEFAULT_MAX_OUTPUT: u32 = 64000;
 
 /// User agent string for OAuth requests (mimics Claude CLI)
-pub const USER_AGENT: &str = "claude-cli/2.1.32 (external, cli)";
+pub const USER_AGENT: &str = "claude-code/2.1.92 (external, cli)";
 
 /// System message prefix for OAuth requests (Claude Code identity)
 pub const SYSTEM_PREFIX: &str = "You are Claude Code, Anthropic's official CLI for Claude.";

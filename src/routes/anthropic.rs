@@ -7,7 +7,7 @@ use axum::{
 };
 use serde_json::Value;
 use std::sync::Arc;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use llm_relay::convert::tool_names::transform_response_tool_names;
 
@@ -67,6 +67,40 @@ pub async fn messages(
             return ProxyError::AnthropicApiError(format!("Failed to contact Anthropic: {}", e))
                 .to_anthropic_response();
         }
+    };
+
+    // On 401, force-refresh the OAuth token and retry once. This handles server-side
+    // token revocation (e.g. password change) without waiting for local expiry.
+    let response = if response.status() == StatusCode::UNAUTHORIZED {
+        info!("Anthropic returned 401, force-refreshing OAuth token and retrying");
+        let new_token = match state.oauth.force_refresh().await {
+            Ok(Some(t)) => t,
+            Ok(None) => {
+                return ProxyError::NoAuthConfigured.to_anthropic_response();
+            }
+            Err(e) => {
+                return ProxyError::OAuthError(e).to_anthropic_response();
+            }
+        };
+        let retry_builder = build_anthropic_request(
+            &state.http_client,
+            ANTHROPIC_API_URL,
+            &new_token,
+            Some(&prepared.betas),
+            stream,
+        );
+        match retry_builder.json(&prepared.body).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                return ProxyError::AnthropicApiError(format!(
+                    "Failed to contact Anthropic on retry: {}",
+                    e
+                ))
+                .to_anthropic_response();
+            }
+        }
+    } else {
+        response
     };
 
     if !response.status().is_success() {

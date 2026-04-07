@@ -13,10 +13,10 @@ use super::storage::{Auth, AuthStore};
 use crate::error::ProxyError;
 
 const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-const AUTHORIZE_URL: &str = "https://claude.ai/oauth/authorize";
-const TOKEN_URL: &str = "https://console.anthropic.com/v1/oauth/token";
-const REDIRECT_URI: &str = "https://console.anthropic.com/oauth/code/callback";
-const SCOPES: &str = "org:create_api_key user:profile user:inference";
+const AUTHORIZE_URL: &str = "https://claude.com/cai/oauth/authorize";
+const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
+const REDIRECT_URI: &str = "https://platform.claude.com/oauth/code/callback";
+const SCOPES: &str = "org:create_api_key user:profile user:inference user:sessions:claude_code";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct TokenResponse {
@@ -140,31 +140,11 @@ impl OAuthManager {
         Ok(())
     }
 
-    pub async fn refresh_if_needed(&self) -> Result<Option<String>, String> {
-        let auth = match self.auth_store.get("anthropic").await {
-            Some(auth) => auth,
-            None => return Ok(None),
-        };
-
-        let (access, refresh, expires) = match auth {
-            Auth::OAuth {
-                access,
-                refresh,
-                expires,
-                ..
-            } => (access, refresh, expires),
-            Auth::Api { key } => return Ok(Some(key)),
-            Auth::WellKnown { token, .. } => return Ok(Some(token)),
-        };
-
+    async fn do_refresh(&self, refresh: String) -> Result<Option<String>, String> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis() as u64;
-
-        if now + 60_000 < expires {
-            return Ok(Some(access));
-        }
 
         let body = serde_json::json!({
             "grant_type": "refresh_token",
@@ -215,6 +195,52 @@ impl OAuthManager {
             .map_err(|e| format!("Failed to save refreshed auth: {}", e))?;
 
         Ok(Some(token.access_token))
+    }
+
+    pub async fn refresh_if_needed(&self) -> Result<Option<String>, String> {
+        let auth = match self.auth_store.get("anthropic").await {
+            Some(auth) => auth,
+            None => return Ok(None),
+        };
+
+        let (access, refresh, expires) = match auth {
+            Auth::OAuth {
+                access,
+                refresh,
+                expires,
+                ..
+            } => (access, refresh, expires),
+            Auth::Api { key } => return Ok(Some(key)),
+            Auth::WellKnown { token, .. } => return Ok(Some(token)),
+        };
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        if now + 300_000 < expires {
+            return Ok(Some(access));
+        }
+
+        self.do_refresh(refresh).await
+    }
+
+    /// Force a token refresh regardless of expiry. Used when Anthropic returns 401
+    /// to recover from server-side token revocation without waiting for local expiry.
+    pub async fn force_refresh(&self) -> Result<Option<String>, String> {
+        let auth = match self.auth_store.get("anthropic").await {
+            Some(auth) => auth,
+            None => return Ok(None),
+        };
+
+        let refresh = match auth {
+            Auth::OAuth { refresh, .. } => refresh,
+            Auth::Api { key } => return Ok(Some(key)),
+            Auth::WellKnown { token, .. } => return Ok(Some(token)),
+        };
+
+        self.do_refresh(refresh).await
     }
 
     pub async fn logout(&self) -> Result<(), ProxyError> {

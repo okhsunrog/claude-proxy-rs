@@ -70,7 +70,7 @@ export default defineConfig({
     ignorePatterns: ['**/src/client/**'],
   },
   build: {
-    chunkSizeWarningLimit: 700,
+    chunkSizeWarningLimit: 1000,
   },
   base: '/admin/',
   plugins: [vue(), vueDevTools(), ui()],

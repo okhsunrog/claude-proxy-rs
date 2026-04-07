@@ -28,6 +28,7 @@ tower-http = { version = "0.6.8", features = ["cors", "normalize-path"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 turso = "0.6.0-pre.5"
+aegis = { version = "0.9.7", features = ["pure-rust"] }
 url = "2.5.8"
 urlencoding = "2.1.3"
 utoipa = { version = "5.4.0", features = ["axum_extras"] }
