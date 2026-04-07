@@ -30,15 +30,13 @@ jobs:
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: admin-ui
     steps:
       - uses: actions/checkout@v4
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          cache: true
+          working-directory: admin-ui
 
-      - run: bun install
-
-      - run: bun run type-check
-      - run: bun run lint
+      - run: vp check
+        working-directory: admin-ui
