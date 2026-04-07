@@ -38,7 +38,7 @@ pub struct ExtraUsage {
     pub utilization: Option<f64>,
 }
 
-#[derive(Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Default, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct SubscriptionUsageResponse {
     pub five_hour: Option<UsageLimit>,

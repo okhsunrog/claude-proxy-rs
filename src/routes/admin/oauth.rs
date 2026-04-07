@@ -7,7 +7,34 @@ use utoipa::ToSchema;
 use super::{ErrorResponse, SuccessResponse};
 use crate::AppState;
 use crate::constants::{ANTHROPIC_USAGE_URL, ANTHROPIC_VERSION, OAUTH_USAGE_BETA, USER_AGENT};
-use crate::subscription::{SubscriptionUsageResponse, extract_subscription_state, fetch_plan_name};
+use crate::subscription::{
+    SubscriptionState, SubscriptionUsageResponse, UsageLimit, extract_subscription_state,
+    fetch_plan_name,
+};
+
+/// Build a partial SubscriptionUsageResponse from cached window_resets state.
+/// Used as fallback when Anthropic's usage API is rate-limited but we have
+/// fresh data from inference response headers.
+fn usage_from_window_resets(resets: &SubscriptionState) -> SubscriptionUsageResponse {    let to_iso = |epoch_ms: u64| -> Option<String> {
+        chrono::DateTime::from_timestamp_millis(epoch_ms as i64)
+            .map(|dt| dt.to_rfc3339())
+    };
+
+    SubscriptionUsageResponse {
+        five_hour: resets.five_hour_reset_at.map(|ts| UsageLimit {
+            utilization: resets.five_hour_utilization,
+            resets_at: to_iso(ts),
+        }),
+        seven_day: resets.seven_day_reset_at.map(|ts| UsageLimit {
+            utilization: resets.seven_day_utilization,
+            resets_at: to_iso(ts),
+        }),
+        seven_day_oauth_apps: None,
+        seven_day_opus: None,
+        seven_day_sonnet: None,
+        extra_usage: None,
+    }
+}
 
 // --- Types ---
 
@@ -181,23 +208,17 @@ pub async fn get_subscription_usage(
         Ok(r) => r,
         Err(e) => {
             warn!("Failed to contact Anthropic usage API: {e}");
-            // Return stale cache on network error rather than failing.
             let cached = state.cached_usage.read().await;
             if let Some((ref usage, _)) = *cached {
                 return Ok(Json(usage.clone()));
             }
-            return Err((
-                StatusCode::BAD_GATEWAY,
-                Json(ErrorResponse {
-                    error: format!("Failed to contact Anthropic: {e}"),
-                }),
-            ));
+            return Ok(Json(usage_from_window_resets(&*state.window_resets.read().await)));
         }
     };
 
     let status = resp.status();
 
-    // On rate limit or server error, return stale cache if available.
+    // On rate limit or server error, return stale cache or window_resets fallback.
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
         warn!("Anthropic usage API returned {status}: {body}");
@@ -205,12 +226,7 @@ pub async fn get_subscription_usage(
         if let Some((ref usage, _)) = *cached {
             return Ok(Json(usage.clone()));
         }
-        return Err((
-            StatusCode::BAD_GATEWAY,
-            Json(ErrorResponse {
-                error: format!("Anthropic returned {status}: {body}"),
-            }),
-        ));
+        return Ok(Json(usage_from_window_resets(&*state.window_resets.read().await)));
     }
 
     let body = resp.text().await.unwrap_or_default();
@@ -222,12 +238,7 @@ pub async fn get_subscription_usage(
             if let Some((ref usage, _)) = *cached {
                 return Ok(Json(usage.clone()));
             }
-            return Err((
-                StatusCode::BAD_GATEWAY,
-                Json(ErrorResponse {
-                    error: format!("Failed to parse usage response: {e}"),
-                }),
-            ));
+            return Ok(Json(usage_from_window_resets(&*state.window_resets.read().await)));
         }
     };
 
