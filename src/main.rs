@@ -279,6 +279,11 @@ fn admin_openapi_router() -> OpenApiRouter<Arc<AppState>> {
     .routes(routes!(routes::admin::exchange_oauth_code))
     .routes(routes!(routes::admin::delete_oauth))
     .routes(routes!(routes::admin::get_subscription_usage))
+    .routes(routes!(
+        routes::admin::get_web_session_status,
+        routes::admin::save_web_session,
+        routes::admin::delete_web_session
+    ))
     // Keys
     .routes(routes!(routes::admin::create_key))
     .routes(routes!(routes::admin::list_keys))

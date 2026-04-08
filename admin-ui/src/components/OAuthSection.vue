@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { deleteWebSession, getWebSessionStatus, saveWebSession } from '../client/sdk.gen'
 import { useOAuth } from '../composables/useOAuth'
 
 const {
@@ -20,8 +21,55 @@ const toast = useToast()
 const oauthCode = ref('')
 const showDisconnectModal = ref(false)
 
+const webSessionConfigured = ref(false)
+const webSessionFormOpen = ref(false)
+const webSessionSaving = ref(false)
+const webSessionForm = ref({
+  session_key: '',
+  org_uuid: '',
+  device_id: '',
+  anonymous_id: '',
+})
+
+async function refreshWebSessionStatus() {
+  try {
+    const res = await getWebSessionStatus()
+    webSessionConfigured.value = res.data?.configured ?? false
+  } catch {
+    webSessionConfigured.value = false
+  }
+}
+
+async function handleSaveWebSession() {
+  webSessionSaving.value = true
+  try {
+    await saveWebSession({ body: { ...webSessionForm.value } })
+    toast.add({ title: 'Web session saved', color: 'success' })
+    webSessionFormOpen.value = false
+    webSessionForm.value = { session_key: '', org_uuid: '', device_id: '', anonymous_id: '' }
+    await refreshWebSessionStatus()
+    await loadUsage()
+  } catch (e) {
+    toast.add({ title: 'Failed to save web session', description: String(e), color: 'error' })
+  } finally {
+    webSessionSaving.value = false
+  }
+}
+
+async function handleDeleteWebSession() {
+  try {
+    await deleteWebSession()
+    toast.add({ title: 'Web session cleared', color: 'success' })
+    await refreshWebSessionStatus()
+    await loadUsage()
+  } catch (e) {
+    toast.add({ title: 'Failed to clear web session', description: String(e), color: 'error' })
+  }
+}
+
 onMounted(() => {
   checkStatus()
+  refreshWebSessionStatus()
 })
 
 async function handleExchangeCode() {
@@ -162,9 +210,24 @@ function getUsageItems(): UsageDisplayItem[] {
         </UButton>
       </div>
 
+      <!-- Upstream error (shown even when no usage data available) -->
+      <UAlert
+        v-if="isConnected && subscriptionUsage?.upstream_error"
+        color="error"
+        variant="subtle"
+        icon="i-lucide-triangle-alert"
+        title="Anthropic usage endpoint failed"
+        :description="subscriptionUsage.upstream_error"
+      />
+
       <!-- Subscription Limits -->
       <div v-if="isConnected && subscriptionUsage && getUsageItems().length > 0">
-        <div class="text-xs text-muted uppercase mb-2">Subscription Limits</div>
+        <div class="flex items-center justify-between mb-2">
+          <div class="text-xs text-muted uppercase">Subscription Limits</div>
+          <UBadge v-if="subscriptionUsage.is_stale" color="warning" variant="subtle" size="sm">
+            Stale (using fallback)
+          </UBadge>
+        </div>
         <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div v-for="item in getUsageItems()" :key="item.label" class="rounded-lg bg-elevated p-3">
             <div class="text-xs text-muted uppercase">{{ item.label }}</div>
@@ -187,6 +250,81 @@ function getUsageItems(): UsageDisplayItem[] {
 
       <div v-if="isConnected && isLoadingUsage && !subscriptionUsage" class="text-sm text-muted">
         Loading usage...
+      </div>
+
+      <!-- Claude.ai web session (bypass rate limit on /oauth/usage) -->
+      <div v-if="isConnected" class="rounded-lg border border-default p-3 space-y-2">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-xs text-muted uppercase">Claude.ai web session</div>
+            <div class="text-sm text-muted">
+              Optional. Uses a browser cookie to fetch usage, bypassing the OAuth rate limit. Cookie
+              is auto-rotated on every request.
+            </div>
+          </div>
+          <UBadge :color="webSessionConfigured ? 'success' : 'neutral'" variant="subtle" size="sm">
+            {{ webSessionConfigured ? 'Configured' : 'Not configured' }}
+          </UBadge>
+        </div>
+        <div class="flex gap-2">
+          <UButton
+            size="xs"
+            color="primary"
+            variant="soft"
+            @click="webSessionFormOpen = !webSessionFormOpen"
+          >
+            {{ webSessionConfigured ? 'Replace' : 'Configure' }}
+          </UButton>
+          <UButton
+            v-if="webSessionConfigured"
+            size="xs"
+            color="error"
+            variant="soft"
+            @click="handleDeleteWebSession"
+          >
+            Clear
+          </UButton>
+        </div>
+        <div v-if="webSessionFormOpen" class="space-y-2 pt-2">
+          <p class="text-xs text-muted">
+            From claude.ai/settings/usage → DevTools → Network → usage request. Copy sessionKey
+            value from Cookie, org uuid from URL path, device-id and anonymous-id from request
+            headers.
+          </p>
+          <UInput
+            v-model="webSessionForm.session_key"
+            placeholder="sessionKey (sk-ant-sid02-...)"
+            size="sm"
+          />
+          <UInput
+            v-model="webSessionForm.org_uuid"
+            placeholder="Org UUID (from /api/organizations/{uuid}/usage)"
+            size="sm"
+          />
+          <UInput
+            v-model="webSessionForm.device_id"
+            placeholder="anthropic-device-id header"
+            size="sm"
+          />
+          <UInput
+            v-model="webSessionForm.anonymous_id"
+            placeholder="anthropic-anonymous-id header"
+            size="sm"
+          />
+          <div class="flex gap-2 justify-end">
+            <UButton size="sm" variant="ghost" @click="webSessionFormOpen = false">
+              Cancel
+            </UButton>
+            <UButton
+              size="sm"
+              color="primary"
+              :loading="webSessionSaving"
+              @click="handleSaveWebSession"
+            >
+              Save
+            </UButton>
+          </div>
+        </div>
       </div>
 
       <div v-if="showCodeInput" class="space-y-2">

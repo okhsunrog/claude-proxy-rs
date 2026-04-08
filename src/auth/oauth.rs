@@ -218,6 +218,7 @@ impl OAuthManager {
             match auth {
                 Auth::Api { key } => return Ok(Some(key)),
                 Auth::WellKnown { token, .. } => return Ok(Some(token)),
+                Auth::WebSession { .. } => return Ok(None),
                 Auth::OAuth {
                     access, expires, ..
                 } => {
@@ -248,6 +249,7 @@ impl OAuthManager {
         let (access, refresh, expires) = match auth {
             Auth::Api { key } => return Ok(Some(key)),
             Auth::WellKnown { token, .. } => return Ok(Some(token)),
+            Auth::WebSession { .. } => return Ok(None),
             Auth::OAuth {
                 access,
                 refresh,
@@ -280,6 +282,7 @@ impl OAuthManager {
             Auth::OAuth { refresh, .. } => refresh,
             Auth::Api { key } => return Ok(Some(key)),
             Auth::WellKnown { token, .. } => return Ok(Some(token)),
+            Auth::WebSession { .. } => return Ok(None),
         };
 
         self.do_refresh(refresh).await

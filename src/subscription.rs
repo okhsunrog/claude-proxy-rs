@@ -1,12 +1,15 @@
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::info;
+use tracing::{info, warn};
 use utoipa::ToSchema;
 
 use crate::AppState;
+use crate::auth::storage::Auth;
 use crate::constants::{
     ANTHROPIC_PROFILE_URL, ANTHROPIC_USAGE_URL, ANTHROPIC_VERSION, OAUTH_USAGE_BETA, USER_AGENT,
 };
+
+pub const WEB_SESSION_PROVIDER: &str = "anthropic_web";
 
 /// Cached subscription state: window reset times (epoch ms) and utilization percentages.
 /// Used to sync per-key rate-limit windows and enforce extra-usage restrictions.
@@ -47,6 +50,16 @@ pub struct SubscriptionUsageResponse {
     pub seven_day_opus: Option<UsageLimit>,
     pub seven_day_sonnet: Option<UsageLimit>,
     pub extra_usage: Option<ExtraUsage>,
+    /// True when this response is a fallback (stale cache or derived from
+    /// `/v1/messages` response headers) because Anthropic's usage endpoint
+    /// returned an error or was unreachable.
+    #[serde(default)]
+    pub is_stale: bool,
+    /// Human-readable description of why the fetch failed. Present only when
+    /// the latest fetch attempt failed; None on success or when we have never
+    /// tried yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_error: Option<String>,
 }
 
 // --- Helpers ---
@@ -228,4 +241,135 @@ pub async fn fetch_fresh_subscription_state(state: &AppState) -> SubscriptionSta
         *state.window_resets.write().await = fresh.clone();
     }
     fresh
+}
+
+/// Fetch subscription usage via a claude.ai web session instead of the
+/// OAuth `/api/oauth/usage` endpoint.
+///
+/// ## Why this exists
+///
+/// Anthropic's OAuth usage endpoint (`api.anthropic.com/api/oauth/usage`,
+/// beta header `oauth-2025-04-20`) is **aggressively rate-limited** for
+/// third-party OAuth clients. In practice it returns `429 Too Many Requests`
+/// after a handful of calls per hour with a `rate_limit_error` body and a
+/// useless `retry-after: 0` header, and stays 429 for extended windows.
+/// Neither refreshing the access token nor waiting for `retry-after` helps;
+/// the limit appears to be keyed to the OAuth session/account.
+///
+/// Claude Code itself mostly avoids this by reading the
+/// `anthropic-ratelimit-unified-5h/7d-*` headers that come back on every
+/// `/v1/messages` response (see [`update_window_resets_from_headers`]). That
+/// covers 5h/7d utilization, but **not** `extra_usage`, `seven_day_sonnet`,
+/// or `seven_day_opus` — those only come from the dedicated usage endpoint.
+///
+/// Meanwhile, the web UI at `claude.ai/settings/usage` calls a completely
+/// different endpoint — `claude.ai/api/organizations/{uuid}/usage` — that
+/// has the **same response shape** but is **not rate-limited**, because it's
+/// intended to be polled from the browser. It authenticates with a
+/// `sessionKey` cookie (scraped manually from DevTools, see the admin UI
+/// form) and requires a bunch of `anthropic-client-*` and
+/// `anthropic-device-id` / `anthropic-anonymous-id` headers to pass
+/// server-side fingerprinting.
+///
+/// This function makes the proxy impersonate that browser call so we can
+/// keep `extra_usage` / `seven_day_sonnet` / `seven_day_opus` fresh without
+/// hitting the OAuth rate limit. It's an optional, manually-configured
+/// fallback in front of the OAuth path (see `get_subscription_usage`).
+///
+/// ## Session key rotation
+///
+/// claude.ai responds with a fresh `Set-Cookie: sessionKey=...` on every
+/// successful request (sliding expiry — a month out from the last touch).
+/// We parse it and `update_web_session_key` the stored value so, as long
+/// as the proxy hits this endpoint at least once a month, the session key
+/// auto-rotates and never expires. If the user changes their claude.ai
+/// password or manually revokes the session, this path starts returning
+/// 401/403, the caller in `get_subscription_usage` logs the error and
+/// falls back to OAuth, and the user has to re-scrape the cookie from
+/// DevTools one more time.
+pub async fn fetch_usage_via_web_session(
+    state: &AppState,
+) -> Result<SubscriptionUsageResponse, String> {
+    let auth = state
+        .auth_store
+        .get(WEB_SESSION_PROVIDER)
+        .await
+        .ok_or_else(|| "no web session configured".to_string())?;
+
+    let (session_key, org_uuid, device_id, anonymous_id) = match auth {
+        Auth::WebSession {
+            session_key,
+            org_uuid,
+            device_id,
+            anonymous_id,
+        } => (session_key, org_uuid, device_id, anonymous_id),
+        _ => return Err("stored credential is not a web session".into()),
+    };
+
+    let url = format!("https://claude.ai/api/organizations/{org_uuid}/usage");
+    let cookie = format!("sessionKey={session_key}");
+
+    let resp = state
+        .http_client
+        .get(&url)
+        .header("cookie", &cookie)
+        .header("accept", "*/*")
+        .header("accept-language", "en-US,en;q=0.9")
+        .header("anthropic-client-platform", "web_claude_ai")
+        .header("anthropic-client-version", "1.0.0")
+        .header("anthropic-device-id", &device_id)
+        .header("anthropic-anonymous-id", &anonymous_id)
+        .header("content-type", "application/json")
+        .header("referer", "https://claude.ai/settings/usage")
+        .header(
+            "user-agent",
+            "Mozilla/5.0 (X11; Linux x86_64; rv:149.0) Gecko/20100101 Firefox/149.0",
+        )
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| format!("network error: {e}"))?;
+
+    let status = resp.status();
+
+    // Extract rotated sessionKey from Set-Cookie before consuming the body.
+    let rotated_key = resp
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .find_map(extract_session_key_from_set_cookie);
+
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("claude.ai returned {status}: {body}"));
+    }
+
+    let body = resp.text().await.map_err(|e| format!("read body: {e}"))?;
+
+    // Rotate stored session key if the server sent a new one.
+    if let Some(new_key) = rotated_key
+        && new_key != session_key
+    {
+        if let Err(e) = state
+            .auth_store
+            .update_web_session_key(WEB_SESSION_PROVIDER, &new_key)
+            .await
+        {
+            warn!("failed to rotate web session key: {e}");
+        } else {
+            info!("rotated web sessionKey from claude.ai Set-Cookie");
+        }
+    }
+
+    serde_json::from_str::<SubscriptionUsageResponse>(&body)
+        .map_err(|e| format!("parse response: {e}"))
+}
+
+/// Parse a `sessionKey=...; ...` Set-Cookie value and return the value.
+fn extract_session_key_from_set_cookie(raw: &str) -> Option<String> {
+    let trimmed = raw.trim_start();
+    let rest = trimmed.strip_prefix("sessionKey=")?;
+    let end = rest.find(';').unwrap_or(rest.len());
+    Some(rest[..end].to_string())
 }

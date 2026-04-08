@@ -2,7 +2,7 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AddModelData, AddModelErrors, AddModelResponses, CreateKeyData, CreateKeyErrors, CreateKeyResponses, DeleteKeyData, DeleteKeyErrors, DeleteKeyResponses, DeleteModelData, DeleteModelErrors, DeleteModelResponses, DeleteOauthData, DeleteOauthErrors, DeleteOauthResponses, DeleteUsageHistoryData, DeleteUsageHistoryErrors, DeleteUsageHistoryResponses, ExchangeOauthCodeData, ExchangeOauthCodeErrors, ExchangeOauthCodeResponses, GetKeyModelsData, GetKeyModelsResponses, GetKeyModelUsageData, GetKeyModelUsageResponses, GetKeyUsageData, GetKeyUsageErrors, GetKeyUsageResponses, GetMyByModelData, GetMyByModelErrors, GetMyByModelResponses, GetMyTimeseriesData, GetMyTimeseriesErrors, GetMyTimeseriesResponses, GetMyUsageData, GetMyUsageErrors, GetMyUsageResponses, GetOauthStatusData, GetOauthStatusResponses, GetSubscriptionUsageData, GetSubscriptionUsageErrors, GetSubscriptionUsageResponses, GetUsageHistoryByKeyData, GetUsageHistoryByKeyResponses, GetUsageHistoryByModelData, GetUsageHistoryByModelResponses, GetUsageHistoryTimeseriesData, GetUsageHistoryTimeseriesResponses, ListKeysData, ListKeysResponses, ListModelsAdminData, ListModelsAdminResponses, RemoveKeyModelLimitsData, RemoveKeyModelLimitsErrors, RemoveKeyModelLimitsResponses, ReorderModelsData, ReorderModelsErrors, ReorderModelsResponses, ResetKeyModelUsageData, ResetKeyModelUsageErrors, ResetKeyModelUsageResponses, ResetKeyUsageData, ResetKeyUsageErrors, ResetKeyUsageResponses, SetAllowExtraUsageData, SetAllowExtraUsageErrors, SetAllowExtraUsageResponses, SetKeyEnabledData, SetKeyEnabledErrors, SetKeyEnabledResponses, SetKeyModelLimitsData, SetKeyModelLimitsErrors, SetKeyModelLimitsResponses, SetKeyModelsData, SetKeyModelsErrors, SetKeyModelsResponses, StartOauthFlowData, StartOauthFlowResponses, UpdateKeyLimitsData, UpdateKeyLimitsErrors, UpdateKeyLimitsResponses, UpdateModelData, UpdateModelErrors, UpdateModelResponses } from './types.gen';
+import type { AddModelData, AddModelErrors, AddModelResponses, CreateKeyData, CreateKeyErrors, CreateKeyResponses, DeleteKeyData, DeleteKeyErrors, DeleteKeyResponses, DeleteModelData, DeleteModelErrors, DeleteModelResponses, DeleteOauthData, DeleteOauthErrors, DeleteOauthResponses, DeleteUsageHistoryData, DeleteUsageHistoryErrors, DeleteUsageHistoryResponses, DeleteWebSessionData, DeleteWebSessionErrors, DeleteWebSessionResponses, ExchangeOauthCodeData, ExchangeOauthCodeErrors, ExchangeOauthCodeResponses, GetKeyModelsData, GetKeyModelsResponses, GetKeyModelUsageData, GetKeyModelUsageResponses, GetKeyUsageData, GetKeyUsageErrors, GetKeyUsageResponses, GetMyByModelData, GetMyByModelErrors, GetMyByModelResponses, GetMyTimeseriesData, GetMyTimeseriesErrors, GetMyTimeseriesResponses, GetMyUsageData, GetMyUsageErrors, GetMyUsageResponses, GetOauthStatusData, GetOauthStatusResponses, GetSubscriptionUsageData, GetSubscriptionUsageErrors, GetSubscriptionUsageResponses, GetUsageHistoryByKeyData, GetUsageHistoryByKeyResponses, GetUsageHistoryByModelData, GetUsageHistoryByModelResponses, GetUsageHistoryTimeseriesData, GetUsageHistoryTimeseriesResponses, GetWebSessionStatusData, GetWebSessionStatusResponses, ListKeysData, ListKeysResponses, ListModelsAdminData, ListModelsAdminResponses, RemoveKeyModelLimitsData, RemoveKeyModelLimitsErrors, RemoveKeyModelLimitsResponses, ReorderModelsData, ReorderModelsErrors, ReorderModelsResponses, ResetKeyModelUsageData, ResetKeyModelUsageErrors, ResetKeyModelUsageResponses, ResetKeyUsageData, ResetKeyUsageErrors, ResetKeyUsageResponses, SaveWebSessionData, SaveWebSessionErrors, SaveWebSessionResponses, SetAllowExtraUsageData, SetAllowExtraUsageErrors, SetAllowExtraUsageResponses, SetKeyEnabledData, SetKeyEnabledErrors, SetKeyEnabledResponses, SetKeyModelLimitsData, SetKeyModelLimitsErrors, SetKeyModelLimitsResponses, SetKeyModelsData, SetKeyModelsErrors, SetKeyModelsResponses, StartOauthFlowData, StartOauthFlowResponses, UpdateKeyLimitsData, UpdateKeyLimitsErrors, UpdateKeyLimitsResponses, UpdateModelData, UpdateModelErrors, UpdateModelResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -221,6 +221,30 @@ export const getOauthStatus = <ThrowOnError extends boolean = false>(options?: O
  * Get Claude subscription usage from Anthropic API
  */
 export const getSubscriptionUsage = <ThrowOnError extends boolean = false>(options?: Options<GetSubscriptionUsageData, ThrowOnError>) => (options?.client ?? client).get<GetSubscriptionUsageResponses, GetSubscriptionUsageErrors, ThrowOnError>({ url: '/oauth/usage', ...options });
+
+/**
+ * Delete claude.ai web session credentials
+ */
+export const deleteWebSession = <ThrowOnError extends boolean = false>(options?: Options<DeleteWebSessionData, ThrowOnError>) => (options?.client ?? client).delete<DeleteWebSessionResponses, DeleteWebSessionErrors, ThrowOnError>({ url: '/oauth/web-session', ...options });
+
+/**
+ * Get web session configuration status
+ */
+export const getWebSessionStatus = <ThrowOnError extends boolean = false>(options?: Options<GetWebSessionStatusData, ThrowOnError>) => (options?.client ?? client).get<GetWebSessionStatusResponses, unknown, ThrowOnError>({ url: '/oauth/web-session', ...options });
+
+/**
+ * Save claude.ai web session credentials (used to bypass rate limits on the
+ * OAuth usage endpoint). The sessionKey is auto-rotated on every successful
+ * request via the Set-Cookie header.
+ */
+export const saveWebSession = <ThrowOnError extends boolean = false>(options: Options<SaveWebSessionData, ThrowOnError>) => (options.client ?? client).post<SaveWebSessionResponses, SaveWebSessionErrors, ThrowOnError>({
+    url: '/oauth/web-session',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
 
 export const deleteUsageHistory = <ThrowOnError extends boolean = false>(options?: Options<DeleteUsageHistoryData, ThrowOnError>) => (options?.client ?? client).delete<DeleteUsageHistoryResponses, DeleteUsageHistoryErrors, ThrowOnError>({ url: '/usage-history', ...options });
 

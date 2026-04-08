@@ -33,7 +33,19 @@ fn usage_from_window_resets(resets: &SubscriptionState) -> SubscriptionUsageResp
         seven_day_opus: None,
         seven_day_sonnet: None,
         extra_usage: None,
+        is_stale: true,
+        upstream_error: None,
     }
+}
+
+/// Mark a cached usage response as stale and attach an upstream error.
+fn stale_with_error(
+    mut usage: SubscriptionUsageResponse,
+    err: String,
+) -> SubscriptionUsageResponse {
+    usage.is_stale = true;
+    usage.upstream_error = Some(err);
+    usage
 }
 
 // --- Types ---
@@ -53,6 +65,19 @@ pub struct OAuthStatusResponse {
 #[derive(Deserialize, Serialize, ToSchema)]
 pub struct ExchangeCodeRequest {
     code: String,
+}
+
+#[derive(Deserialize, Serialize, ToSchema)]
+pub struct WebSessionRequest {
+    pub session_key: String,
+    pub org_uuid: String,
+    pub device_id: String,
+    pub anonymous_id: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct WebSessionStatusResponse {
+    pub configured: bool,
 }
 
 // --- Handlers ---
@@ -162,12 +187,49 @@ pub async fn get_subscription_usage(
         let cached = state.cached_usage.read().await;
         if let Some((ref usage, cached_at)) = *cached {
             let now = timestamp_millis();
-            let five_hour_reset_at = state.window_resets.read().await.five_hour_reset_at;
+            let resets = state.window_resets.read().await.clone();
             let window_reset_since_cache =
-                five_hour_reset_at.is_some_and(|r| r > cached_at && r <= now);
+                resets.five_hour_reset_at.is_some_and(|r| r > cached_at && r <= now);
             if now - cached_at < CACHE_TTL_MS && !window_reset_since_cache {
-                return Ok(Json(usage.clone()));
+                // Patch utilization from window_resets (updated from every
+                // /v1/messages response headers) so the UI sees near-realtime
+                // changes instead of the snapshot from the last usage fetch.
+                let mut fresh = usage.clone();
+                if let (Some(fh), Some(util)) =
+                    (fresh.five_hour.as_mut(), resets.five_hour_utilization)
+                {
+                    fh.utilization = Some(util);
+                }
+                if let (Some(sd), Some(util)) =
+                    (fresh.seven_day.as_mut(), resets.seven_day_utilization)
+                {
+                    sd.utilization = Some(util);
+                }
+                return Ok(Json(fresh));
             }
+        }
+    }
+
+    // Try the claude.ai web session endpoint first — it has the same
+    // response shape but is not aggressively rate-limited like the OAuth
+    // one (which 429s constantly — see fetch_usage_via_web_session docs
+    // for the full story). Fall back to the OAuth endpoint if no web
+    // session is configured or the request fails.
+    match crate::subscription::fetch_usage_via_web_session(&state).await {
+        Ok(usage) => {
+            tracing::info!("Fetched subscription usage via claude.ai web session");
+            let resets = extract_subscription_state(&usage);
+            if resets.five_hour_reset_at.is_some() {
+                *state.window_resets.write().await = resets;
+            }
+            *state.cached_usage.write().await = Some((usage.clone(), timestamp_millis()));
+            return Ok(Json(usage));
+        }
+        Err(e) if e == "no web session configured" => {
+            // fall through to OAuth path silently
+        }
+        Err(e) => {
+            warn!("Web session usage fetch failed, falling back to OAuth: {e}");
         }
     }
 
@@ -207,14 +269,15 @@ pub async fn get_subscription_usage(
     let resp = match resp {
         Ok(r) => r,
         Err(e) => {
-            warn!("Failed to contact Anthropic usage API: {e}");
+            let err_msg = format!("network error contacting Anthropic usage API: {e}");
+            warn!("{err_msg}");
             let cached = state.cached_usage.read().await;
             if let Some((ref usage, _)) = *cached {
-                return Ok(Json(usage.clone()));
+                return Ok(Json(stale_with_error(usage.clone(), err_msg)));
             }
-            return Ok(Json(usage_from_window_resets(
-                &*state.window_resets.read().await,
-            )));
+            let mut fallback = usage_from_window_resets(&*state.window_resets.read().await);
+            fallback.upstream_error = Some(err_msg);
+            return Ok(Json(fallback));
         }
     };
 
@@ -222,29 +285,36 @@ pub async fn get_subscription_usage(
 
     // On rate limit or server error, return stale cache or window_resets fallback.
     if !status.is_success() {
+        let headers_dump: Vec<String> = resp
+            .headers()
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, v.to_str().unwrap_or("<binary>")))
+            .collect();
         let body = resp.text().await.unwrap_or_default();
-        warn!("Anthropic usage API returned {status}: {body}");
+        let err_msg = format!("Anthropic usage API returned {status}: {body}");
+        warn!("{err_msg} | headers: [{}]", headers_dump.join(", "));
         let cached = state.cached_usage.read().await;
         if let Some((ref usage, _)) = *cached {
-            return Ok(Json(usage.clone()));
+            return Ok(Json(stale_with_error(usage.clone(), err_msg)));
         }
-        return Ok(Json(usage_from_window_resets(
-            &*state.window_resets.read().await,
-        )));
+        let mut fallback = usage_from_window_resets(&*state.window_resets.read().await);
+        fallback.upstream_error = Some(err_msg);
+        return Ok(Json(fallback));
     }
 
     let body = resp.text().await.unwrap_or_default();
     let usage: SubscriptionUsageResponse = match serde_json::from_str(&body) {
         Ok(u) => u,
         Err(e) => {
-            warn!("Failed to parse usage response: {e}");
+            let err_msg = format!("failed to parse usage response: {e}");
+            warn!("{err_msg}");
             let cached = state.cached_usage.read().await;
             if let Some((ref usage, _)) = *cached {
-                return Ok(Json(usage.clone()));
+                return Ok(Json(stale_with_error(usage.clone(), err_msg)));
             }
-            return Ok(Json(usage_from_window_resets(
-                &*state.window_resets.read().await,
-            )));
+            let mut fallback = usage_from_window_resets(&*state.window_resets.read().await);
+            fallback.upstream_error = Some(err_msg);
+            return Ok(Json(fallback));
         }
     };
 
@@ -256,4 +326,97 @@ pub async fn get_subscription_usage(
     *state.cached_usage.write().await = Some((usage.clone(), timestamp_millis()));
 
     Ok(Json(usage))
+}
+
+/// Get web session configuration status
+#[utoipa::path(
+    get,
+    path = "/oauth/web-session",
+    tag = "oauth",
+    responses((status = 200, body = WebSessionStatusResponse))
+)]
+pub async fn get_web_session_status(
+    State(state): State<Arc<AppState>>,
+) -> Json<WebSessionStatusResponse> {
+    let configured = state
+        .auth_store
+        .has(crate::subscription::WEB_SESSION_PROVIDER)
+        .await
+        .unwrap_or(false);
+    Json(WebSessionStatusResponse { configured })
+}
+
+/// Save claude.ai web session credentials (used to bypass rate limits on the
+/// OAuth usage endpoint). The sessionKey is auto-rotated on every successful
+/// request via the Set-Cookie header.
+#[utoipa::path(
+    post,
+    path = "/oauth/web-session",
+    tag = "oauth",
+    request_body = WebSessionRequest,
+    responses(
+        (status = 200, body = SuccessResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+pub async fn save_web_session(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<WebSessionRequest>,
+) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    use crate::auth::storage::Auth;
+
+    state
+        .auth_store
+        .set(
+            crate::subscription::WEB_SESSION_PROVIDER,
+            Auth::WebSession {
+                session_key: body.session_key,
+                org_uuid: body.org_uuid,
+                device_id: body.device_id,
+                anonymous_id: body.anonymous_id,
+            },
+        )
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: e.to_string(),
+                }),
+            )
+        })?;
+
+    // Invalidate cached usage so the next GET /oauth/usage hits the new web endpoint.
+    *state.cached_usage.write().await = None;
+
+    Ok(Json(SuccessResponse { success: true }))
+}
+
+/// Delete claude.ai web session credentials
+#[utoipa::path(
+    delete,
+    path = "/oauth/web-session",
+    tag = "oauth",
+    responses(
+        (status = 200, body = SuccessResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+pub async fn delete_web_session(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    state
+        .auth_store
+        .remove(crate::subscription::WEB_SESSION_PROVIDER)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: e.to_string(),
+                }),
+            )
+        })?;
+    *state.cached_usage.write().await = None;
+    Ok(Json(SuccessResponse { success: true }))
 }

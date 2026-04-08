@@ -166,9 +166,22 @@ export type SetKeyModelsRequest = {
 export type SubscriptionUsageResponse = {
     extra_usage?: null | ExtraUsage;
     five_hour?: null | UsageLimit;
+    /**
+     * True when this response is a fallback (stale cache or derived from
+     * `/v1/messages` response headers) because Anthropic's usage endpoint
+     * returned an error or was unreachable.
+     */
+    is_stale?: boolean;
     seven_day?: null | UsageLimit;
+    seven_day_oauth_apps?: null | UsageLimit;
     seven_day_opus?: null | UsageLimit;
     seven_day_sonnet?: null | UsageLimit;
+    /**
+     * Human-readable description of why the fetch failed. Present only when
+     * the latest fetch attempt failed; None on success or when we have never
+     * tried yet.
+     */
+    upstream_error?: string | null;
 };
 
 export type SuccessResponse = {
@@ -269,6 +282,17 @@ export type UserUsageResponse = {
     limits: TokenLimits;
     modelEntries: Array<ModelUsageEntry>;
     usage: TokenUsage;
+};
+
+export type WebSessionRequest = {
+    anonymous_id: string;
+    device_id: string;
+    org_uuid: string;
+    session_key: string;
+};
+
+export type WebSessionStatusResponse = {
+    configured: boolean;
 };
 
 export type CreateKeyData = {
@@ -786,6 +810,57 @@ export type GetSubscriptionUsageResponses = {
 };
 
 export type GetSubscriptionUsageResponse = GetSubscriptionUsageResponses[keyof GetSubscriptionUsageResponses];
+
+export type DeleteWebSessionData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/oauth/web-session';
+};
+
+export type DeleteWebSessionErrors = {
+    500: ErrorResponse;
+};
+
+export type DeleteWebSessionError = DeleteWebSessionErrors[keyof DeleteWebSessionErrors];
+
+export type DeleteWebSessionResponses = {
+    200: SuccessResponse;
+};
+
+export type DeleteWebSessionResponse = DeleteWebSessionResponses[keyof DeleteWebSessionResponses];
+
+export type GetWebSessionStatusData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/oauth/web-session';
+};
+
+export type GetWebSessionStatusResponses = {
+    200: WebSessionStatusResponse;
+};
+
+export type GetWebSessionStatusResponse = GetWebSessionStatusResponses[keyof GetWebSessionStatusResponses];
+
+export type SaveWebSessionData = {
+    body: WebSessionRequest;
+    path?: never;
+    query?: never;
+    url: '/oauth/web-session';
+};
+
+export type SaveWebSessionErrors = {
+    500: ErrorResponse;
+};
+
+export type SaveWebSessionError = SaveWebSessionErrors[keyof SaveWebSessionErrors];
+
+export type SaveWebSessionResponses = {
+    200: SuccessResponse;
+};
+
+export type SaveWebSessionResponse = SaveWebSessionResponses[keyof SaveWebSessionResponses];
 
 export type DeleteUsageHistoryData = {
     body?: never;

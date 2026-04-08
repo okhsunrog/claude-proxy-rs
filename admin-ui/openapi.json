@@ -1075,6 +1075,89 @@
         }
       }
     },
+    "/oauth/web-session": {
+      "get": {
+        "tags": ["oauth"],
+        "summary": "Get web session configuration status",
+        "operationId": "get_web_session_status",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebSessionStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["oauth"],
+        "summary": "Save claude.ai web session credentials (used to bypass rate limits on the\nOAuth usage endpoint). The sessionKey is auto-rotated on every successful\nrequest via the Set-Cookie header.",
+        "operationId": "save_web_session",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["oauth"],
+        "summary": "Delete claude.ai web session credentials",
+        "operationId": "delete_web_session",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/usage-history": {
       "delete": {
         "operationId": "delete_usage_history",
@@ -1851,7 +1934,21 @@
               }
             ]
           },
+          "is_stale": {
+            "type": "boolean",
+            "description": "True when this response is a fallback (stale cache or derived from\n`/v1/messages` response headers) because Anthropic's usage endpoint\nreturned an error or was unreachable."
+          },
           "seven_day": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UsageLimit"
+              }
+            ]
+          },
+          "seven_day_oauth_apps": {
             "oneOf": [
               {
                 "type": "null"
@@ -1880,6 +1977,10 @@
                 "$ref": "#/components/schemas/UsageLimit"
               }
             ]
+          },
+          "upstream_error": {
+            "type": ["string", "null"],
+            "description": "Human-readable description of why the fetch failed. Present only when\nthe latest fetch attempt failed; None on success or when we have never\ntried yet."
           }
         }
       },
@@ -2125,6 +2226,33 @@
           },
           "usage": {
             "$ref": "#/components/schemas/TokenUsage"
+          }
+        }
+      },
+      "WebSessionRequest": {
+        "type": "object",
+        "required": ["session_key", "org_uuid", "device_id", "anonymous_id"],
+        "properties": {
+          "anonymous_id": {
+            "type": "string"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "org_uuid": {
+            "type": "string"
+          },
+          "session_key": {
+            "type": "string"
+          }
+        }
+      },
+      "WebSessionStatusResponse": {
+        "type": "object",
+        "required": ["configured"],
+        "properties": {
+          "configured": {
+            "type": "boolean"
           }
         }
       }

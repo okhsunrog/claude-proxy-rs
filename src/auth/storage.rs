@@ -27,6 +27,22 @@ pub enum Auth {
         key: String,
         token: String,
     },
+    /// Claude.ai web session credentials scraped from a browser login.
+    /// Used only for the subscription-usage endpoint, which is aggressively
+    /// rate-limited for OAuth clients but not for web sessions. The session
+    /// key is rotated on every successful request (Set-Cookie), so stored
+    /// value is updated automatically.
+    ///
+    /// Stored in the auth table with auth_type='web_session' and columns
+    /// repurposed as: access_token=session_key, refresh_token=org_uuid,
+    /// account_id=device_id, enterprise_url=anonymous_id.
+    #[serde(rename = "web_session")]
+    WebSession {
+        session_key: String,
+        org_uuid: String,
+        device_id: String,
+        anonymous_id: String,
+    },
 }
 
 pub struct AuthStore;
@@ -71,6 +87,12 @@ impl AuthStore {
             "wellknown" => Some(Auth::WellKnown {
                 key: row.get(1).ok()?,
                 token: row.get(2).ok()?,
+            }),
+            "web_session" => Some(Auth::WebSession {
+                session_key: row.get(1).ok()?,
+                org_uuid: row.get(2).ok()?,
+                device_id: row.get::<Option<String>>(4).ok().flatten().unwrap_or_default(),
+                anonymous_id: row.get::<Option<String>>(5).ok().flatten().unwrap_or_default(),
             }),
             _ => None,
         }
@@ -136,6 +158,26 @@ impl AuthStore {
                 .await
                 .map_err(|e| ProxyError::DatabaseError(format!("Failed to save auth: {e}")))?;
             }
+            Auth::WebSession {
+                session_key,
+                org_uuid,
+                device_id,
+                anonymous_id,
+            } => {
+                conn.execute(
+                    r#"INSERT OR REPLACE INTO auth (provider, auth_type, access_token, refresh_token, expires_at, account_id, enterprise_url)
+                       VALUES (?, 'web_session', ?, ?, 0, ?, ?)"#,
+                    (
+                        provider,
+                        session_key.as_str(),
+                        org_uuid.as_str(),
+                        device_id.as_str(),
+                        anonymous_id.as_str(),
+                    ),
+                )
+                .await
+                .map_err(|e| ProxyError::DatabaseError(format!("Failed to save auth: {e}")))?;
+            }
         }
 
         Ok(())
@@ -172,6 +214,23 @@ impl AuthStore {
         )
         .await
         .map_err(|e| ProxyError::DatabaseError(format!("Failed to update tokens: {e}")))?;
+        Ok(())
+    }
+
+    /// Update just the session_key of a stored WebSession. Used when the
+    /// claude.ai server rotates the cookie on a response.
+    pub async fn update_web_session_key(
+        &self,
+        provider: &str,
+        new_session_key: &str,
+    ) -> Result<(), ProxyError> {
+        let conn = db::get_conn().await?;
+        conn.execute(
+            "UPDATE auth SET access_token = ? WHERE provider = ? AND auth_type = 'web_session'",
+            (new_session_key, provider),
+        )
+        .await
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to update web session: {e}")))?;
         Ok(())
     }
 }
