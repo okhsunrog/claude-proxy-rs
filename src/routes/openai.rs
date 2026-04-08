@@ -87,6 +87,7 @@ pub async fn chat_completions(
         &auth.token,
         Some(&prepared.betas),
         stream,
+        &state.session_id,
     );
 
     let response: reqwest::Response = match req_builder.json(&prepared.body).send().await {

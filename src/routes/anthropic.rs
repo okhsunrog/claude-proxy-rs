@@ -59,6 +59,7 @@ pub async fn messages(
         &auth.token,
         Some(&prepared.betas),
         stream,
+        &state.session_id,
     );
 
     let response: reqwest::Response = match req_builder.json(&prepared.body).send().await {
@@ -88,6 +89,7 @@ pub async fn messages(
             &new_token,
             Some(&prepared.betas),
             stream,
+            &state.session_id,
         );
         match retry_builder.json(&prepared.body).send().await {
             Ok(r) => r,
@@ -192,6 +194,7 @@ pub async fn count_tokens(
         &auth.token,
         Some(&prepared.betas),
         false, // count_tokens is never streaming
+        &state.session_id,
     );
 
     let response: reqwest::Response = match req_builder.json(&prepared.body).send().await {

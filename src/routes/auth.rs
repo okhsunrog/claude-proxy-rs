@@ -5,7 +5,7 @@ use tracing::warn;
 
 use crate::AppState;
 use crate::auth::ClientKey;
-use crate::constants::{ANTHROPIC_VERSION, OAUTH_BETA_HEADER, USER_AGENT};
+use crate::constants::{ANTHROPIC_VERSION, INFERENCE_USER_AGENT, OAUTH_BETA_HEADER};
 use crate::error::ProxyError;
 
 /// Result of successful authentication containing the client key and OAuth token
@@ -139,6 +139,7 @@ pub fn build_anthropic_request(
     token: &str,
     extra_betas: Option<&[String]>,
     stream: bool,
+    session_id: &str,
 ) -> RequestBuilder {
     // Merge base betas with extra betas from request body
     let beta_header = if let Some(extras) = extra_betas {
@@ -172,10 +173,10 @@ pub fn build_anthropic_request(
         .header("content-type", "application/json")
         .header("authorization", format!("Bearer {}", token))
         .header("anthropic-beta", beta_header)
-        .header("user-agent", USER_AGENT)
-        // Additional headers matching CLIProxyAPI behavior
+        .header("user-agent", INFERENCE_USER_AGENT)
         .header("anthropic-dangerous-direct-browser-access", "true")
         .header("x-app", "cli")
+        .header("X-Claude-Code-Session-Id", session_id)
         .header("x-stainless-helper-method", "stream")
         .header("x-stainless-retry-count", "0")
         .header("x-stainless-runtime-version", "v24.3.0")

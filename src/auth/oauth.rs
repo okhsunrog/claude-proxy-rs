@@ -16,7 +16,13 @@ const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const AUTHORIZE_URL: &str = "https://claude.com/cai/oauth/authorize";
 const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
 const REDIRECT_URI: &str = "https://platform.claude.com/oauth/code/callback";
-const SCOPES: &str = "org:create_api_key user:profile user:inference user:sessions:claude_code";
+/// Scopes requested at initial authorization (ALL_OAUTH_SCOPES from Claude Code).
+const AUTHORIZE_SCOPES: &str = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
+
+/// Scopes requested at token refresh (CLAUDE_AI_OAUTH_SCOPES from Claude Code).
+/// Excludes org:create_api_key — matches Claude Code's refresh behavior.
+const REFRESH_SCOPES: &str =
+    "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct TokenResponse {
@@ -30,6 +36,9 @@ pub struct OAuthManager {
     client: Client,
     verifier: RwLock<Option<String>>,
     auth_store: Arc<AuthStore>,
+    /// Prevents concurrent token refreshes (Anthropic rotates refresh tokens,
+    /// so two simultaneous refreshes would invalidate each other).
+    refresh_lock: tokio::sync::Mutex<()>,
 }
 
 impl OAuthManager {
@@ -38,6 +47,7 @@ impl OAuthManager {
             client,
             verifier: RwLock::new(None),
             auth_store,
+            refresh_lock: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -66,7 +76,7 @@ impl OAuthManager {
             AUTHORIZE_URL,
             CLIENT_ID,
             urlencoding::encode(REDIRECT_URI),
-            urlencoding::encode(SCOPES),
+            urlencoding::encode(AUTHORIZE_SCOPES),
             challenge,
             verifier
         )
@@ -150,6 +160,7 @@ impl OAuthManager {
             "grant_type": "refresh_token",
             "refresh_token": refresh,
             "client_id": CLIENT_ID,
+            "scope": REFRESH_SCOPES,
         });
 
         let response = self
@@ -198,27 +209,56 @@ impl OAuthManager {
     }
 
     pub async fn refresh_if_needed(&self) -> Result<Option<String>, String> {
+        // Fast path: check without the lock first.
+        let needs_refresh = {
+            let auth = match self.auth_store.get("anthropic").await {
+                Some(auth) => auth,
+                None => return Ok(None),
+            };
+            match auth {
+                Auth::Api { key } => return Ok(Some(key)),
+                Auth::WellKnown { token, .. } => return Ok(Some(token)),
+                Auth::OAuth {
+                    access, expires, ..
+                } => {
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as u64;
+                    if now + 300_000 < expires {
+                        return Ok(Some(access));
+                    }
+                    true
+                }
+            }
+        };
+
+        if !needs_refresh {
+            unreachable!();
+        }
+
+        // Acquire the mutex so only one refresh happens at a time.
+        let _guard = self.refresh_lock.lock().await;
+
+        // Re-check after acquiring the lock — another task may have already refreshed.
         let auth = match self.auth_store.get("anthropic").await {
             Some(auth) => auth,
             None => return Ok(None),
         };
-
         let (access, refresh, expires) = match auth {
+            Auth::Api { key } => return Ok(Some(key)),
+            Auth::WellKnown { token, .. } => return Ok(Some(token)),
             Auth::OAuth {
                 access,
                 refresh,
                 expires,
                 ..
             } => (access, refresh, expires),
-            Auth::Api { key } => return Ok(Some(key)),
-            Auth::WellKnown { token, .. } => return Ok(Some(token)),
         };
-
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis() as u64;
-
         if now + 300_000 < expires {
             return Ok(Some(access));
         }
@@ -229,6 +269,8 @@ impl OAuthManager {
     /// Force a token refresh regardless of expiry. Used when Anthropic returns 401
     /// to recover from server-side token revocation without waiting for local expiry.
     pub async fn force_refresh(&self) -> Result<Option<String>, String> {
+        let _guard = self.refresh_lock.lock().await;
+
         let auth = match self.auth_store.get("anthropic").await {
             Some(auth) => auth,
             None => return Ok(None),

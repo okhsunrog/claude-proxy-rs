@@ -63,6 +63,9 @@ pub struct AppState {
     pub window_resets: RwLock<SubscriptionState>,
     /// Cached full subscription usage response (avoids hammering Anthropic's rate-limited endpoint)
     pub cached_usage: RwLock<Option<(SubscriptionUsageResponse, u64)>>,
+    /// Stable session UUID sent as X-Claude-Code-Session-Id header on every inference request.
+    /// Matches Claude Code's per-process session ID behavior.
+    pub session_id: String,
 }
 
 impl AppState {
@@ -386,6 +389,7 @@ async fn main() {
         cloak_mode,
         window_resets: RwLock::new(SubscriptionState::default()),
         cached_usage: RwLock::new(None),
+        session_id: uuid::Uuid::new_v4().to_string(),
     });
 
     // CORS configuration based on environment

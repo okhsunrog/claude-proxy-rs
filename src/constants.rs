@@ -17,9 +17,9 @@ pub const ANTHROPIC_VERSION: &str = "2023-06-01";
 /// Beta header for usage/profile API calls — only the OAuth beta, matching Claude Code exactly.
 pub const OAUTH_USAGE_BETA: &str = "oauth-2025-04-20";
 
-/// OAuth beta features header value (matches Claude Code 2.1.32)
-/// Includes adaptive-thinking for Opus 4.6 support
-pub const OAUTH_BETA_HEADER: &str = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14,prompt-caching-scope-2026-01-05,adaptive-thinking-2026-01-28";
+/// Beta header for inference requests (matches Claude Code 2.1.92 binary).
+/// Base set: claude-code-20250219 + interleaved-thinking + context-management + oauth + prompt-caching.
+pub const OAUTH_BETA_HEADER: &str = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05";
 
 /// Max output tokens for Opus 4.6 (128K)
 pub const OPUS_4_6_MAX_OUTPUT: u32 = 128000;
@@ -27,8 +27,13 @@ pub const OPUS_4_6_MAX_OUTPUT: u32 = 128000;
 /// Default max output tokens for Claude 4 models (64K)  
 pub const DEFAULT_MAX_OUTPUT: u32 = 64000;
 
-/// User agent string for OAuth requests (mimics Claude CLI)
-pub const USER_AGENT: &str = "claude-code/2.1.92 (external, cli)";
+/// User-Agent for inference requests — matches Claude Code's getUserAgent() function.
+/// Format: claude-cli/{VERSION} ({USER_TYPE}, {ENTRYPOINT})
+pub const INFERENCE_USER_AGENT: &str = "claude-cli/2.1.92 (external, cli)";
+
+/// User-Agent for admin/non-inference requests — matches getClaudeCodeUserAgent().
+/// Used for usage API, profile, bootstrap calls.
+pub const USER_AGENT: &str = "claude-code/2.1.92";
 
 /// System message prefix for OAuth requests (Claude Code identity)
 pub const SYSTEM_PREFIX: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
