@@ -7,10 +7,10 @@ use utoipa::ToSchema;
 use super::client_keys::{
     ClientKeysStore, TokenLimits, TokenUsage, UsageResetType, get_u64, opt_u64,
 };
-use crate::SubscriptionState;
 use crate::db;
 use crate::error::ProxyError;
 use crate::subscription::timestamp_millis;
+use crate::usage::SubscriptionState;
 
 // ============================================================================
 // Structs

@@ -1039,7 +1039,8 @@
     "/oauth/usage": {
       "get": {
         "tags": ["oauth"],
-        "summary": "Get Claude subscription usage from Anthropic API",
+        "summary": "Get Claude subscription usage.",
+        "description": "Thin wrapper around [`UsageCache::get_or_refresh`]: reads the current\ncached state, triggers an opportunistic refresh if the data is stale,\nand returns the snapshot with freshness metadata attached.",
         "operationId": "get_subscription_usage",
         "responses": {
           "200": {
@@ -1048,26 +1049,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SubscriptionUsageResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "502": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1913,6 +1894,7 @@
       },
       "SubscriptionUsageResponse": {
         "type": "object",
+        "description": "The full subscription usage response as returned by either the OAuth\n`api.anthropic.com/api/oauth/usage` endpoint or the web-session\n`claude.ai/api/organizations/{uuid}/usage` endpoint. Both have identical\nshape.\n\n`is_stale`, `source`, and the two freshness timestamps are injected by\nthe proxy's [`UsageCache`] on read — they are not part of Anthropic's\nresponse.",
         "properties": {
           "extra_usage": {
             "oneOf": [
@@ -1934,9 +1916,15 @@
               }
             ]
           },
+          "full_fetched_at": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Epoch-ms timestamp of the last successful full HTTP fetch. Tracks the\nfreshness of extras (`extra_usage`, `seven_day_sonnet`, etc.) that\ncannot be derived from `/v1/messages` headers.",
+            "minimum": 0
+          },
           "is_stale": {
             "type": "boolean",
-            "description": "True when this response is a fallback (stale cache or derived from\n`/v1/messages` response headers) because Anthropic's usage endpoint\nreturned an error or was unreachable."
+            "description": "True when this response was served from cache after a failed refresh\nattempt, or assembled from `/v1/messages` response headers because no\nfull fetch has succeeded yet."
           },
           "seven_day": {
             "oneOf": [
@@ -1978,9 +1966,19 @@
               }
             ]
           },
+          "source": {
+            "$ref": "#/components/schemas/UsageSource",
+            "description": "Which fetcher produced the current snapshot, or [`UsageSource::None`]\nif no full fetch has succeeded yet."
+          },
           "upstream_error": {
             "type": ["string", "null"],
-            "description": "Human-readable description of why the fetch failed. Present only when\nthe latest fetch attempt failed; None on success or when we have never\ntried yet."
+            "description": "Error from the most recent fetch attempt. Present iff the latest\nrefresh failed. `None` on success or before the first attempt."
+          },
+          "util_updated_at": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Epoch-ms timestamp of the most recent 5h/7d utilization update, from\neither a full fetch or a `/v1/messages` response header patch.\nUsually much fresher than `full_fetched_at` under active inference.",
+            "minimum": 0
           }
         }
       },
@@ -2207,6 +2205,11 @@
             "format": "double"
           }
         }
+      },
+      "UsageSource": {
+        "type": "string",
+        "description": "Where the most recent successful full fetch came from.",
+        "enum": ["none", "web_session", "o_auth_api"]
       },
       "UserUsageResponse": {
         "type": "object",

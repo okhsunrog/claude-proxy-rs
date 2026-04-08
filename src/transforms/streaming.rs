@@ -325,7 +325,7 @@ pub fn stream_anthropic_to_openai_with_usage(
         }
 
         // Record usage after stream ends (per-model; global is derived via aggregation)
-        let window_resets = crate::subscription::get_or_refresh_window_resets(&state).await;
+        let window_resets = state.usage_cache.snapshot().await.window_state();
         if let Err(e) = state.client_keys.record_model_usage(&key_id, &model, &usage_report, &window_resets).await {
             warn!("Failed to record streaming model usage for key {key_id}/{model}: {e}");
         }
@@ -454,7 +454,7 @@ pub fn stream_strip_mcp_prefix_with_usage(
         }
 
         // Record usage after stream ends (per-model; global is derived via aggregation)
-        let window_resets = crate::subscription::get_or_refresh_window_resets(&state).await;
+        let window_resets = state.usage_cache.snapshot().await.window_state();
         if let Err(e) = state.client_keys.record_model_usage(&key_id, &model, &usage_report, &window_resets).await {
             warn!("Failed to record streaming model usage for key {key_id}/{model}: {e}");
         }

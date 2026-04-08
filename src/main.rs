@@ -6,6 +6,7 @@ mod error;
 mod routes;
 mod subscription;
 mod transforms;
+mod usage;
 
 use auth::{AuthStore, ClientKeysStore, ModelsStore, OAuthManager};
 use axum::ServiceExt;
@@ -25,7 +26,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use subtle::ConstantTimeEq;
-use tokio::sync::RwLock;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::normalize_path::NormalizePath;
 use tracing::{info, warn};
@@ -39,7 +39,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const GIT_HASH: &str = env!("GIT_HASH");
 pub const BUILD_TIME: &str = env!("BUILD_TIME");
 
-use subscription::{SubscriptionState, SubscriptionUsageResponse};
+use usage::UsageCache;
 
 pub struct AdminCredentials {
     pub username: String,
@@ -59,10 +59,10 @@ pub struct AppState {
     pub disable_auth: bool,
     /// Cloaking mode (always / never / auto)
     pub cloak_mode: CloakMode,
-    /// Cached subscription window reset times for syncing rate-limit windows
-    pub window_resets: RwLock<SubscriptionState>,
-    /// Cached full subscription usage response (avoids hammering Anthropic's rate-limited endpoint)
-    pub cached_usage: RwLock<Option<(SubscriptionUsageResponse, u64)>>,
+    /// Single source of truth for Claude subscription usage. Owns cached
+    /// snapshot, freshness timestamps, fetcher dispatch, and header-based
+    /// patching. See `usage::UsageCache` for the freshness model.
+    pub usage_cache: UsageCache,
     /// Stable session UUID sent as X-Claude-Code-Session-Id header on every inference request.
     /// Matches Claude Code's per-process session ID behavior.
     pub session_id: String,
@@ -392,8 +392,7 @@ async fn main() {
         secure_cookies,
         disable_auth,
         cloak_mode,
-        window_resets: RwLock::new(SubscriptionState::default()),
-        cached_usage: RwLock::new(None),
+        usage_cache: UsageCache::new(),
         session_id: uuid::Uuid::new_v4().to_string(),
     });
 

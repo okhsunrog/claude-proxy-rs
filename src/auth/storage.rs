@@ -91,8 +91,16 @@ impl AuthStore {
             "web_session" => Some(Auth::WebSession {
                 session_key: row.get(1).ok()?,
                 org_uuid: row.get(2).ok()?,
-                device_id: row.get::<Option<String>>(4).ok().flatten().unwrap_or_default(),
-                anonymous_id: row.get::<Option<String>>(5).ok().flatten().unwrap_or_default(),
+                device_id: row
+                    .get::<Option<String>>(4)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default(),
+                anonymous_id: row
+                    .get::<Option<String>>(5)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default(),
             }),
             _ => None,
         }

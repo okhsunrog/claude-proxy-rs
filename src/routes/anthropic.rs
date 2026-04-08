@@ -120,7 +120,10 @@ pub async fn messages(
     }
 
     // Update window resets from rate-limit headers on every successful response.
-    crate::subscription::update_window_resets_from_headers(response.headers(), &state).await;
+    state
+        .usage_cache
+        .patch_from_headers(response.headers())
+        .await;
 
     if stream {
         let body_stream = response.bytes_stream();
@@ -148,7 +151,7 @@ pub async fn messages(
         // Record token usage (per-model; global is derived via aggregation)
         if let Some(usage) = json_response.get("usage") {
             let usage_report = usage_from_json(usage);
-            let window_resets = crate::subscription::get_or_refresh_window_resets(&state).await;
+            let window_resets = state.usage_cache.snapshot().await.window_state();
 
             if let Err(e) = state
                 .client_keys

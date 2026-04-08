@@ -163,13 +163,29 @@ export type SetKeyModelsRequest = {
     models: Array<string>;
 };
 
+/**
+ * The full subscription usage response as returned by either the OAuth
+ * `api.anthropic.com/api/oauth/usage` endpoint or the web-session
+ * `claude.ai/api/organizations/{uuid}/usage` endpoint. Both have identical
+ * shape.
+ *
+ * `is_stale`, `source`, and the two freshness timestamps are injected by
+ * the proxy's [`UsageCache`] on read — they are not part of Anthropic's
+ * response.
+ */
 export type SubscriptionUsageResponse = {
     extra_usage?: null | ExtraUsage;
     five_hour?: null | UsageLimit;
     /**
-     * True when this response is a fallback (stale cache or derived from
-     * `/v1/messages` response headers) because Anthropic's usage endpoint
-     * returned an error or was unreachable.
+     * Epoch-ms timestamp of the last successful full HTTP fetch. Tracks the
+     * freshness of extras (`extra_usage`, `seven_day_sonnet`, etc.) that
+     * cannot be derived from `/v1/messages` headers.
+     */
+    full_fetched_at?: number | null;
+    /**
+     * True when this response was served from cache after a failed refresh
+     * attempt, or assembled from `/v1/messages` response headers because no
+     * full fetch has succeeded yet.
      */
     is_stale?: boolean;
     seven_day?: null | UsageLimit;
@@ -177,11 +193,21 @@ export type SubscriptionUsageResponse = {
     seven_day_opus?: null | UsageLimit;
     seven_day_sonnet?: null | UsageLimit;
     /**
-     * Human-readable description of why the fetch failed. Present only when
-     * the latest fetch attempt failed; None on success or when we have never
-     * tried yet.
+     * Which fetcher produced the current snapshot, or [`UsageSource::None`]
+     * if no full fetch has succeeded yet.
+     */
+    source?: UsageSource;
+    /**
+     * Error from the most recent fetch attempt. Present iff the latest
+     * refresh failed. `None` on success or before the first attempt.
      */
     upstream_error?: string | null;
+    /**
+     * Epoch-ms timestamp of the most recent 5h/7d utilization update, from
+     * either a full fetch or a `/v1/messages` response header patch.
+     * Usually much fresher than `full_fetched_at` under active inference.
+     */
+    util_updated_at?: number | null;
 };
 
 export type SuccessResponse = {
@@ -276,6 +302,11 @@ export type UsageLimit = {
     resets_at?: string | null;
     utilization?: number | null;
 };
+
+/**
+ * Where the most recent successful full fetch came from.
+ */
+export type UsageSource = 'none' | 'web_session' | 'o_auth_api';
 
 export type UserUsageResponse = {
     keyName: string;
@@ -797,13 +828,6 @@ export type GetSubscriptionUsageData = {
     query?: never;
     url: '/oauth/usage';
 };
-
-export type GetSubscriptionUsageErrors = {
-    401: ErrorResponse;
-    502: ErrorResponse;
-};
-
-export type GetSubscriptionUsageError = GetSubscriptionUsageErrors[keyof GetSubscriptionUsageErrors];
 
 export type GetSubscriptionUsageResponses = {
     200: SubscriptionUsageResponse;

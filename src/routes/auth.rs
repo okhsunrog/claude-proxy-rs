@@ -54,8 +54,11 @@ async fn authenticate_key(
         .await?
         .ok_or(ProxyError::InvalidApiKey)?;
 
-    // Get window resets for limit checks
-    let window_resets = crate::subscription::get_or_refresh_window_resets(state).await;
+    // Get window resets for limit checks. Pure read from the usage cache —
+    // no HTTP I/O. The cache is kept fresh by `patch_from_headers` on every
+    // /v1/messages response and by the opportunistic refresh triggered by
+    // the admin UI poll.
+    let window_resets = state.usage_cache.snapshot().await.window_state();
 
     // Check global limits (cost-based, derived from per-model aggregation)
     if let Err(msg) = state
@@ -89,16 +92,13 @@ async fn authenticate_key(
         return Err(ProxyError::RateLimitExceeded(msg));
     }
 
-    // Block keys without extra-usage permission when subscription limits are exhausted
-    if !client_key.allow_extra_usage {
-        let sub = crate::subscription::fetch_fresh_subscription_state(state).await;
-        let is_over = sub.five_hour_utilization.is_some_and(|u| u >= 100.0)
-            || sub.seven_day_utilization.is_some_and(|u| u >= 100.0);
-        if is_over {
-            return Err(ProxyError::RateLimitExceeded(
-                "Subscription limits exhausted (extra usage not allowed for this key)".into(),
-            ));
-        }
+    // Block keys without extra-usage permission when subscription limits are
+    // exhausted. Reads from the usage cache (populated from /v1/messages
+    // response headers in near real time); no per-request HTTP call.
+    if !client_key.allow_extra_usage && state.usage_cache.is_over_subscription_limit().await {
+        return Err(ProxyError::RateLimitExceeded(
+            "Subscription limits exhausted (extra usage not allowed for this key)".into(),
+        ));
     }
 
     if let Err(e) = state.client_keys.update_last_used(&client_key.id).await {
