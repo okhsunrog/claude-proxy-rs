@@ -36,7 +36,7 @@ Use your existing Claude Pro/Max subscription with AI coding assistants and tool
 
 ### Requirements
 
-- [Rust](https://www.rust-lang.org/) >= 1.85.0 (edition 2024)
+- [Rust](https://www.rust-lang.org/) >= 1.94.0 (edition 2024)
 - [Bun](https://bun.sh/) >= 1.3.0
 - [Vite+](https://viteplus.dev/) (`vp` CLI) — unified frontend toolchain
 - [just](https://github.com/casey/just) command runner
