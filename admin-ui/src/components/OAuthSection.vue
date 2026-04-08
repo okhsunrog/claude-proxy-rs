@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { deleteWebSession, getWebSessionStatus, saveWebSession } from '../client/sdk.gen'
 import { useOAuth } from '../composables/useOAuth'
 
@@ -70,6 +70,16 @@ async function handleDeleteWebSession() {
 onMounted(() => {
   checkStatus()
   refreshWebSessionStatus()
+  tickHandle = setInterval(() => {
+    nowMs.value = Date.now()
+  }, 1000)
+})
+
+onUnmounted(() => {
+  if (tickHandle != null) {
+    clearInterval(tickHandle)
+    tickHandle = null
+  }
 })
 
 async function handleExchangeCode() {
@@ -108,6 +118,35 @@ function formatResetTime(isoString: string): string {
     return `Resets in ${days}d ${remainingHours}h (${abs})`
   }
   return `Resets in ${hours}h ${minutes}m (${abs})`
+}
+
+// Ticking clock so "Xs ago" labels update every second without re-fetching.
+const nowMs = ref(Date.now())
+let tickHandle: ReturnType<typeof setInterval> | null = null
+
+function formatAge(epochMs?: number | null): string {
+  if (epochMs == null) return 'never'
+  const diffMs = Math.max(0, nowMs.value - epochMs)
+  const s = Math.floor(diffMs / 1000)
+  if (s < 60) return `${s}s ago`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ${m % 60}m ago`
+  const d = Math.floor(h / 24)
+  return `${d}d ${h % 24}h ago`
+}
+
+function formatSource(source?: string): string {
+  switch (source) {
+    case 'web_session':
+      return 'claude.ai web session'
+    case 'oauth_api':
+      return 'OAuth /api/oauth/usage'
+    case 'none':
+    default:
+      return 'not yet fetched'
+  }
 }
 
 interface UsageDisplayItem {
@@ -245,6 +284,15 @@ function getUsageItems(): UsageDisplayItem[] {
               {{ item.subtitle }}
             </div>
           </div>
+        </div>
+        <!-- Freshness metadata footer -->
+        <div
+          v-if="subscriptionUsage"
+          class="text-xs text-muted mt-2 flex flex-wrap gap-x-4 gap-y-1"
+        >
+          <span>Source: {{ formatSource(subscriptionUsage.source) }}</span>
+          <span>Utilization: {{ formatAge(subscriptionUsage.util_updated_at) }}</span>
+          <span>Extras: {{ formatAge(subscriptionUsage.full_fetched_at) }}</span>
         </div>
       </div>
 
