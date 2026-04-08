@@ -1,4 +1,8 @@
-use axum::{Json, extract::State, http::StatusCode};
+use axum::{
+    Json,
+    extract::{Query, State},
+    http::StatusCode,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use utoipa::ToSchema;
@@ -38,6 +42,17 @@ pub struct WebSessionRequest {
 #[derive(Serialize, ToSchema)]
 pub struct WebSessionStatusResponse {
     pub configured: bool,
+}
+
+/// Query parameters for `GET /oauth/usage`.
+#[derive(Debug, Default, Deserialize, utoipa::IntoParams)]
+pub struct GetUsageQuery {
+    /// When `true`, bypass the freshness throttle and hit the upstream
+    /// immediately via `UsageCache::force_refresh`. When `false` or absent,
+    /// use `UsageCache::get_or_refresh` which only fetches if the cached
+    /// data is older than its freshness thresholds.
+    #[serde(default)]
+    pub force: bool,
 }
 
 // --- Handlers ---
@@ -134,21 +149,31 @@ pub async fn delete_oauth(
 
 /// Get Claude subscription usage.
 ///
-/// Thin wrapper around [`UsageCache::get_or_refresh`]: reads the current
-/// cached state, triggers an opportunistic refresh if the data is stale,
-/// and returns the snapshot with freshness metadata attached.
+/// Thin wrapper around [`UsageCache`]: reads the current cached state,
+/// triggers an opportunistic refresh if the data is stale, and returns
+/// the snapshot with freshness metadata attached.
+///
+/// When called with `?force=true`, bypasses the freshness throttle and
+/// hits the upstream immediately — used by the admin UI's dedicated
+/// "force refresh" button.
 #[utoipa::path(
     get,
     path = "/oauth/usage",
     tag = "oauth",
+    params(GetUsageQuery),
     responses(
         (status = 200, body = SubscriptionUsageResponse),
     )
 )]
 pub async fn get_subscription_usage(
     State(state): State<Arc<AppState>>,
+    Query(query): Query<GetUsageQuery>,
 ) -> Json<SubscriptionUsageResponse> {
-    let cached = state.usage_cache.get_or_refresh(&state).await;
+    let cached = if query.force {
+        state.usage_cache.force_refresh(&state).await
+    } else {
+        state.usage_cache.get_or_refresh(&state).await
+    };
     Json(cached.to_response())
 }
 

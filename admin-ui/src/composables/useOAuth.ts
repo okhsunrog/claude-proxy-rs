@@ -33,10 +33,12 @@ export function useOAuth() {
     }
   }
 
-  async function loadUsage() {
+  async function loadUsage(options: { force?: boolean } = {}) {
     isLoadingUsage.value = true
     try {
-      const { data, error: apiError } = await getSubscriptionUsage()
+      const { data, error: apiError } = await getSubscriptionUsage({
+        query: options.force ? { force: true } : undefined,
+      })
       if (data) {
         subscriptionUsage.value = data
       } else if (apiError) {

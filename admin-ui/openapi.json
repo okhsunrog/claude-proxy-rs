@@ -1040,8 +1040,19 @@
       "get": {
         "tags": ["oauth"],
         "summary": "Get Claude subscription usage.",
-        "description": "Thin wrapper around [`UsageCache::get_or_refresh`]: reads the current\ncached state, triggers an opportunistic refresh if the data is stale,\nand returns the snapshot with freshness metadata attached.",
+        "description": "Thin wrapper around [`UsageCache`]: reads the current cached state,\ntriggers an opportunistic refresh if the data is stale, and returns\nthe snapshot with freshness metadata attached.\n\nWhen called with `?force=true`, bypasses the freshness throttle and\nhits the upstream immediately — used by the admin UI's dedicated\n\"force refresh\" button.",
         "operationId": "get_subscription_usage",
+        "parameters": [
+          {
+            "name": "force",
+            "in": "query",
+            "description": "When `true`, bypass the freshness throttle and hit the upstream\nimmediately via `UsageCache::force_refresh`. When `false` or absent,\nuse `UsageCache::get_or_refresh` which only fetches if the cached\ndata is older than its freshness thresholds.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",

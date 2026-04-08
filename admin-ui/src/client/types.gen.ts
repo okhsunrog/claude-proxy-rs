@@ -825,7 +825,15 @@ export type GetOauthStatusResponse = GetOauthStatusResponses[keyof GetOauthStatu
 export type GetSubscriptionUsageData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * When `true`, bypass the freshness throttle and hit the upstream
+         * immediately via `UsageCache::force_refresh`. When `false` or absent,
+         * use `UsageCache::get_or_refresh` which only fetches if the cached
+         * data is older than its freshness thresholds.
+         */
+        force?: boolean;
+    };
     url: '/oauth/usage';
 };
 

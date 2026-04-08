@@ -73,12 +73,21 @@ onMounted(() => {
   tickHandle = setInterval(() => {
     nowMs.value = Date.now()
   }, 1000)
+  pollHandle = setInterval(() => {
+    if (isConnected.value) {
+      void loadUsage()
+    }
+  }, USAGE_POLL_INTERVAL_MS)
 })
 
 onUnmounted(() => {
   if (tickHandle != null) {
     clearInterval(tickHandle)
     tickHandle = null
+  }
+  if (pollHandle != null) {
+    clearInterval(pollHandle)
+    pollHandle = null
   }
 })
 
@@ -123,6 +132,25 @@ function formatResetTime(isoString: string): string {
 // Ticking clock so "Xs ago" labels update every second without re-fetching.
 const nowMs = ref(Date.now())
 let tickHandle: ReturnType<typeof setInterval> | null = null
+// Auto-poll the backend every USAGE_POLL_INTERVAL_MS so the UI stays fresh
+// while the page is open. Backend has its own freshness throttle so this is
+// cheap — most polls return immediately from the cache.
+const USAGE_POLL_INTERVAL_MS = 60_000
+let pollHandle: ReturnType<typeof setInterval> | null = null
+
+// Distinguish the two refresh buttons' spinners. The normal loadUsage
+// flips isLoadingUsage; the force variant flips both so the force button
+// shows its own spinner and the normal one stays quiet.
+const forceLoading = ref(false)
+
+async function handleForceRefresh() {
+  forceLoading.value = true
+  try {
+    await loadUsage({ force: true })
+  } finally {
+    forceLoading.value = false
+  }
+}
 
 function formatAge(epochMs?: number | null): string {
   if (epochMs == null) return 'never'
@@ -210,14 +238,27 @@ function getUsageItems(): UsageDisplayItem[] {
     <template #header>
       <div class="flex items-center justify-between">
         <h2 class="text-xl font-semibold">Claude Subscription</h2>
-        <UButton
-          v-if="isConnected && subscriptionUsage"
-          size="xs"
-          variant="ghost"
-          icon="i-lucide-refresh-cw"
-          :loading="isLoadingUsage"
-          @click="loadUsage"
-        />
+        <div v-if="isConnected && subscriptionUsage" class="flex gap-1">
+          <UTooltip text="Refresh (uses cache if fresh)">
+            <UButton
+              size="xs"
+              variant="ghost"
+              icon="i-lucide-refresh-cw"
+              :loading="isLoadingUsage && !forceLoading"
+              @click="loadUsage()"
+            />
+          </UTooltip>
+          <UTooltip text="Force refresh (bypass cache throttle)">
+            <UButton
+              size="xs"
+              variant="ghost"
+              color="warning"
+              icon="i-lucide-zap"
+              :loading="forceLoading"
+              @click="handleForceRefresh"
+            />
+          </UTooltip>
+        </div>
       </div>
     </template>
 

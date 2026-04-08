@@ -220,9 +220,13 @@ export const getOauthStatus = <ThrowOnError extends boolean = false>(options?: O
 /**
  * Get Claude subscription usage.
  *
- * Thin wrapper around [`UsageCache::get_or_refresh`]: reads the current
- * cached state, triggers an opportunistic refresh if the data is stale,
- * and returns the snapshot with freshness metadata attached.
+ * Thin wrapper around [`UsageCache`]: reads the current cached state,
+ * triggers an opportunistic refresh if the data is stale, and returns
+ * the snapshot with freshness metadata attached.
+ *
+ * When called with `?force=true`, bypasses the freshness throttle and
+ * hits the upstream immediately — used by the admin UI's dedicated
+ * "force refresh" button.
  */
 export const getSubscriptionUsage = <ThrowOnError extends boolean = false>(options?: Options<GetSubscriptionUsageData, ThrowOnError>) => (options?.client ?? client).get<GetSubscriptionUsageResponses, unknown, ThrowOnError>({ url: '/oauth/usage', ...options });
 
