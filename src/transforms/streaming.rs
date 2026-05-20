@@ -282,11 +282,9 @@ pub fn stream_anthropic_to_openai_with_usage(
                                     }
                                 }
                             }
-                            "content_block_stop" => {
-                                if current_tool_call_id.is_some() {
+                            "content_block_stop" if current_tool_call_id.is_some() => {
                                     tool_call_index += 1;
                                     current_tool_call_id = None;
-                                }
                             }
                             "message_delta" => {
                                 if let Some(delta) = &event.delta

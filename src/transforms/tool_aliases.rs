@@ -165,13 +165,10 @@ fn normalize_name_field(
     map: &mut ToolNameMap,
     unsupported: &mut Vec<String>,
 ) -> Option<String> {
-    let Some(name) = value
+    let name = value
         .get("name")
         .and_then(|n| n.as_str())
-        .map(str::to_string)
-    else {
-        return None;
-    };
+        .map(str::to_string)?;
 
     let Some(normalized) = normalize_tool_name(&name) else {
         unsupported.push(strip_mcp_prefix(&name));
