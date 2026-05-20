@@ -737,10 +737,13 @@ pub async fn init_db(path: &Path) -> Result<(), ProxyError> {
         .connect()
         .map_err(|e| ProxyError::DatabaseError(format!("Failed to connect: {e}")))?;
 
-    // Enable foreign key enforcement (required for ON DELETE CASCADE)
-    conn.execute("PRAGMA foreign_keys = ON", ())
+    configure_connection(&conn).await?;
+    conn.execute("PRAGMA journal_mode = WAL", ())
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to enable foreign keys: {e}")))?;
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to enable WAL mode: {e}")))?;
+    conn.execute("PRAGMA synchronous = NORMAL", ())
+        .await
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to set synchronous mode: {e}")))?;
 
     run_migrations(&conn, path).await?;
 
@@ -752,6 +755,17 @@ pub async fn init_db(path: &Path) -> Result<(), ProxyError> {
     Ok(())
 }
 
+async fn configure_connection(conn: &Connection) -> Result<(), ProxyError> {
+    conn.execute("PRAGMA busy_timeout = 5000", ())
+        .await
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to set busy timeout: {e}")))?;
+    // Enable foreign key enforcement (required for ON DELETE CASCADE).
+    conn.execute("PRAGMA foreign_keys = ON", ())
+        .await
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to enable foreign keys: {e}")))?;
+    Ok(())
+}
+
 /// Get a database connection with foreign keys enabled.
 pub async fn get_conn() -> Result<Connection, ProxyError> {
     let db = DATABASE
@@ -760,8 +774,6 @@ pub async fn get_conn() -> Result<Connection, ProxyError> {
     let conn = db
         .connect()
         .map_err(|e| ProxyError::DatabaseError(format!("Failed to get connection: {e}")))?;
-    conn.execute("PRAGMA foreign_keys = ON", ())
-        .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to enable foreign keys: {e}")))?;
+    configure_connection(&conn).await?;
     Ok(conn)
 }
