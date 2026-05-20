@@ -13,6 +13,7 @@ use llm_relay::MessagesResponse;
 use llm_relay::types::openai::InboundChatRequest;
 
 use crate::AppState;
+use crate::capture::{Capture, capture_byte_stream};
 use crate::constants::ANTHROPIC_API_URL;
 use crate::error::ProxyError;
 use crate::transforms::{
@@ -50,8 +51,19 @@ pub async fn list_models(State(state): State<Arc<AppState>>) -> Response {
 pub async fn chat_completions(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<InboundChatRequest>,
+    Json(raw_body): Json<Value>,
 ) -> Response {
+    let body: InboundChatRequest = match serde_json::from_value(raw_body.clone()) {
+        Ok(body) => body,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": format!("Invalid request body: {e}") })),
+            )
+                .into_response();
+        }
+    };
+
     // Extract model before auth so we can validate it
     let model_name = body
         .model
@@ -73,6 +85,16 @@ pub async fn chat_completions(
     let cloak = state.should_cloak(headers.get("user-agent").and_then(|v| v.to_str().ok()));
 
     let stream = body.stream.unwrap_or(false);
+    let capture = Capture::begin(
+        &state.capture,
+        "openai",
+        "/v1/chat/completions",
+        base_model,
+        stream,
+        &headers,
+        &raw_body,
+    )
+    .await;
     let anthropic_value = transform_openai_request(body);
     let model = anthropic_value
         .get("model")
@@ -80,6 +102,11 @@ pub async fn chat_completions(
         .unwrap_or("")
         .to_string();
     let prepared = prepare_anthropic_request(anthropic_value, cloak);
+    if let Some(capture) = &capture {
+        capture
+            .write_prepared(&prepared.body, &prepared.betas, cloak)
+            .await;
+    }
 
     let req_builder = build_anthropic_request(
         &state.http_client,
@@ -100,7 +127,15 @@ pub async fn chat_completions(
 
     if !response.status().is_success() {
         let status = response.status();
+        if let Some(capture) = &capture {
+            capture
+                .write_upstream_response(status, response.headers())
+                .await;
+        }
         let text: String = response.text().await.unwrap_or_default();
+        if let Some(capture) = &capture {
+            capture.write_upstream_body(&text).await;
+        }
         return (
             StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY),
             Json(json!({ "error": text })),
@@ -113,9 +148,17 @@ pub async fn chat_completions(
         .usage_cache
         .patch_from_headers(response.headers())
         .await;
+    if let Some(capture) = &capture {
+        capture
+            .write_upstream_response(response.status(), response.headers())
+            .await;
+    }
 
     if stream {
-        let body_stream = response.bytes_stream();
+        let body_stream = capture_byte_stream(
+            response.bytes_stream(),
+            capture.as_ref().map(|c| c.upstream_stream_path()),
+        );
         let key_id = auth.client_key.id.clone();
         let sse_stream =
             stream_anthropic_to_openai_with_usage(body_stream, model, state.clone(), key_id);
@@ -128,7 +171,18 @@ pub async fn chat_completions(
             .body(Body::from_stream(sse_stream))
             .unwrap()
     } else {
-        let anthropic_response = match response.json::<MessagesResponse>().await {
+        let text = match response.text().await {
+            Ok(text) => text,
+            Err(e) => {
+                return ProxyError::ParseError(format!("Failed to read response: {}", e))
+                    .to_openai_response();
+            }
+        };
+        if let Some(capture) = &capture {
+            capture.write_upstream_body(&text).await;
+        }
+
+        let anthropic_response = match serde_json::from_str::<MessagesResponse>(&text) {
             Ok(r) => r,
             Err(e) => {
                 return ProxyError::ParseError(format!("Failed to parse response: {}", e))

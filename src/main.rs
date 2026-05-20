@@ -1,4 +1,5 @@
 mod auth;
+mod capture;
 mod config;
 mod constants;
 mod db;
@@ -19,6 +20,7 @@ use axum::{
     routing::{get, post},
 };
 use base64::Engine;
+use capture::CaptureConfig;
 use clap::Parser;
 use config::{CloakMode, Config, CorsMode};
 use reqwest::Client;
@@ -66,6 +68,8 @@ pub struct AppState {
     /// Stable session UUID sent as X-Claude-Code-Session-Id header on every inference request.
     /// Matches Claude Code's per-process session ID behavior.
     pub session_id: String,
+    /// Optional request/response capture sink for debugging client compatibility.
+    pub capture: CaptureConfig,
 }
 
 impl AppState {
@@ -381,6 +385,10 @@ async fn main() {
 
     let cloak_mode = config.cloak_mode;
     info!("Cloaking mode: {:?}", cloak_mode);
+    let capture = CaptureConfig::from_env();
+    if capture.is_enabled() {
+        info!("Request capture is enabled");
+    }
 
     let state = Arc::new(AppState {
         auth_store,
@@ -394,6 +402,7 @@ async fn main() {
         cloak_mode,
         usage_cache: UsageCache::new(),
         session_id: uuid::Uuid::new_v4().to_string(),
+        capture,
     });
 
     // CORS configuration based on environment

@@ -66,8 +66,15 @@ Environment variables are loaded from `.env` or the environment.
 | `CLAUDE_PROXY_PORT` | `4096` | Port |
 | `CLAUDE_PROXY_CORS_ORIGINS` | `localhost` | CORS: `localhost`, `*`, or comma-separated origins |
 | `CLAUDE_PROXY_CLOAK_MODE` | `auto` | Cloaking: `always`, `never`, `auto` (skips cloaking for Claude Code clients) |
+| `CLAUDE_PROXY_CAPTURE_DIR` | *(unset)* | Optional directory for redacted request/response captures. Enable only for debugging. |
 
 Admin sessions use HttpOnly cookies with a 30-day sliding expiration. Basic Auth is also accepted.
+
+### Request captures
+
+Set `CLAUDE_PROXY_CAPTURE_DIR=/path/to/captures` to write one directory per inference request. Captures include redacted client headers, inbound JSON, prepared Anthropic JSON, upstream response headers, and either `upstream_body.txt` or raw `upstream_stream.sse` chunks.
+
+Capture files may contain prompts, tool results, code, and model outputs. API keys, authorization headers, and cookies are redacted from headers, but the capture directory should still be treated as sensitive.
 
 ### Data storage
 

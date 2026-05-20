@@ -13,6 +13,7 @@ use llm_relay::convert::tool_names::transform_response_tool_names;
 
 use crate::AppState;
 use crate::auth::usage::usage_from_json;
+use crate::capture::{Capture, capture_byte_stream};
 use crate::constants::{ANTHROPIC_API_URL, ANTHROPIC_COUNT_TOKENS_URL};
 use crate::error::ProxyError;
 use crate::transforms::{
@@ -43,9 +44,24 @@ pub async fn messages(
         .get("stream")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let capture = Capture::begin(
+        &state.capture,
+        "anthropic",
+        "/v1/messages",
+        &model,
+        stream,
+        &headers,
+        &body,
+    )
+    .await;
 
     // Apply all transformations via unified pipeline
     let prepared = prepare_anthropic_request(body, cloak);
+    if let Some(capture) = &capture {
+        capture
+            .write_prepared(&prepared.body, &prepared.betas, cloak)
+            .await;
+    }
 
     // Log outgoing request body keys for debugging
     if let Some(obj) = prepared.body.as_object() {
@@ -107,7 +123,15 @@ pub async fn messages(
 
     if !response.status().is_success() {
         let status = response.status();
+        if let Some(capture) = &capture {
+            capture
+                .write_upstream_response(status, response.headers())
+                .await;
+        }
         let text: String = response.text().await.unwrap_or_default();
+        if let Some(capture) = &capture {
+            capture.write_upstream_body(&text).await;
+        }
         warn!(
             status = %status, model = %model,
             "Anthropic API error: {text}"
@@ -124,9 +148,17 @@ pub async fn messages(
         .usage_cache
         .patch_from_headers(response.headers())
         .await;
+    if let Some(capture) = &capture {
+        capture
+            .write_upstream_response(response.status(), response.headers())
+            .await;
+    }
 
     if stream {
-        let body_stream = response.bytes_stream();
+        let body_stream = capture_byte_stream(
+            response.bytes_stream(),
+            capture.as_ref().map(|c| c.upstream_stream_path()),
+        );
         let key_id = auth.client_key.id.clone();
         // Transform stream to strip mcp_ prefix from tool names and track usage
         let transformed_stream =
@@ -140,7 +172,18 @@ pub async fn messages(
             .body(Body::from_stream(transformed_stream))
             .unwrap()
     } else {
-        let mut json_response = match response.json::<Value>().await {
+        let text = match response.text().await {
+            Ok(text) => text,
+            Err(e) => {
+                return ProxyError::ParseError(format!("Failed to read response: {}", e))
+                    .to_anthropic_response();
+            }
+        };
+        if let Some(capture) = &capture {
+            capture.write_upstream_body(&text).await;
+        }
+
+        let mut json_response = match serde_json::from_str::<Value>(&text) {
             Ok(r) => r,
             Err(e) => {
                 return ProxyError::ParseError(format!("Failed to parse response: {}", e))
@@ -187,9 +230,24 @@ pub async fn count_tokens(
     };
 
     let cloak = state.should_cloak(headers.get("user-agent").and_then(|v| v.to_str().ok()));
+    let capture = Capture::begin(
+        &state.capture,
+        "anthropic",
+        "/v1/messages/count_tokens",
+        model,
+        false,
+        &headers,
+        &body,
+    )
+    .await;
 
     // Apply lighter transformations for count_tokens (no metadata/tools support)
     let prepared = prepare_count_tokens_request(body, cloak);
+    if let Some(capture) = &capture {
+        capture
+            .write_prepared(&prepared.body, &prepared.betas, cloak)
+            .await;
+    }
 
     let req_builder = build_anthropic_request(
         &state.http_client,
@@ -210,7 +268,15 @@ pub async fn count_tokens(
 
     if !response.status().is_success() {
         let status = response.status();
+        if let Some(capture) = &capture {
+            capture
+                .write_upstream_response(status, response.headers())
+                .await;
+        }
         let text: String = response.text().await.unwrap_or_default();
+        if let Some(capture) = &capture {
+            capture.write_upstream_body(&text).await;
+        }
         return (
             StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY),
             text,
@@ -218,7 +284,23 @@ pub async fn count_tokens(
             .into_response();
     }
 
-    let json_response: Value = match response.json::<Value>().await {
+    if let Some(capture) = &capture {
+        capture
+            .write_upstream_response(response.status(), response.headers())
+            .await;
+    }
+    let text = match response.text().await {
+        Ok(text) => text,
+        Err(e) => {
+            return ProxyError::ParseError(format!("Failed to read response: {}", e))
+                .to_anthropic_response();
+        }
+    };
+    if let Some(capture) = &capture {
+        capture.write_upstream_body(&text).await;
+    }
+
+    let json_response: Value = match serde_json::from_str(&text) {
         Ok(r) => r,
         Err(e) => {
             return ProxyError::ParseError(format!("Failed to parse response: {}", e))
