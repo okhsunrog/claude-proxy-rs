@@ -210,22 +210,26 @@ fn normalize_tool_name(name: &str) -> Option<String> {
     let base = strip_mcp_prefix(name);
     let lower = base.to_ascii_lowercase();
     let normalized = match lower.as_str() {
-        "agent" | "task" => "mcp_Agent",
-        "askuserquestion" | "ask_user_question" => "mcp_AskUserQuestion",
+        "agent" | "task" | "new_task" => "mcp_Agent",
+        "askuserquestion" | "ask_user_question" | "ask_followup_question" => "mcp_AskUserQuestion",
         "bash" | "shell" | "terminal" | "run_command" | "execute" => "mcp_Bash",
         "edit" | "remove" | "delete" => "mcp_Edit",
-        "lsp" | "multi_patch" | "multipatch" => "mcp_LSP",
+        "list_files" => "mcp_EnterWorktree",
+        "switch_mode" => "mcp_EnterPlanMode",
+        "lsp" | "multi_patch" | "multipatch" | "codebase_search" => "mcp_LSP",
         "notebookedit" | "notebook_edit" | "patch" => "mcp_NotebookEdit",
         "read" | "read_file" => "mcp_Read",
         "skill" => "mcp_Skill",
         "todowrite" | "todo_write" => "mcp_TaskCreate",
         "todoget" | "todo_get" => "mcp_TaskGet",
         "todoread" | "todo_read" | "todo_list" | "task_list" => "mcp_TaskList",
-        "taskoutput" | "task_output" => "mcp_TaskOutput",
+        "taskoutput" | "task_output" | "attempt_completion" => "mcp_TaskOutput",
         "taskstop" | "task_stop" | "undo" => "mcp_TaskStop",
-        "taskupdate" | "task_update" => "mcp_TaskUpdate",
+        "taskupdate" | "task_update" | "update_todo_list" => "mcp_TaskUpdate",
         "fetch" | "web_fetch" | "webfetch" | "http" | "http_request" => "mcp_WebFetch",
-        "fs_search" | "search" | "web_search" | "websearch" | "grep" | "glob" => "mcp_WebSearch",
+        "fs_search" | "search" | "web_search" | "websearch" | "grep" | "glob" | "search_files" => {
+            "mcp_WebSearch"
+        }
         "write" | "write_file" => "mcp_Write",
         _ => return None,
     };
@@ -283,6 +287,52 @@ mod tests {
         let err = normalize_claude_code_tool_names(&mut body).unwrap_err();
 
         assert_eq!(err.names(), &["test".to_string()]);
+    }
+
+    #[test]
+    fn normalizes_roo_code_aliases() {
+        let mut body = serde_json::json!({
+            "tools": [
+                {"name": "ask_followup_question"},
+                {"name": "attempt_completion"},
+                {"name": "codebase_search"},
+                {"name": "list_files"},
+                {"name": "new_task"},
+                {"name": "read_file"},
+                {"name": "skill"},
+                {"name": "search_files"},
+                {"name": "switch_mode"},
+                {"name": "update_todo_list"}
+            ]
+        });
+
+        let map = normalize_claude_code_tool_names(&mut body).unwrap();
+        let names: Vec<&str> = body["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap())
+            .collect();
+
+        assert_eq!(
+            names,
+            vec![
+                "mcp_AskUserQuestion",
+                "mcp_TaskOutput",
+                "mcp_LSP",
+                "mcp_EnterWorktree",
+                "mcp_Agent",
+                "mcp_Read",
+                "mcp_Skill",
+                "mcp_WebSearch",
+                "mcp_EnterPlanMode",
+                "mcp_TaskUpdate",
+            ]
+        );
+        assert_eq!(map.restore("mcp_AskUserQuestion"), "ask_followup_question");
+        assert_eq!(map.restore("mcp_TaskOutput"), "attempt_completion");
+        assert_eq!(map.restore("mcp_EnterWorktree"), "list_files");
+        assert_eq!(map.restore("mcp_EnterPlanMode"), "switch_mode");
     }
 
     #[test]
