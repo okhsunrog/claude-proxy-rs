@@ -2,7 +2,7 @@
 //!
 //! This module provides:
 //! - `stream_anthropic_to_openai_with_usage`: Convert Anthropic SSE to OpenAI SSE format with usage tracking
-//! - `stream_strip_mcp_prefix_with_usage`: Strip mcp_ prefix from native Anthropic SSE with usage tracking
+//! - `stream_restore_native_tool_names_with_usage`: Restore native Anthropic SSE tool names with usage tracking
 //!
 //! Both functions include keep-alive pings to prevent connection timeouts
 //! during long-running requests (e.g., extended thinking).
@@ -22,6 +22,7 @@ use llm_relay::convert::tool_names::strip_mcp_prefix;
 
 use crate::AppState;
 use crate::auth::usage::{add_usage, usage_from_json};
+use crate::transforms::tool_aliases::ToolNameMap;
 
 /// Keep-alive interval for SSE streams (prevents proxy/load balancer timeouts).
 const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
@@ -332,18 +333,22 @@ pub fn stream_anthropic_to_openai_with_usage(
     }
 }
 
-/// Strip mcp_ prefix from tool names in native Anthropic SSE stream with usage tracking.
-///
-/// This is used for the Anthropic-native endpoint to return clean tool names
-/// to clients while preserving the SSE format.
-/// Records token usage to the client keys store after the stream ends.
-///
-/// Includes keep-alive pings every 15 seconds to prevent connection timeouts.
-pub fn stream_strip_mcp_prefix_with_usage(
+pub fn stream_restore_native_tool_names_with_usage(
     body: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
     state: Arc<AppState>,
     key_id: String,
     model: String,
+    tool_name_map: ToolNameMap,
+) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
+    stream_transform_native_tool_names_with_usage(body, state, key_id, model, tool_name_map)
+}
+
+fn stream_transform_native_tool_names_with_usage(
+    body: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
+    state: Arc<AppState>,
+    key_id: String,
+    model: String,
+    tool_name_map: ToolNameMap,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
     use futures_util::StreamExt;
 
@@ -351,17 +356,16 @@ pub fn stream_strip_mcp_prefix_with_usage(
         let mut body = std::pin::pin!(body);
         let mut buffer = String::new();
         let mut keep_alive = interval(KEEP_ALIVE_INTERVAL);
-        keep_alive.reset(); // Don't fire immediately
+        keep_alive.reset();
         let mut usage_report = Usage::default();
 
         loop {
             tokio::select! {
-                biased; // Prefer data over keep-alive when both ready
+                biased;
 
-                // Data chunk received
                 chunk_opt = body.next() => {
                     let Some(chunk_result) = chunk_opt else {
-                        break; // Stream ended
+                        break;
                     };
 
                     let chunk = match chunk_result {
@@ -375,7 +379,6 @@ pub fn stream_strip_mcp_prefix_with_usage(
                     let text = match std::str::from_utf8(&chunk) {
                         Ok(t) => t,
                         Err(_) => {
-                            // Not valid UTF-8, pass through
                             yield Ok(chunk);
                             continue;
                         }
@@ -383,16 +386,13 @@ pub fn stream_strip_mcp_prefix_with_usage(
 
                     buffer.push_str(text);
 
-                    // Process complete lines
                     let mut output = String::new();
                     while let Some(newline_pos) = buffer.find('\n') {
                         let line = &buffer[..=newline_pos];
 
-                        // Try to extract usage from data lines
                         if line.starts_with("data: ") {
                             let data = &line[6..line.len()].trim();
                             if let Ok(event) = serde_json::from_str::<Value>(data) {
-                                // Capture usage from message_start event
                                 if event.get("type").and_then(|t| t.as_str()) == Some("message_start")
                                     && let Some(usage) = event
                                         .get("message")
@@ -401,7 +401,6 @@ pub fn stream_strip_mcp_prefix_with_usage(
                                     add_usage(&mut usage_report, &usage_from_json(usage));
                                 }
 
-                                // Capture usage from message_delta event
                                 if event.get("type").and_then(|t| t.as_str()) == Some("message_delta")
                                     && let Some(usage) = event.get("usage")
                                 {
@@ -410,18 +409,15 @@ pub fn stream_strip_mcp_prefix_with_usage(
                             }
                         }
 
-                        // Check if this is an SSE data line with content_block_start
                         if line.starts_with("data: ") && line.contains("content_block_start") {
-                            // Try to parse and transform the JSON
                             let data = &line[6..line.len()].trim();
                             if let Ok(mut event) = serde_json::from_str::<Value>(data) {
-                                // Check for tool_use content block and strip mcp_ prefix
                                 if let Some(content_block) = event.get_mut("content_block")
                                     && content_block.get("type").and_then(|t| t.as_str()) == Some("tool_use")
                                     && let Some(name) = content_block.get("name").and_then(|n| n.as_str()).map(|s| s.to_string())
                                     && let Some(obj) = content_block.as_object_mut()
                                 {
-                                    obj.insert("name".to_string(), Value::String(strip_mcp_prefix(&name)));
+                                    obj.insert("name".to_string(), Value::String(tool_name_map.restore(&name)));
                                 }
                                 output.push_str("data: ");
                                 output.push_str(&serde_json::to_string(&event).unwrap_or_else(|_| data.to_string()));
@@ -441,19 +437,16 @@ pub fn stream_strip_mcp_prefix_with_usage(
                     }
                 }
 
-                // Keep-alive timer fired
                 _ = keep_alive.tick() => {
                     yield Ok(Bytes::from(KEEP_ALIVE_COMMENT));
                 }
             }
         }
 
-        // Flush remaining buffer
         if !buffer.is_empty() {
             yield Ok(Bytes::from(buffer));
         }
 
-        // Record usage after stream ends (per-model; global is derived via aggregation)
         let window_resets = state.usage_cache.snapshot().await.window_state();
         if let Err(e) = state.client_keys.record_model_usage(&key_id, &model, &usage_report, &window_resets).await {
             warn!("Failed to record streaming model usage for key {key_id}/{model}: {e}");

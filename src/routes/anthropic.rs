@@ -5,11 +5,9 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
-
-use llm_relay::convert::tool_names::transform_response_tool_names;
 
 use crate::AppState;
 use crate::auth::usage::usage_from_json;
@@ -17,7 +15,9 @@ use crate::capture::{Capture, capture_byte_stream};
 use crate::constants::{ANTHROPIC_API_URL, ANTHROPIC_COUNT_TOKENS_URL};
 use crate::error::ProxyError;
 use crate::transforms::{
-    prepare_anthropic_request, prepare_count_tokens_request, stream_strip_mcp_prefix_with_usage,
+    ToolNameMap, normalize_claude_code_tool_names, prepare_anthropic_request,
+    prepare_count_tokens_request, restore_response_tool_names,
+    stream_restore_native_tool_names_with_usage,
 };
 
 use super::auth::{authenticate_anthropic, build_anthropic_request};
@@ -56,7 +56,31 @@ pub async fn messages(
     .await;
 
     // Apply all transformations via unified pipeline
-    let prepared = prepare_anthropic_request(body, cloak);
+    let mut prepared = prepare_anthropic_request(body, cloak);
+    let tool_name_map = if cloak {
+        match normalize_claude_code_tool_names(&mut prepared.body) {
+            Ok(map) => map,
+            Err(err) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "type": "error",
+                        "error": {
+                            "type": "invalid_request_error",
+                            "message": format!(
+                                "Cannot normalize tool names to Claude Code-compatible names: {}",
+                                err.names().join(", ")
+                            ),
+                            "unsupported_tool_names": err.names(),
+                        }
+                    })),
+                )
+                    .into_response();
+            }
+        }
+    } else {
+        ToolNameMap::default()
+    };
     if let Some(capture) = &capture {
         capture
             .write_prepared(&prepared.body, &prepared.betas, cloak)
@@ -160,9 +184,14 @@ pub async fn messages(
             capture.as_ref().map(|c| c.upstream_stream_path()),
         );
         let key_id = auth.client_key.id.clone();
-        // Transform stream to strip mcp_ prefix from tool names and track usage
-        let transformed_stream =
-            stream_strip_mcp_prefix_with_usage(body_stream, state.clone(), key_id, model);
+        // Transform stream tool names back to client-visible names and track usage.
+        let transformed_stream = stream_restore_native_tool_names_with_usage(
+            body_stream,
+            state.clone(),
+            key_id,
+            model,
+            tool_name_map,
+        );
 
         Response::builder()
             .status(StatusCode::OK)
@@ -208,8 +237,8 @@ pub async fn messages(
             }
         }
 
-        // Strip mcp_ prefix from tool names in response
-        transform_response_tool_names(&mut json_response);
+        // Restore client-visible tool names in response.
+        restore_response_tool_names(&mut json_response, &tool_name_map);
         Json(json_response).into_response()
     }
 }
