@@ -134,6 +134,26 @@ Use the native **Anthropic** provider:
 
 Extended thinking works via the extension's built-in controls — no model suffixes needed.
 
+#### Custom Tool Names
+
+Claude subscription OAuth is sensitive to the tool names sent to the native Anthropic API. Claude Code uses a fixed set of `mcp_*` tool names; third-party tools often send their own names such as `shell`, `patch`, `ask_followup_question`, or `update_todo_list`.
+
+In cloaking mode, the proxy best-effort normalizes known third-party tool names to Claude Code-compatible names before forwarding the request upstream. Tool descriptions and input schemas are kept intact, and response tool calls are mapped back to the client's original names before returning to the tool.
+
+Unknown or colliding tool names fail locally with `400 Bad Request` instead of being forwarded upstream. This is intentional: new tool vocabularies should be captured, reviewed, and added explicitly.
+
+Current tested support:
+
+| Tool | API mode tested | Status | Notes |
+|------|-----------------|--------|-------|
+| Claude Code | Anthropic native | Supported | Treated as first-party shape; cloaking is skipped in `auto` mode. |
+| ForgeCode | Anthropic native | Supported | Tested with tool normalization for `fs_search`, `Read`, `Write`, `undo`, `remove`, `patch`, `multi_patch`, `shell`, `fetch`, `skill`, `todo_write`, `todo_read`, and `Task`. |
+| Roo Code | Anthropic native | Supported | Tested with tool normalization for `ask_followup_question`, `attempt_completion`, `codebase_search`, `list_files`, `new_task`, `read_file`, `skill`, `search_files`, `switch_mode`, and `update_todo_list`. |
+| Kilo Code | Anthropic native | Not verified | Expected to work if it uses a supported tool vocabulary; capture and add aliases if it returns a local unknown-tool `400`. |
+| Cline | Anthropic native | Not recently verified | Basic native Anthropic shape should work; custom tool names may need aliases. |
+
+Some aliases are semantically approximate because Anthropic only accepts the Claude Code-compatible name set. The model still sees the original tool description and schema, which are the primary signals for how to call the tool.
+
 #### Alternative: OpenAI Compatible
 
 | Setting | Value |
