@@ -738,9 +738,7 @@ pub async fn init_db(path: &Path) -> Result<(), ProxyError> {
         .map_err(|e| ProxyError::DatabaseError(format!("Failed to connect: {e}")))?;
 
     configure_connection(&conn).await?;
-    conn.execute("PRAGMA journal_mode = WAL", ())
-        .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to enable WAL mode: {e}")))?;
+    set_journal_mode_wal(&conn).await?;
     conn.execute("PRAGMA synchronous = NORMAL", ())
         .await
         .map_err(|e| ProxyError::DatabaseError(format!("Failed to set synchronous mode: {e}")))?;
@@ -763,6 +761,20 @@ async fn configure_connection(conn: &Connection) -> Result<(), ProxyError> {
     conn.execute("PRAGMA foreign_keys = ON", ())
         .await
         .map_err(|e| ProxyError::DatabaseError(format!("Failed to enable foreign keys: {e}")))?;
+    Ok(())
+}
+
+async fn set_journal_mode_wal(conn: &Connection) -> Result<(), ProxyError> {
+    let mut rows = conn
+        .query("PRAGMA journal_mode = WAL", ())
+        .await
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to enable WAL mode: {e}")))?;
+    while rows
+        .next()
+        .await
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to read WAL mode result: {e}")))?
+        .is_some()
+    {}
     Ok(())
 }
 
