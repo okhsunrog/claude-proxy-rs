@@ -33,6 +33,14 @@ fn extract_api_key(headers: &HeaderMap) -> Option<&str> {
     extract_bearer_token(headers)
 }
 
+/// Build a non-sensitive fingerprint of a presented API key for logging.
+/// Shows only a short prefix and the length so a mistyped/stale key can be
+/// recognized without leaking the secret into the logs.
+fn key_fingerprint(key: &str) -> String {
+    let prefix: String = key.chars().take(12).collect();
+    format!("{prefix}…(len={})", key.len())
+}
+
 /// Get OAuth token, refreshing if needed
 async fn get_oauth_token(state: &AppState) -> Result<String, ProxyError> {
     match state.oauth.refresh_if_needed().await {
@@ -48,11 +56,16 @@ async fn authenticate_key(
     state: &Arc<AppState>,
     model: &str,
 ) -> Result<AuthResult, ProxyError> {
-    let client_key = state
-        .client_keys
-        .validate(key)
-        .await?
-        .ok_or(ProxyError::InvalidApiKey)?;
+    let client_key = match state.client_keys.validate(key).await? {
+        Some(ck) => ck,
+        None => {
+            warn!(
+                key_prefix = %key_fingerprint(key),
+                "auth rejected: no enabled key matches the presented API key"
+            );
+            return Err(ProxyError::InvalidApiKey);
+        }
+    };
 
     // Get window resets for limit checks. Pure read from the usage cache —
     // no HTTP I/O. The cache is kept fresh by `patch_from_headers` on every
@@ -66,11 +79,21 @@ async fn authenticate_key(
         .check_limits(&client_key.id, &window_resets)
         .await
     {
+        warn!(
+            key = %client_key.name,
+            key_id = %client_key.id,
+            "auth rejected: global rate limit exceeded: {msg}"
+        );
         return Err(ProxyError::RateLimitExceeded(msg));
     }
 
     // Check model exists and is enabled
     if !state.models.is_valid(model).await? {
+        warn!(
+            key = %client_key.name,
+            %model,
+            "auth rejected: unknown or disabled model"
+        );
         return Err(ProxyError::InvalidModel(model.to_string()));
     }
 
@@ -80,6 +103,11 @@ async fn authenticate_key(
         .is_model_allowed(&client_key.id, model)
         .await?
     {
+        warn!(
+            key = %client_key.name,
+            %model,
+            "auth rejected: model not in key's allowed-models whitelist"
+        );
         return Err(ProxyError::ModelNotAllowed(model.to_string()));
     }
 
@@ -89,6 +117,11 @@ async fn authenticate_key(
         .check_model_limits(&client_key.id, model, &window_resets)
         .await
     {
+        warn!(
+            key = %client_key.name,
+            %model,
+            "auth rejected: per-model rate limit exceeded: {msg}"
+        );
         return Err(ProxyError::RateLimitExceeded(msg));
     }
 
@@ -96,6 +129,10 @@ async fn authenticate_key(
     // exhausted. Reads from the usage cache (populated from /v1/messages
     // response headers in near real time); no per-request HTTP call.
     if !client_key.allow_extra_usage && state.usage_cache.is_over_subscription_limit().await {
+        warn!(
+            key = %client_key.name,
+            "auth rejected: subscription limits exhausted (extra usage not allowed for this key)"
+        );
         return Err(ProxyError::RateLimitExceeded(
             "Subscription limits exhausted (extra usage not allowed for this key)".into(),
         ));
