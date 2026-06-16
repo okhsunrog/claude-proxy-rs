@@ -106,7 +106,6 @@ pub async fn messages(
         ANTHROPIC_API_URL,
         &auth.token,
         Some(&prepared.betas),
-        stream,
         &state.session_id,
     );
 
@@ -136,7 +135,6 @@ pub async fn messages(
             ANTHROPIC_API_URL,
             &new_token,
             Some(&prepared.betas),
-            stream,
             &state.session_id,
         );
         match retry_builder.json(&prepared.body).send().await {
@@ -297,7 +295,6 @@ pub async fn count_tokens(
         ANTHROPIC_COUNT_TOKENS_URL,
         &auth.token,
         Some(&prepared.betas),
-        false, // count_tokens is never streaming
         &state.session_id,
     );
 

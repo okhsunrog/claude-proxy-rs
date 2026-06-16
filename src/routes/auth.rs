@@ -202,22 +202,18 @@ fn build_beta_header(extras: &[String]) -> String {
     result
 }
 
-/// Build a request to the Anthropic API with OAuth headers
+/// Build a request to the Anthropic API with OAuth headers.
+///
+/// Headers mirror the Claude Code 2.1.178 CLI exactly (captured from live
+/// traffic) so the upstream request is indistinguishable from the real client.
 pub fn build_anthropic_request(
     client: &Client,
     url: &str,
     token: &str,
     extra_betas: Option<&[String]>,
-    stream: bool,
     session_id: &str,
 ) -> RequestBuilder {
     let beta_header = build_beta_header(extra_betas.unwrap_or(&[]));
-
-    let accept = if stream {
-        "text/event-stream"
-    } else {
-        "application/json"
-    };
 
     client
         .post(url)
@@ -229,17 +225,16 @@ pub fn build_anthropic_request(
         .header("anthropic-dangerous-direct-browser-access", "true")
         .header("x-app", "cli")
         .header("X-Claude-Code-Session-Id", session_id)
-        .header("x-stainless-helper-method", "stream")
         .header("x-stainless-retry-count", "0")
         .header("x-stainless-runtime-version", "v24.3.0")
-        .header("x-stainless-package-version", "0.55.1")
+        .header("x-stainless-package-version", "0.94.0")
         .header("x-stainless-runtime", "node")
         .header("x-stainless-lang", "js")
-        .header("x-stainless-arch", "x86_64")
+        .header("x-stainless-arch", "x64")
         .header("x-stainless-os", "Linux")
-        .header("x-stainless-timeout", "60")
+        .header("x-stainless-timeout", "600")
         .header("connection", "keep-alive")
-        .header("accept", accept)
+        .header("accept", "application/json")
 }
 
 #[cfg(test)]
