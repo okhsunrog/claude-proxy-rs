@@ -20,7 +20,7 @@ use crate::transforms::{
     stream_restore_native_tool_names_with_usage,
 };
 
-use super::auth::{authenticate_anthropic, build_anthropic_request};
+use super::auth::{authenticate_anthropic, build_anthropic_request, extract_client_betas};
 
 pub async fn messages(
     State(state): State<Arc<AppState>>,
@@ -57,6 +57,14 @@ pub async fn messages(
 
     // Apply all transformations via unified pipeline
     let mut prepared = prepare_anthropic_request(body, cloak);
+    // Forward beta flags the client sent in the `anthropic-beta` header. Native
+    // Claude Code carries them there (not in a body `betas` field), and dropping
+    // them makes Anthropic reject newer tool types like `advisor_*` with a 400.
+    for beta in extract_client_betas(&headers) {
+        if !prepared.betas.contains(&beta) {
+            prepared.betas.push(beta);
+        }
+    }
     let tool_name_map = if cloak {
         match normalize_claude_code_tool_names(&mut prepared.body) {
             Ok(map) => map,
@@ -271,7 +279,13 @@ pub async fn count_tokens(
     .await;
 
     // Apply lighter transformations for count_tokens (no metadata/tools support)
-    let prepared = prepare_count_tokens_request(body, cloak);
+    let mut prepared = prepare_count_tokens_request(body, cloak);
+    // Forward client-supplied beta flags (see note in `messages`).
+    for beta in extract_client_betas(&headers) {
+        if !prepared.betas.contains(&beta) {
+            prepared.betas.push(beta);
+        }
+    }
     if let Some(capture) = &capture {
         capture
             .write_prepared(&prepared.body, &prepared.betas, cloak)

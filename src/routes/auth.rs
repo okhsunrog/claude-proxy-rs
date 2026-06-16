@@ -169,6 +169,39 @@ pub async fn authenticate_anthropic(
     authenticate_key(key, state, model).await
 }
 
+/// Parse client-supplied beta flags from the inbound `anthropic-beta` header.
+///
+/// Native Claude Code (and the Anthropic SDK) send beta flags in this header,
+/// not in a body `betas` field. They must be forwarded upstream or Anthropic
+/// rejects newer features and tool types (e.g. `advisor_*`) with a 400.
+pub fn extract_client_betas(headers: &HeaderMap) -> Vec<String> {
+    headers
+        .get("anthropic-beta")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| {
+            s.split(',')
+                .map(|b| b.trim().to_string())
+                .filter(|b| !b.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Merge the base OAuth betas with caller-supplied extras, preserving order and
+/// de-duplicating both against the base set and within the extras themselves.
+fn build_beta_header(extras: &[String]) -> String {
+    let mut seen: std::collections::HashSet<&str> = OAUTH_BETA_HEADER.split(',').collect();
+    let mut result = OAUTH_BETA_HEADER.to_string();
+    for beta in extras {
+        let beta = beta.trim();
+        if !beta.is_empty() && seen.insert(beta) {
+            result.push(',');
+            result.push_str(beta);
+        }
+    }
+    result
+}
+
 /// Build a request to the Anthropic API with OAuth headers
 pub fn build_anthropic_request(
     client: &Client,
@@ -178,25 +211,7 @@ pub fn build_anthropic_request(
     stream: bool,
     session_id: &str,
 ) -> RequestBuilder {
-    // Merge base betas with extra betas from request body
-    let beta_header = if let Some(extras) = extra_betas {
-        if extras.is_empty() {
-            OAUTH_BETA_HEADER.to_string()
-        } else {
-            let existing: std::collections::HashSet<&str> = OAUTH_BETA_HEADER.split(',').collect();
-            let mut result = OAUTH_BETA_HEADER.to_string();
-            for beta in extras {
-                let beta = beta.trim();
-                if !beta.is_empty() && !existing.contains(beta) {
-                    result.push(',');
-                    result.push_str(beta);
-                }
-            }
-            result
-        }
-    } else {
-        OAUTH_BETA_HEADER.to_string()
-    };
+    let beta_header = build_beta_header(extra_betas.unwrap_or(&[]));
 
     let accept = if stream {
         "text/event-stream"
@@ -225,4 +240,57 @@ pub fn build_anthropic_request(
         .header("x-stainless-timeout", "60")
         .header("connection", "keep-alive")
         .header("accept", accept)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn headers_with_beta(value: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert("anthropic-beta", value.parse().unwrap());
+        h
+    }
+
+    #[test]
+    fn extract_client_betas_splits_and_trims() {
+        let h = headers_with_beta("advisor-2026-03-01, fine-grained-tool-streaming-2025-05-14 ,");
+        assert_eq!(
+            extract_client_betas(&h),
+            vec![
+                "advisor-2026-03-01".to_string(),
+                "fine-grained-tool-streaming-2025-05-14".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn extract_client_betas_empty_when_absent() {
+        assert!(extract_client_betas(&HeaderMap::new()).is_empty());
+    }
+
+    #[test]
+    fn build_beta_header_appends_new_betas() {
+        let header = build_beta_header(&["advisor-2026-03-01".to_string()]);
+        assert!(header.starts_with(OAUTH_BETA_HEADER));
+        assert!(header.ends_with(",advisor-2026-03-01"));
+    }
+
+    #[test]
+    fn build_beta_header_dedups_against_base_and_within_extras() {
+        // A beta already in the base set, plus a duplicate extra, are not repeated.
+        let base_first = OAUTH_BETA_HEADER.split(',').next().unwrap().to_string();
+        let header = build_beta_header(&[
+            base_first,
+            "advisor-2026-03-01".to_string(),
+            "advisor-2026-03-01".to_string(),
+        ]);
+        assert_eq!(header.matches("advisor-2026-03-01").count(), 1);
+        assert_eq!(header, format!("{OAUTH_BETA_HEADER},advisor-2026-03-01"));
+    }
+
+    #[test]
+    fn build_beta_header_no_extras_is_base() {
+        assert_eq!(build_beta_header(&[]), OAUTH_BETA_HEADER);
+    }
 }
