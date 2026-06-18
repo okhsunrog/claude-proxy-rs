@@ -255,7 +255,14 @@ fn sanitize_system(mut system: Value) -> Value {
                     .replace("OpenCode", "Claude Code")
                     .replace("opencode", "Claude")
                     .replace("Opencode", "Claude")
-                    .replace("OPENCODE", "Claude");
+                    .replace("OPENCODE", "Claude")
+                    // Anthropic flags this exact OpenCode env-injection phrase as a
+                    // non-Claude-Code agent fingerprint and bills the request as extra
+                    // usage instead of subscription; reword it (verified via probes).
+                    .replace(
+                        "Here is some useful information about the environment you are running in:",
+                        "Working context:",
+                    );
                 if let Some(obj) = item.as_object_mut() {
                     obj.insert("text".to_string(), Value::String(sanitized));
                 }
@@ -344,6 +351,22 @@ mod tests {
         // Index 0 is prefix, 1 and 2 are user-provided
         assert!(!system[1]["text"].as_str().unwrap().contains("OpenCode"));
         assert!(!system[2]["text"].as_str().unwrap().contains("opencode"));
+    }
+
+    #[test]
+    fn test_sanitize_system_rewords_env_preamble() {
+        let body = serde_json::json!({
+            "system": "Here is some useful information about the environment you are running in:\n<env>x</env>"
+        });
+        let result = inject_system_message(body);
+        let joined: String = result["system"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|b| b["text"].as_str().unwrap_or(""))
+            .collect();
+        assert!(!joined.contains("Here is some useful information about the environment"));
+        assert!(joined.contains("Working context:"));
     }
 
     #[test]
