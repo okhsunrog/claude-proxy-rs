@@ -5,7 +5,7 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
@@ -66,26 +66,7 @@ pub async fn messages(
         }
     }
     let tool_name_map = if cloak {
-        match normalize_claude_code_tool_names(&mut prepared.body) {
-            Ok(map) => map,
-            Err(err) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "type": "error",
-                        "error": {
-                            "type": "invalid_request_error",
-                            "message": format!(
-                                "Cannot normalize tool names to Claude Code-compatible names: {}",
-                                err.names().join(", ")
-                            ),
-                            "unsupported_tool_names": err.names(),
-                        }
-                    })),
-                )
-                    .into_response();
-            }
-        }
+        normalize_claude_code_tool_names(&mut prepared.body)
     } else {
         ToolNameMap::default()
     };

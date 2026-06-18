@@ -415,7 +415,9 @@ fn stream_transform_native_tool_names_with_usage(
                                     && let Some(name) = content_block.get("name").and_then(|n| n.as_str()).map(|s| s.to_string())
                                     && let Some(obj) = content_block.as_object_mut()
                                 {
-                                    obj.insert("name".to_string(), Value::String(tool_name_map.restore(&name)));
+                                    let client_name = tool_name_map.restore(&name);
+                                    tracing::info!(tool = %client_name, "tool_use");
+                                    obj.insert("name".to_string(), Value::String(client_name));
                                 }
                                 output.push_str("data: ");
                                 output.push_str(&serde_json::to_string(&event).unwrap_or_else(|_| data.to_string()));
