@@ -170,14 +170,15 @@ impl ClientKeysStore {
             };
 
             if needs_init {
-                let _ = sqlx::query!(
+                sqlx::query!(
                     "UPDATE client_keys SET five_hour_reset_at = $1, weekly_reset_at = $2 WHERE id = $3",
                     new_five_hour as i64,
                     new_weekly as i64,
                     key_id,
                 )
                 .execute(&conn)
-                    .await;
+                .await
+                .db_context("Failed to initialize reset timestamps")?;
             }
         }
 

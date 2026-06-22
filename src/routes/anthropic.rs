@@ -180,13 +180,17 @@ pub async fn messages(
             tool_name_map,
         );
 
-        Response::builder()
+        match Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "text/event-stream")
             .header(header::CACHE_CONTROL, "no-cache")
             .header(header::CONNECTION, "keep-alive")
             .body(Body::from_stream(transformed_stream))
-            .unwrap()
+        {
+            Ok(response) => response,
+            Err(e) => ProxyError::ParseError(format!("Failed to build stream response: {e}"))
+                .to_anthropic_response(),
+        }
     } else {
         let text = match response.text().await {
             Ok(text) => text,

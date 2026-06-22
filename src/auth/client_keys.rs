@@ -91,11 +91,11 @@ struct ClientKeyRow {
 }
 
 pub(crate) fn opt_i64_to_u64(value: Option<i64>) -> Option<u64> {
-    value.map(|v| v as u64)
+    value.and_then(|v| u64::try_from(v).ok())
 }
 
 pub(crate) fn i64_to_u64(value: i64) -> u64 {
-    value as u64
+    u64::try_from(value).unwrap_or_default()
 }
 
 fn row_to_client_key(row: ClientKeyRow) -> ClientKey {

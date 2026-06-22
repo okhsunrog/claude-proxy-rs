@@ -93,9 +93,7 @@ impl OAuthManager {
             .ok_or("No OAuth flow in progress")?;
 
         // Code format is "actual_code#state"
-        let parts: Vec<&str> = code.split('#').collect();
-        let actual_code = parts[0];
-        let state = parts.get(1).copied().unwrap_or("");
+        let (actual_code, state) = code.split_once('#').unwrap_or((code, ""));
 
         let body = json!({
             "code": actual_code,
@@ -126,12 +124,7 @@ impl OAuthManager {
             .await
             .map_err(|e| format!("Failed to parse token response: {}", e))?;
 
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
-
-        let expires = now + (token.expires_in * 1000);
+        let expires = now_millis() + (token.expires_in * 1000);
 
         self.auth_store
             .set(
@@ -153,11 +146,6 @@ impl OAuthManager {
     }
 
     async fn do_refresh(&self, refresh: String) -> Result<Option<String>, String> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
-
         let body = json!({
             "grant_type": "refresh_token",
             "refresh_token": refresh,
@@ -183,7 +171,9 @@ impl OAuthManager {
             // of endlessly failing.
             if text.contains("invalid_grant") {
                 warn!("OAuth refresh token is invalid, clearing stale credentials");
-                let _ = self.auth_store.remove("anthropic").await;
+                if let Err(e) = self.auth_store.remove("anthropic").await {
+                    warn!("Failed to clear stale OAuth credentials: {e}");
+                }
                 return Ok(None);
             }
 
@@ -195,7 +185,7 @@ impl OAuthManager {
             .await
             .map_err(|e| format!("Failed to parse refresh response: {}", e))?;
 
-        let new_expires = now + (token.expires_in * 1000);
+        let new_expires = now_millis() + (token.expires_in * 1000);
 
         self.auth_store
             .update_tokens(
@@ -212,7 +202,7 @@ impl OAuthManager {
 
     pub async fn refresh_if_needed(&self) -> Result<Option<String>, String> {
         // Fast path: check without the lock first.
-        let needs_refresh = {
+        {
             let auth = match self.auth_store.get("anthropic").await {
                 Some(auth) => auth,
                 None => return Ok(None),
@@ -224,20 +214,11 @@ impl OAuthManager {
                 Auth::OAuth {
                     access, expires, ..
                 } => {
-                    let now = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_millis() as u64;
-                    if now + 300_000 < expires {
+                    if now_millis() + 300_000 < expires {
                         return Ok(Some(access));
                     }
-                    true
                 }
             }
-        };
-
-        if !needs_refresh {
-            unreachable!();
         }
 
         // Acquire the mutex so only one refresh happens at a time.
@@ -259,11 +240,7 @@ impl OAuthManager {
                 ..
             } => (access, refresh, expires),
         };
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
-        if now + 300_000 < expires {
+        if now_millis() + 300_000 < expires {
             return Ok(Some(access));
         }
 
@@ -298,4 +275,12 @@ impl OAuthManager {
     pub async fn is_authenticated(&self) -> bool {
         self.auth_store.has("anthropic").await.unwrap_or(false)
     }
+}
+
+fn now_millis() -> u64 {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    u64::try_from(millis).unwrap_or(u64::MAX)
 }

@@ -36,7 +36,7 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Self {
-        dotenv().ok();
+        drop(dotenv());
 
         let host = env::var("CLAUDE_PROXY_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
         let port = env::var("CLAUDE_PROXY_PORT")

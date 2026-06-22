@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use super::client_keys::i64_to_u64;
 use crate::db;
 use crate::error::{DbResultExt, ProxyError};
 
@@ -67,7 +68,7 @@ impl AuthStore {
             "oauth" => Some(Auth::OAuth {
                 access: row.access_token,
                 refresh: row.refresh_token,
-                expires: row.expires_at as u64,
+                expires: i64_to_u64(row.expires_at),
                 account_id: row.account_id.filter(|s| !s.is_empty()),
                 enterprise_url: row.enterprise_url.filter(|s| !s.is_empty()),
             }),

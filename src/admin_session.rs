@@ -62,32 +62,39 @@ pub(crate) async fn validate_session(token: &str) -> bool {
     let now = now_secs() as i64;
     if now >= expires_at {
         // Expired: clean it up.
-        let _ = sqlx::query!("DELETE FROM admin_sessions WHERE token = $1", token)
+        if let Err(e) = sqlx::query!("DELETE FROM admin_sessions WHERE token = $1", token)
             .execute(&conn)
-            .await;
+            .await
+        {
+            warn!("Failed to delete expired admin session: {e}");
+        }
         return false;
     }
 
     // Sliding expiration: renew if more than 1 day has passed since last renewal.
     let new_expires = now + SESSION_TTL_SECS as i64;
-    if new_expires - expires_at > 24 * 3600 {
-        let _ = sqlx::query!(
+    if new_expires - expires_at > 24 * 3600
+        && let Err(e) = sqlx::query!(
             "UPDATE admin_sessions SET expires_at = $1 WHERE token = $2",
             new_expires,
             token
         )
         .execute(&conn)
-        .await;
+        .await
+    {
+        warn!("Failed to refresh admin session expiry: {e}");
     }
     true
 }
 
 /// Remove a session token from the database.
 pub(crate) async fn remove_session(token: &str) {
-    if let Ok(conn) = db::get_conn().await {
-        let _ = sqlx::query!("DELETE FROM admin_sessions WHERE token = $1", token)
+    if let Ok(conn) = db::get_conn().await
+        && let Err(e) = sqlx::query!("DELETE FROM admin_sessions WHERE token = $1", token)
             .execute(&conn)
-            .await;
+            .await
+    {
+        warn!("Failed to remove admin session: {e}");
     }
 }
 

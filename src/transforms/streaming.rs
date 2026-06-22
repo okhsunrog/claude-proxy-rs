@@ -43,6 +43,13 @@ fn map_stop_reason(reason: &str) -> &str {
     }
 }
 
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
 // ============================================================================
 // Anthropic SSE Event Types
 // ============================================================================
@@ -108,10 +115,7 @@ pub fn stream_anthropic_to_openai_with_usage(
     key_id: String,
 ) -> impl Stream<Item = Result<Bytes, IoError>> + Send {
     stream! {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let now = now_secs();
 
         let mut buffer = String::new();
         let mut current_tool_call_id: Option<String> = None;
@@ -147,15 +151,13 @@ pub fn stream_anthropic_to_openai_with_usage(
 
                     buffer.push_str(text);
 
-                    while let Some(newline_pos) = buffer.find('\n') {
-                        let line = buffer[..newline_pos].trim().to_string();
-                        buffer = buffer[newline_pos + 1..].to_string();
+                    while let Some((line, rest)) = buffer.split_once('\n') {
+                        let line = line.trim().to_string();
+                        buffer = rest.to_string();
 
-                        if line.is_empty() || !line.starts_with("data: ") {
+                        let Some(data) = line.strip_prefix("data: ") else {
                             continue;
-                        }
-
-                        let data = &line[6..];
+                        };
 
                         if data == "[DONE]" {
                             continue;
@@ -384,11 +386,11 @@ fn stream_transform_native_tool_names_with_usage(
                     buffer.push_str(text);
 
                     let mut output = String::new();
-                    while let Some(newline_pos) = buffer.find('\n') {
-                        let line = &buffer[..=newline_pos];
+                    while let Some((line, rest)) = buffer.split_once('\n') {
+                        let line_with_newline = format!("{line}\n");
 
-                        if line.starts_with("data: ") {
-                            let data = &line[6..line.len()].trim();
+                        if let Some(data) = line.strip_prefix("data: ") {
+                            let data = data.trim();
                             if let Ok(event) = from_str::<Value>(data) {
                                 if event.get("type").and_then(|t| t.as_str()) == Some("message_start")
                                     && let Some(usage) = event
@@ -406,8 +408,9 @@ fn stream_transform_native_tool_names_with_usage(
                             }
                         }
 
-                        if line.starts_with("data: ") && line.contains("content_block_start") {
-                            let data = &line[6..line.len()].trim();
+                        if line.contains("content_block_start")
+                            && let Some(data) = line.strip_prefix("data: ").map(str::trim)
+                        {
                             if let Ok(mut event) = from_str::<Value>(data) {
                                 if let Some(content_block) = event.get_mut("content_block")
                                     && content_block.get("type").and_then(|t| t.as_str()) == Some("tool_use")
@@ -422,13 +425,13 @@ fn stream_transform_native_tool_names_with_usage(
                                 output.push_str(&to_string(&event).unwrap_or_else(|_| data.to_string()));
                                 output.push('\n');
                             } else {
-                                output.push_str(line);
+                                output.push_str(&line_with_newline);
                             }
                         } else {
-                            output.push_str(line);
+                            output.push_str(&line_with_newline);
                         }
 
-                        buffer = buffer[newline_pos + 1..].to_string();
+                        buffer = rest.to_string();
                     }
 
                     if !output.is_empty() {
@@ -591,7 +594,7 @@ mod tests {
     fn test_sse_data_line_extraction() {
         let line = "data: {\"type\":\"message_stop\"}";
         assert!(line.starts_with("data: "));
-        let data = &line[6..];
+        let data = line.strip_prefix("data: ").unwrap();
         let event: StreamEvent = from_str(data).unwrap();
         assert_eq!(event.event_type, "message_stop");
     }
@@ -607,7 +610,7 @@ mod tests {
     #[test]
     fn test_done_sentinel() {
         let line = "data: [DONE]";
-        let data = &line[6..];
+        let data = line.strip_prefix("data: ").unwrap();
         assert_eq!(data, "[DONE]");
     }
 }

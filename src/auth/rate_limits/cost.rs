@@ -86,5 +86,11 @@ pub(super) async fn compute_cost(conn: &Connection, model: &str, report: &Usage)
         + report.cache_read_input_tokens.unwrap_or(0) as f64 * row.cache_read_price
         + report.cache_creation_input_tokens.unwrap_or(0) as f64 * row.cache_write_price;
 
-    cost.round() as u64
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "cost inputs are non-negative token counts and configured non-negative prices"
+    )]
+    {
+        cost.round() as u64
+    }
 }

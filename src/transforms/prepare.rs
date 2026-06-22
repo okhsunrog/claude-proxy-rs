@@ -224,18 +224,17 @@ fn generate_fake_user_id() -> String {
 /// Check if a user ID matches Claude Code format.
 /// Format: user_[64-hex]_account__session_[uuid-v4]
 fn is_valid_user_id(user_id: &str) -> bool {
-    let parts: Vec<&str> = user_id.split("_account__session_").collect();
-    if parts.len() != 2 {
+    let Some((user_part, uuid_part)) = user_id.split_once("_account__session_") else {
         return false;
-    }
+    };
 
     // Check hex part
-    let hex_part = parts[0].strip_prefix("user_");
+    let hex_part = user_part.strip_prefix("user_");
     let valid_hex =
         hex_part.is_some_and(|h| h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()));
 
     // Check UUID part (basic validation)
-    let valid_uuid = parts[1].len() == 36 && parts[1].matches('-').count() == 4;
+    let valid_uuid = uuid_part.len() == 36 && uuid_part.matches('-').count() == 4;
 
     valid_hex && valid_uuid
 }

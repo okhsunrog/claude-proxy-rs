@@ -115,7 +115,7 @@ impl CachedUsage {
         let parse_reset = |s: &str| -> Option<u64> {
             DateTime::parse_from_rfc3339(s)
                 .ok()
-                .map(|dt| dt.timestamp_millis() as u64)
+                .and_then(|dt| u64::try_from(dt.timestamp_millis()).ok())
         };
         SubscriptionState {
             five_hour_reset_at: snapshot

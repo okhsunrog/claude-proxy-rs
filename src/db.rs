@@ -27,7 +27,7 @@ pub async fn init_db(database_url: &str) -> Result<(), ProxyError> {
 
     DATABASE
         .set(pool)
-        .map_err(|_| ProxyError::DatabaseState("Database already initialized"))?;
+        .map_err(|_pool| ProxyError::DatabaseState("Database already initialized"))?;
 
     info!("PostgreSQL database initialized");
     Ok(())

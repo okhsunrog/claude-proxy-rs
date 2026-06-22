@@ -124,6 +124,6 @@ pub async fn fetch(state: &AppState) -> Result<SubscriptionUsageResponse, FetchE
 fn parse_session_key_from_set_cookie(raw: &str) -> Option<String> {
     let trimmed = raw.trim_start();
     let rest = trimmed.strip_prefix("sessionKey=")?;
-    let end = rest.find(';').unwrap_or(rest.len());
-    Some(rest[..end].to_string())
+    let value = rest.split_once(';').map_or(rest, |(value, _)| value);
+    Some(value.to_string())
 }

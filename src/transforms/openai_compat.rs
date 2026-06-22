@@ -58,14 +58,14 @@ pub fn transform_openai_request(req: InboundChatRequest) -> Value {
     let mut request = inbound_request_to_anthropic(req);
 
     // Override model with the base model (without suffix)
-    request["model"] = Value::String(base_model.clone());
+    set_field(&mut request, "model", Value::String(base_model.clone()));
 
     // Add fields not handled by inbound_request_to_anthropic
     if let Some(s) = stream {
-        request["stream"] = json!(s);
+        set_field(&mut request, "stream", json!(s));
     }
     if let Some(p) = top_p {
-        request["top_p"] = json!(p);
+        set_field(&mut request, "top_p", json!(p));
     }
 
     // Convert reasoning_effort or suffix to thinking config
@@ -82,10 +82,10 @@ pub fn transform_openai_request(req: InboundChatRequest) -> Value {
     if let Some(ref config) = thinking_config {
         let (thinking_json, output_config_json) = build_thinking_params_json(Some(config));
         if let Some(v) = thinking_json {
-            request["thinking"] = v;
+            set_field(&mut request, "thinking", v);
         }
         if let Some(v) = output_config_json {
-            request["output_config"] = v;
+            set_field(&mut request, "output_config", v);
         }
     }
 
@@ -122,9 +122,15 @@ pub fn transform_openai_request(req: InboundChatRequest) -> Value {
 
     // Cap at model's max output
     max_tokens = max_tokens.min(model_max_output);
-    request["max_tokens"] = json!(max_tokens);
+    set_field(&mut request, "max_tokens", json!(max_tokens));
 
     request
+}
+
+fn set_field(request: &mut Value, key: &str, value: Value) {
+    if let Some(object) = request.as_object_mut() {
+        object.insert(key.to_string(), value);
+    }
 }
 
 /// Transform an Anthropic response to OpenAI format.

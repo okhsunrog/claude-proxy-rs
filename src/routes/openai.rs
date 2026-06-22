@@ -73,9 +73,8 @@ pub async fn chat_completions(
 
     // Parse model suffix (e.g., "claude-sonnet-4-5(high)" -> base model)
     let base_model = model_name
-        .find('(')
-        .map(|i| &model_name[..i])
-        .unwrap_or(&model_name);
+        .split_once('(')
+        .map_or(model_name.as_str(), |(base, _)| base);
 
     let auth = match authenticate_openai(&headers, &state, base_model).await {
         Ok(a) => a,
@@ -162,13 +161,17 @@ pub async fn chat_completions(
         let sse_stream =
             stream_anthropic_to_openai_with_usage(body_stream, model, state.clone(), key_id);
 
-        Response::builder()
+        match Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "text/event-stream")
             .header(header::CACHE_CONTROL, "no-cache")
             .header(header::CONNECTION, "keep-alive")
             .body(Body::from_stream(sse_stream))
-            .unwrap()
+        {
+            Ok(response) => response,
+            Err(e) => ProxyError::ParseError(format!("Failed to build stream response: {e}"))
+                .to_openai_response(),
+        }
     } else {
         let text = match response.text().await {
             Ok(text) => text,

@@ -237,7 +237,7 @@ fn truncate(name: &str, max: usize) -> String {
     if name.len() <= max {
         name.to_string()
     } else {
-        name[..max].to_string()
+        name.chars().take(max).collect()
     }
 }
 

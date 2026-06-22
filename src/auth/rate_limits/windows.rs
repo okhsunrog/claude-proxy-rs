@@ -58,14 +58,15 @@ pub(super) async fn maybe_reset_expired_windows(
             .unwrap_or(weekly_reset_at);
 
         if new_five_hour != five_hour_reset_at || new_weekly != weekly_reset_at {
-            let _ = sqlx::query!(
+            sqlx::query!(
                 "UPDATE client_keys SET five_hour_reset_at = $1, weekly_reset_at = $2 WHERE id = $3",
                 new_five_hour as i64,
                 new_weekly as i64,
                 key_id,
             )
             .execute(conn)
-            .await;
+            .await
+            .db_context("Failed to update window state")?;
         }
 
         return Ok(WindowState {
