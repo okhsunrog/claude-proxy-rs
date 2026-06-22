@@ -789,3 +789,34 @@ pub async fn get_conn() -> Result<Connection, ProxyError> {
     configure_connection(&conn).await?;
     Ok(conn)
 }
+
+/// Max attempts for a transient stale-snapshot conflict (1 initial + retries).
+const STALE_RETRY_ATTEMPTS: usize = 5;
+
+/// True if the error is Turso's transient MVCC write conflict — it rolls the
+/// transaction back and asks the caller to retry: "database snapshot is stale,
+/// rollback and retry the transaction".
+fn is_stale_snapshot(err: &ProxyError) -> bool {
+    matches!(err, ProxyError::DatabaseError(msg) if msg.contains("snapshot is stale"))
+}
+
+/// Run a database read-modify-write op, retrying on Turso's transient
+/// stale-snapshot conflict with a small linear backoff. The closure must
+/// acquire a fresh connection (via [`get_conn`]) on each call so every attempt
+/// starts from a current snapshot. Non-stale errors return immediately.
+pub async fn with_stale_retry<T, F, Fut>(mut op: F) -> Result<T, ProxyError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, ProxyError>>,
+{
+    let mut attempt = 0usize;
+    loop {
+        match op().await {
+            Err(e) if is_stale_snapshot(&e) && attempt + 1 < STALE_RETRY_ATTEMPTS => {
+                attempt += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(5 * attempt as u64)).await;
+            }
+            other => return other,
+        }
+    }
+}
