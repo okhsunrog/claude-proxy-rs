@@ -10,8 +10,11 @@ use subtle::ConstantTimeEq;
 use utoipa::ToSchema;
 
 use super::{ErrorResponse, SuccessResponse};
-use crate::parse_cookie;
-use crate::{AppState, SESSION_TTL_SECS, now_secs};
+use crate::AppState;
+use crate::admin_session::{
+    clear_session_cookie, parse_cookie, remove_session, save_session, session_cookie,
+    session_expires_at, validate_session,
+};
 
 // --- Types ---
 
@@ -43,14 +46,8 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(body): Json<LoginReq
             rand::random::<u128>(),
             rand::random::<u128>()
         );
-        let expires_at = now_secs() + SESSION_TTL_SECS;
-        crate::save_session(&token, expires_at).await;
-
-        let secure_flag = if state.secure_cookies { "; Secure" } else { "" };
-        let cookie = format!(
-            "admin_session={}; HttpOnly; SameSite=Strict; Path=/admin; Max-Age={}{}",
-            token, SESSION_TTL_SECS, secure_flag
-        );
+        save_session(&token, session_expires_at()).await;
+        let cookie = session_cookie(&token, state.secure_cookies);
 
         (
             StatusCode::OK,
@@ -77,14 +74,10 @@ pub async fn logout(
     if let Some(cookie_header) = headers.get(header::COOKIE).and_then(|v| v.to_str().ok())
         && let Some(token) = parse_cookie(cookie_header, "admin_session")
     {
-        crate::remove_session(&token).await;
+        remove_session(&token).await;
     }
 
-    let secure_flag = if state.secure_cookies { "; Secure" } else { "" };
-    let clear_cookie = format!(
-        "admin_session=; HttpOnly; SameSite=Strict; Path=/admin; Max-Age=0{}",
-        secure_flag
-    );
+    let clear_cookie = clear_session_cookie(state.secure_cookies);
 
     (
         StatusCode::OK,
@@ -100,7 +93,7 @@ pub async fn auth_check(headers: axum::http::HeaderMap) -> Json<AuthCheckRespons
         headers.get(header::COOKIE).and_then(|v| v.to_str().ok())
         && let Some(token) = parse_cookie(cookie_header, "admin_session")
     {
-        crate::validate_session(&token).await
+        validate_session(&token).await
     } else {
         false
     };

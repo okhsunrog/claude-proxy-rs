@@ -1,3 +1,4 @@
+mod admin_session;
 mod auth;
 mod capture;
 mod config;
@@ -9,44 +10,34 @@ mod subscription;
 mod transforms;
 mod usage;
 
+use admin_session::{AdminCredentials, admin_auth_middleware};
+use anyhow::{Context, Result};
 use auth::{AuthStore, ClientKeysStore, ModelsStore, OAuthManager};
 use axum::ServiceExt;
 use axum::{
     Router,
-    extract::State,
-    http::{HeaderValue, Method, StatusCode, header},
-    middleware::{self, Next},
-    response::{IntoResponse, Response},
+    http::{HeaderValue, Method, header},
+    middleware,
     routing::{get, post},
 };
-use base64::Engine;
 use capture::CaptureConfig;
 use clap::Parser;
 use config::{CloakMode, Config, CorsMode};
 use reqwest::Client;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use subtle::ConstantTimeEq;
+use std::time::Duration;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::normalize_path::NormalizePath;
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
-/// Session TTL: 30 days (with sliding expiration on each request)
-const SESSION_TTL_SECS: u64 = 30 * 24 * 3600;
-
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const GIT_HASH: &str = env!("GIT_HASH");
 pub const BUILD_TIME: &str = env!("BUILD_TIME");
 
 use usage::UsageCache;
-
-pub struct AdminCredentials {
-    pub username: String,
-    pub password: String,
-}
 
 pub struct AppState {
     pub auth_store: Arc<AuthStore>,
@@ -86,79 +77,6 @@ impl AppState {
     }
 }
 
-/// Save a session token to the database
-pub async fn save_session(token: &str, expires_at: u64) {
-    if let Ok(conn) = db::get_conn().await
-        && let Err(e) = sqlx::query!(
-            "INSERT INTO admin_sessions (token, expires_at) VALUES ($1, $2) \
-             ON CONFLICT (token) DO UPDATE SET expires_at = EXCLUDED.expires_at",
-            token,
-            expires_at as i64,
-        )
-        .execute(&conn)
-        .await
-    {
-        warn!("Failed to save session: {e}");
-    }
-}
-
-/// Validate a session token, returns true if valid and not expired.
-/// Also extends the session (sliding expiration) if it's valid.
-pub async fn validate_session(token: &str) -> bool {
-    let Ok(conn) = db::get_conn().await else {
-        return false;
-    };
-    let Ok(row) = sqlx::query!(
-        "SELECT expires_at FROM admin_sessions WHERE token = $1",
-        token
-    )
-    .fetch_optional(&conn)
-    .await
-    else {
-        return false;
-    };
-    let Some(row) = row else {
-        return false;
-    };
-    let expires_at = row.expires_at;
-    let now = now_secs() as i64;
-    if now >= expires_at {
-        // Expired — clean it up
-        let _ = sqlx::query!("DELETE FROM admin_sessions WHERE token = $1", token)
-            .execute(&conn)
-            .await;
-        return false;
-    }
-    // Sliding expiration: renew if more than 1 day has passed since last renewal
-    let new_expires = now + SESSION_TTL_SECS as i64;
-    if new_expires - expires_at > 24 * 3600 {
-        let _ = sqlx::query!(
-            "UPDATE admin_sessions SET expires_at = $1 WHERE token = $2",
-            new_expires,
-            token
-        )
-        .execute(&conn)
-        .await;
-    }
-    true
-}
-
-/// Remove a session token from the database
-pub async fn remove_session(token: &str) {
-    if let Ok(conn) = db::get_conn().await {
-        let _ = sqlx::query!("DELETE FROM admin_sessions WHERE token = $1", token)
-            .execute(&conn)
-            .await;
-    }
-}
-
-fn now_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-}
-
 #[derive(Parser)]
 #[command(name = "claude-proxy")]
 #[command(about = "OpenAI-compatible proxy for Claude API")]
@@ -174,92 +92,6 @@ struct Args {
     /// Dump OpenAPI spec as JSON and exit (no config/DB needed)
     #[arg(long)]
     openapi: bool,
-}
-
-/// Parse a named cookie from the Cookie header
-pub fn parse_cookie(header: &str, name: &str) -> Option<String> {
-    header.split(';').find_map(|cookie| {
-        let (key, value) = cookie.trim().split_once('=')?;
-        if key.trim() == name {
-            Some(value.trim().to_string())
-        } else {
-            None
-        }
-    })
-}
-
-/// Middleware for admin routes authentication (session cookie or Basic Auth)
-async fn admin_auth_middleware(
-    State(state): State<Arc<AppState>>,
-    request: axum::extract::Request,
-    next: Next,
-) -> Response {
-    if state.disable_auth {
-        return next.run(request).await;
-    }
-
-    let creds = &state.admin_credentials;
-
-    // Check for session cookie first
-    if let Some(cookie_header) = request
-        .headers()
-        .get(header::COOKIE)
-        .and_then(|v| v.to_str().ok())
-        && let Some(token) = parse_cookie(cookie_header, "admin_session")
-        && validate_session(&token).await
-    {
-        let mut response = next.run(request).await;
-        // Refresh cookie Max-Age to keep browser cookie in sync with sliding expiration
-        let secure_flag = if state.secure_cookies { "; Secure" } else { "" };
-        let cookie = format!(
-            "admin_session={}; HttpOnly; SameSite=Strict; Path=/admin; Max-Age={}{}",
-            token, SESSION_TTL_SECS, secure_flag
-        );
-        if let Ok(value) = cookie.parse() {
-            response.headers_mut().insert(header::SET_COOKIE, value);
-        }
-        return response;
-    }
-
-    // Fall through to Basic Auth check
-    let auth_header = request
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok());
-
-    let Some(auth_value) = auth_header else {
-        return unauthorized_response();
-    };
-
-    let Some(encoded) = auth_value.strip_prefix("Basic ") else {
-        return unauthorized_response();
-    };
-
-    let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded) else {
-        return unauthorized_response();
-    };
-
-    let Ok(credentials) = String::from_utf8(decoded) else {
-        return unauthorized_response();
-    };
-
-    let Some((provided_user, provided_pass)) = credentials.split_once(':') else {
-        return unauthorized_response();
-    };
-
-    // Constant-time comparison to prevent timing attacks
-    let user_match = provided_user.as_bytes().ct_eq(creds.username.as_bytes());
-    let pass_match = provided_pass.as_bytes().ct_eq(creds.password.as_bytes());
-
-    if user_match.into() && pass_match.into() {
-        next.run(request).await
-    } else {
-        unauthorized_response()
-    }
-}
-
-fn unauthorized_response() -> Response {
-    (StatusCode::UNAUTHORIZED, "Unauthorized").into_response()
 }
 
 fn full_openapi_router() -> OpenApiRouter<Arc<AppState>> {
@@ -331,14 +163,19 @@ fn build_openapi() -> utoipa::openapi::OpenApi {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     let args = Args::parse();
 
     // Dump OpenAPI spec and exit (no config/DB needed)
     if args.openapi {
         let openapi = build_openapi();
-        println!("{}", openapi.to_pretty_json().unwrap());
-        return;
+        println!(
+            "{}",
+            openapi
+                .to_pretty_json()
+                .context("Failed to serialize OpenAPI spec")?
+        );
+        return Ok(());
     }
 
     tracing_subscriber::registry()
@@ -353,7 +190,7 @@ async fn main() {
     // Initialize database (before moving fields out of config)
     db::init_db(&config.database_url)
         .await
-        .expect("Failed to initialize database");
+        .context("Failed to initialize database")?;
 
     let host = args.host.unwrap_or(config.host);
     let port = args.port.unwrap_or(config.port);
@@ -367,7 +204,7 @@ async fn main() {
         .timeout(Duration::from_secs(300)) // 5 min timeout for long requests
         .pool_max_idle_per_host(10)
         .build()
-        .expect("Failed to create HTTP client");
+        .context("Failed to create HTTP client")?;
 
     let oauth = OAuthManager::new(http_client.clone(), auth_store.clone());
 
@@ -496,9 +333,10 @@ async fn main() {
             .with_state(state),
     );
 
-    let addr: SocketAddr = format!("{}:{}", host, port)
+    let bind_addr = format!("{}:{}", host, port);
+    let addr: SocketAddr = bind_addr
         .parse()
-        .expect("Invalid address");
+        .with_context(|| format!("Invalid bind address: {bind_addr}"))?;
     info!(
         "Starting claude-proxy v{}-{} (built {})",
         VERSION, GIT_HASH, BUILD_TIME
@@ -506,11 +344,15 @@ async fn main() {
     info!("Listening on http://{}", addr);
     info!("Admin UI: http://{}/admin", addr);
 
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .with_context(|| format!("Failed to bind {addr}"))?;
     axum::serve(
         listener,
         ServiceExt::<axum::extract::Request>::into_make_service(app),
     )
     .await
-    .unwrap();
+    .context("HTTP server failed")?;
+
+    Ok(())
 }

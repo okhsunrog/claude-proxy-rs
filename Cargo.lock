@@ -412,6 +412,7 @@ name = "claude-proxy-rs"
 version = "1.2.0"
 dependencies = [
  "aegis",
+ "anyhow",
  "async-stream",
  "axum",
  "base64",
