@@ -34,8 +34,22 @@ pub enum ProxyError {
     #[error("Missing required header: {0}")]
     MissingHeader(String),
 
-    #[error("Database error: {0}")]
-    DatabaseError(String),
+    #[error("Database error while {context}: {source}")]
+    Database {
+        context: &'static str,
+        #[source]
+        source: sqlx::Error,
+    },
+
+    #[error("Database migration error while {context}: {source}")]
+    DatabaseMigration {
+        context: &'static str,
+        #[source]
+        source: sqlx::migrate::MigrateError,
+    },
+
+    #[error("Database state error: {0}")]
+    DatabaseState(&'static str),
 
     #[error("Model not allowed: {0}")]
     ModelNotAllowed(String),
@@ -54,9 +68,11 @@ impl ProxyError {
             ProxyError::RateLimitExceeded(_) => (StatusCode::TOO_MANY_REQUESTS, self.to_string()),
             ProxyError::ModelNotAllowed(_) => (StatusCode::FORBIDDEN, self.to_string()),
             ProxyError::InvalidModel(_) => (StatusCode::BAD_REQUEST, self.to_string()),
-            ProxyError::OAuthError(_) | ProxyError::IoError(_) | ProxyError::DatabaseError(_) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
-            }
+            ProxyError::OAuthError(_)
+            | ProxyError::IoError(_)
+            | ProxyError::Database { .. }
+            | ProxyError::DatabaseMigration { .. }
+            | ProxyError::DatabaseState(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             ProxyError::NetworkError(_)
             | ProxyError::AnthropicApiError(_)
             | ProxyError::ParseError(_) => (StatusCode::BAD_GATEWAY, self.to_string()),
@@ -88,7 +104,11 @@ impl ProxyError {
                 "invalid_request_error",
                 self.to_string(),
             ),
-            ProxyError::OAuthError(_) | ProxyError::IoError(_) | ProxyError::DatabaseError(_) => (
+            ProxyError::OAuthError(_)
+            | ProxyError::IoError(_)
+            | ProxyError::Database { .. }
+            | ProxyError::DatabaseMigration { .. }
+            | ProxyError::DatabaseState(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "api_error",
                 self.to_string(),
@@ -109,6 +129,22 @@ impl ProxyError {
             })),
         )
             .into_response()
+    }
+}
+
+pub trait DbResultExt<T> {
+    fn db_context(self, context: &'static str) -> Result<T, ProxyError>;
+}
+
+impl<T> DbResultExt<T> for Result<T, sqlx::Error> {
+    fn db_context(self, context: &'static str) -> Result<T, ProxyError> {
+        self.map_err(|source| ProxyError::Database { context, source })
+    }
+}
+
+impl<T> DbResultExt<T> for Result<T, sqlx::migrate::MigrateError> {
+    fn db_context(self, context: &'static str) -> Result<T, ProxyError> {
+        self.map_err(|source| ProxyError::DatabaseMigration { context, source })
     }
 }
 

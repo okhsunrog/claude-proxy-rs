@@ -28,7 +28,7 @@
       {
         "ordinal": 2,
         "name": "enabled",
-        "type_info": "Int8",
+        "type_info": "Bool",
         "origin": {
           "Table": {
             "table": "models",

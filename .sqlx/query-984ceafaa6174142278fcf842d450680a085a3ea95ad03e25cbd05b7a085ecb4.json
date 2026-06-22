@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT input_price, output_price, cache_read_price, cache_write_price FROM models WHERE id = $1 AND enabled = 1",
+  "query": "SELECT input_price, output_price, cache_read_price, cache_write_price FROM models WHERE id = $1 AND enabled = TRUE",
   "describe": {
     "columns": [
       {
@@ -60,5 +60,5 @@
       false
     ]
   },
-  "hash": "fb3ef7afdc2ce294ae718ccc83ed7dd6768c77873a59c0c98974f264d0fd06b0"
+  "hash": "984ceafaa6174142278fcf842d450680a085a3ea95ad03e25cbd05b7a085ecb4"
 }

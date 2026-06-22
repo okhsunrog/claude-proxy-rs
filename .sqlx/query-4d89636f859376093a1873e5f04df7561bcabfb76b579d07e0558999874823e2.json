@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, sort_order, enabled, input_price, output_price, cache_read_price, cache_write_price FROM models WHERE enabled = 1 ORDER BY sort_order",
+  "query": "SELECT id, sort_order, enabled, input_price, output_price, cache_read_price, cache_write_price FROM models WHERE enabled = TRUE ORDER BY sort_order",
   "describe": {
     "columns": [
       {
@@ -28,7 +28,7 @@
       {
         "ordinal": 2,
         "name": "enabled",
-        "type_info": "Int8",
+        "type_info": "Bool",
         "origin": {
           "Table": {
             "table": "models",
@@ -94,5 +94,5 @@
       false
     ]
   },
-  "hash": "5ca4cae82a48e2f40bf2991feb939789d18a4a0dbf6d52fdfcca65aae0fe94b0"
+  "hash": "4d89636f859376093a1873e5f04df7561bcabfb76b579d07e0558999874823e2"
 }

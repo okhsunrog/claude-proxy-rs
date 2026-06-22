@@ -4,7 +4,7 @@ use tokio::sync::OnceCell;
 use tracing::info;
 
 use crate::constants::SEED_MODELS;
-use crate::error::ProxyError;
+use crate::error::{DbResultExt, ProxyError};
 
 /// Global database pool.
 static DATABASE: OnceCell<PgPool> = OnceCell::const_new();
@@ -17,17 +17,17 @@ pub async fn init_db(database_url: &str) -> Result<(), ProxyError> {
         .max_connections(10)
         .connect(database_url)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to connect to PostgreSQL: {e}")))?;
+        .db_context("Failed to connect to PostgreSQL")?;
 
     sqlx::migrate!("./migrations")
         .run(&pool)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to run migrations: {e}")))?;
+        .db_context("Failed to run migrations")?;
     seed_models_if_empty(&pool).await?;
 
     DATABASE
         .set(pool)
-        .map_err(|_| ProxyError::DatabaseError("Database already initialized".into()))?;
+        .map_err(|_| ProxyError::DatabaseState("Database already initialized"))?;
 
     info!("PostgreSQL database initialized");
     Ok(())
@@ -38,14 +38,14 @@ pub async fn get_conn() -> Result<Connection, ProxyError> {
     DATABASE
         .get()
         .cloned()
-        .ok_or_else(|| ProxyError::DatabaseError("Database not initialized".into()))
+        .ok_or(ProxyError::DatabaseState("Database not initialized"))
 }
 
 async fn seed_models_if_empty(conn: &Connection) -> Result<(), ProxyError> {
     let model_count = sqlx::query_scalar!("SELECT COUNT(*) FROM models")
         .fetch_one(conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to count models: {e}")))?;
+        .db_context("Failed to count models")?;
 
     if model_count.unwrap_or(0) == 0 {
         info!(
@@ -56,7 +56,7 @@ async fn seed_models_if_empty(conn: &Connection) -> Result<(), ProxyError> {
             SEED_MODELS.iter().enumerate()
         {
             sqlx::query!(
-                "INSERT INTO models (id, sort_order, enabled, input_price, output_price, cache_read_price, cache_write_price) VALUES ($1, $2, 1, $3, $4, $5, $6)",
+                "INSERT INTO models (id, sort_order, enabled, input_price, output_price, cache_read_price, cache_write_price) VALUES ($1, $2, TRUE, $3, $4, $5, $6)",
                 id,
                 i as i64,
                 input_price,
@@ -66,7 +66,7 @@ async fn seed_models_if_empty(conn: &Connection) -> Result<(), ProxyError> {
             )
             .execute(conn)
             .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to seed model {id}: {e}")))?;
+            .db_context("Failed to seed model")?;
         }
     }
 

@@ -4,7 +4,7 @@ use tracing::warn;
 use super::windows::WindowState;
 use crate::auth::client_keys::i64_to_u64;
 use crate::db::Connection;
-use crate::error::ProxyError;
+use crate::error::{DbResultExt, ProxyError};
 
 /// Aggregate usage cost from request_log for a key across all three windows.
 /// Returns (five_hour_cost, weekly_cost, total_cost) in microdollars.
@@ -32,7 +32,7 @@ pub(super) async fn aggregate_usage_costs(
     )
     .fetch_one(conn)
     .await
-    .map_err(|e| ProxyError::DatabaseError(format!("Failed to aggregate usage: {e}")))?;
+    .db_context("Failed to aggregate usage")?;
 
     Ok((
         i64_to_u64(row.five_hour),
@@ -57,7 +57,7 @@ pub(super) async fn query_model_cost(
     )
     .fetch_one(conn)
     .await
-    .map_err(|e| ProxyError::DatabaseError(format!("Failed to query model cost: {e}")))?;
+    .db_context("Failed to query model cost")?;
 
     Ok(i64_to_u64(cost))
 }

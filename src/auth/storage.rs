@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::db;
-use crate::error::ProxyError;
+use crate::error::{DbResultExt, ProxyError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
@@ -118,7 +118,7 @@ impl AuthStore {
                 )
                 .execute(&conn)
                 .await
-                .map_err(|e| ProxyError::DatabaseError(format!("Failed to save auth: {e}")))?;
+                .db_context("Failed to save auth")?;
             }
             Auth::Api { key } => {
                 sqlx::query!(
@@ -136,7 +136,7 @@ impl AuthStore {
                 )
                 .execute(&conn)
                 .await
-                .map_err(|e| ProxyError::DatabaseError(format!("Failed to save auth: {e}")))?;
+                .db_context("Failed to save auth")?;
             }
             Auth::WellKnown { key, token } => {
                 sqlx::query!(
@@ -155,7 +155,7 @@ impl AuthStore {
                 )
                 .execute(&conn)
                 .await
-                .map_err(|e| ProxyError::DatabaseError(format!("Failed to save auth: {e}")))?;
+                .db_context("Failed to save auth")?;
             }
             Auth::WebSession {
                 session_key,
@@ -181,7 +181,7 @@ impl AuthStore {
                 )
                 .execute(&conn)
                 .await
-                .map_err(|e| ProxyError::DatabaseError(format!("Failed to save auth: {e}")))?;
+                .db_context("Failed to save auth")?;
             }
         }
 
@@ -193,7 +193,7 @@ impl AuthStore {
         sqlx::query!("DELETE FROM auth WHERE provider = $1", provider)
             .execute(&conn)
             .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to remove auth: {e}")))?;
+            .db_context("Failed to remove auth")?;
         Ok(())
     }
 
@@ -205,7 +205,7 @@ impl AuthStore {
         )
         .fetch_optional(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to check auth: {e}")))?;
+        .db_context("Failed to check auth")?;
         Ok(row.is_some())
     }
 
@@ -226,7 +226,7 @@ impl AuthStore {
         )
         .execute(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to update tokens: {e}")))?;
+        .db_context("Failed to update tokens")?;
         Ok(())
     }
 
@@ -245,7 +245,7 @@ impl AuthStore {
         )
         .execute(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to update web session: {e}")))?;
+        .db_context("Failed to update web session")?;
         Ok(())
     }
 }

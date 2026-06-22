@@ -9,7 +9,7 @@
         "Float8",
         "Float8",
         "Float8",
-        "Int8",
+        "Bool",
         "Text"
       ]
     },

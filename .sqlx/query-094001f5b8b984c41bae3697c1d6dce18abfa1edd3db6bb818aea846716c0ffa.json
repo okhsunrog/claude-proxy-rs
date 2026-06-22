@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, key, name, enabled, created_at, last_used_at, five_hour_limit, weekly_limit, total_limit, five_hour_reset_at, weekly_reset_at, allow_extra_usage FROM client_keys WHERE enabled = 1",
+  "query": "SELECT id, key, name, enabled, created_at, last_used_at, five_hour_limit, weekly_limit, total_limit, five_hour_reset_at, weekly_reset_at, allow_extra_usage FROM client_keys WHERE enabled = TRUE",
   "describe": {
     "columns": [
       {
@@ -39,7 +39,7 @@
       {
         "ordinal": 3,
         "name": "enabled",
-        "type_info": "Int8",
+        "type_info": "Bool",
         "origin": {
           "Table": {
             "table": "client_keys",
@@ -127,7 +127,7 @@
       {
         "ordinal": 11,
         "name": "allow_extra_usage",
-        "type_info": "Int8",
+        "type_info": "Bool",
         "origin": {
           "Table": {
             "table": "client_keys",
@@ -154,5 +154,5 @@
       false
     ]
   },
-  "hash": "e1637e8fe7bad440a61523848b2607bba9baf5118423362c027fc6289a86a641"
+  "hash": "094001f5b8b984c41bae3697c1d6dce18abfa1edd3db6bb818aea846716c0ffa"
 }

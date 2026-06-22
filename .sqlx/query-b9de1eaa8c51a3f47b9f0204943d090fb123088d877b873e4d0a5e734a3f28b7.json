@@ -39,7 +39,7 @@
       {
         "ordinal": 3,
         "name": "enabled",
-        "type_info": "Int8",
+        "type_info": "Bool",
         "origin": {
           "Table": {
             "table": "client_keys",
@@ -127,7 +127,7 @@
       {
         "ordinal": 11,
         "name": "allow_extra_usage",
-        "type_info": "Int8",
+        "type_info": "Bool",
         "origin": {
           "Table": {
             "table": "client_keys",

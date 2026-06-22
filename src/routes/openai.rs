@@ -27,7 +27,7 @@ pub async fn list_models(State(state): State<Arc<AppState>>) -> Response {
     let model_ids = match state.models.list_enabled_ids().await {
         Ok(ids) => ids,
         Err(e) => {
-            return ProxyError::DatabaseError(e.to_string()).to_openai_response();
+            return e.to_openai_response();
         }
     };
     let models: Vec<Value> = model_ids

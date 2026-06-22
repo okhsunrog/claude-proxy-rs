@@ -1,6 +1,6 @@
 use crate::auth::client_keys::i64_to_u64;
 use crate::db::Connection;
-use crate::error::ProxyError;
+use crate::error::{DbResultExt, ProxyError};
 use crate::usage::SubscriptionState;
 
 /// Window boundary state read from client_keys.
@@ -28,7 +28,7 @@ pub(super) async fn maybe_reset_expired_windows(
     )
     .fetch_optional(conn)
     .await
-    .map_err(|e| ProxyError::DatabaseError(format!("Failed to read window state: {e}")))?;
+    .db_context("Failed to read window state")?;
 
     let Some(row) = row else {
         return Ok(WindowState {
@@ -100,7 +100,7 @@ pub(super) async fn maybe_reset_expired_windows(
     )
     .execute(conn)
     .await
-    .map_err(|e| ProxyError::DatabaseError(format!("Failed to update window state: {e}")))?;
+    .db_context("Failed to update window state")?;
 
     Ok(WindowState {
         five_hour_count_from,

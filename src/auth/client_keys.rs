@@ -7,7 +7,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::db;
-use crate::error::ProxyError;
+use crate::error::{DbResultExt, ProxyError};
 use crate::subscription::timestamp_millis;
 
 /// Token usage limits for a client key (all optional, in microdollars)
@@ -79,7 +79,7 @@ struct ClientKeyRow {
     id: String,
     key: String,
     name: String,
-    enabled: i64,
+    enabled: bool,
     created_at: i64,
     last_used_at: Option<i64>,
     five_hour_limit: Option<i64>,
@@ -87,7 +87,7 @@ struct ClientKeyRow {
     total_limit: Option<i64>,
     five_hour_reset_at: i64,
     weekly_reset_at: i64,
-    allow_extra_usage: i64,
+    allow_extra_usage: bool,
 }
 
 pub(crate) fn opt_i64_to_u64(value: Option<i64>) -> Option<u64> {
@@ -103,10 +103,10 @@ fn row_to_client_key(row: ClientKeyRow) -> ClientKey {
         id: row.id,
         key: row.key,
         name: row.name,
-        enabled: row.enabled != 0,
+        enabled: row.enabled,
         created_at: i64_to_u64(row.created_at),
         last_used_at: opt_i64_to_u64(row.last_used_at),
-        allow_extra_usage: row.allow_extra_usage != 0,
+        allow_extra_usage: row.allow_extra_usage,
         limits: TokenLimits {
             five_hour_limit: opt_i64_to_u64(row.five_hour_limit),
             weekly_limit: opt_i64_to_u64(row.weekly_limit),
@@ -136,7 +136,7 @@ impl ClientKeysStore {
         )
             .fetch_all(&conn)
             .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to list keys: {e}")))?;
+            .db_context("Failed to list keys")?;
 
         let mut keys = Vec::new();
         for row in rows {
@@ -158,7 +158,7 @@ impl ClientKeysStore {
 
         let conn = db::get_conn().await?;
         sqlx::query!(
-            "INSERT INTO client_keys (id, key, name, enabled, created_at) VALUES ($1, $2, $3, 1, $4)",
+            "INSERT INTO client_keys (id, key, name, enabled, created_at) VALUES ($1, $2, $3, TRUE, $4)",
             id,
             key,
             name,
@@ -166,7 +166,7 @@ impl ClientKeysStore {
         )
         .execute(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to create key: {e}")))?;
+        .db_context("Failed to create key")?;
 
         Ok(ClientKey {
             id,
@@ -185,12 +185,12 @@ impl ClientKeysStore {
         let conn = db::get_conn().await?;
         let affected = sqlx::query!(
             "UPDATE client_keys SET enabled = $1 WHERE id = $2",
-            enabled as i64,
+            enabled,
             id
         )
         .execute(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to update key: {e}")))?
+        .db_context("Failed to update key")?
         .rows_affected();
         Ok(affected > 0)
     }
@@ -199,12 +199,12 @@ impl ClientKeysStore {
         let conn = db::get_conn().await?;
         let affected = sqlx::query!(
             "UPDATE client_keys SET allow_extra_usage = $1 WHERE id = $2",
-            allow as i64,
+            allow,
             id
         )
         .execute(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to update key: {e}")))?
+        .db_context("Failed to update key")?
         .rows_affected();
         Ok(affected > 0)
     }
@@ -214,7 +214,7 @@ impl ClientKeysStore {
         let affected = sqlx::query!("DELETE FROM client_keys WHERE id = $1", id)
             .execute(&conn)
             .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to delete key: {e}")))?
+            .db_context("Failed to delete key")?
             .rows_affected();
         Ok(affected > 0)
     }
@@ -225,11 +225,11 @@ impl ClientKeysStore {
         let conn = db::get_conn().await?;
         let rows = sqlx::query_as!(
             ClientKeyRow,
-            "SELECT id, key, name, enabled, created_at, last_used_at, five_hour_limit, weekly_limit, total_limit, five_hour_reset_at, weekly_reset_at, allow_extra_usage FROM client_keys WHERE enabled = 1"
+            "SELECT id, key, name, enabled, created_at, last_used_at, five_hour_limit, weekly_limit, total_limit, five_hour_reset_at, weekly_reset_at, allow_extra_usage FROM client_keys WHERE enabled = TRUE"
         )
             .fetch_all(&conn)
             .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to validate key: {e}")))?;
+            .db_context("Failed to validate key")?;
 
         let mut result = None;
         for row in rows {
@@ -252,7 +252,7 @@ impl ClientKeysStore {
         )
         .execute(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to update last_used: {e}")))?;
+        .db_context("Failed to update last_used")?;
         Ok(())
     }
 
@@ -265,7 +265,7 @@ impl ClientKeysStore {
         )
             .fetch_optional(&conn)
             .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to get key: {e}")))?;
+            .db_context("Failed to get key")?;
         let Some(row) = row else {
             return Ok(None);
         };
@@ -289,7 +289,7 @@ impl ClientKeysStore {
         )
         .execute(&conn)
             .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to set limits: {e}")))?
+            .db_context("Failed to set limits")?
             .rows_affected();
 
         Ok(affected > 0)

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::db;
-use crate::error::ProxyError;
+use crate::error::{DbResultExt, ProxyError};
 
 /// Model pricing for cost calculation during requests
 #[derive(Debug, Clone)]
@@ -31,7 +31,7 @@ pub struct ModelsStore;
 struct ModelRow {
     id: String,
     sort_order: i64,
-    enabled: i64,
+    enabled: bool,
     input_price: f64,
     output_price: f64,
     cache_read_price: f64,
@@ -42,7 +42,7 @@ fn row_to_model(row: ModelRow) -> Model {
     Model {
         id: row.id,
         sort_order: row.sort_order,
-        enabled: row.enabled != 0,
+        enabled: row.enabled,
         input_price: row.input_price,
         output_price: row.output_price,
         cache_read_price: row.cache_read_price,
@@ -64,7 +64,7 @@ impl ModelsStore {
         )
         .fetch_all(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to list models: {e}")))?;
+        .db_context("Failed to list models")?;
 
         Ok(rows.into_iter().map(row_to_model).collect())
     }
@@ -74,11 +74,11 @@ impl ModelsStore {
         let conn = db::get_conn().await?;
         let rows = sqlx::query_as!(
             ModelRow,
-            "SELECT id, sort_order, enabled, input_price, output_price, cache_read_price, cache_write_price FROM models WHERE enabled = 1 ORDER BY sort_order",
+            "SELECT id, sort_order, enabled, input_price, output_price, cache_read_price, cache_write_price FROM models WHERE enabled = TRUE ORDER BY sort_order",
         )
         .fetch_all(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to list enabled models: {e}")))?;
+        .db_context("Failed to list enabled models")?;
 
         Ok(rows.into_iter().map(row_to_model).collect())
     }
@@ -86,10 +86,10 @@ impl ModelsStore {
     /// List only enabled model IDs (for /v1/models endpoint)
     pub async fn list_enabled_ids(&self) -> Result<Vec<String>, ProxyError> {
         let conn = db::get_conn().await?;
-        let rows = sqlx::query!("SELECT id FROM models WHERE enabled = 1 ORDER BY sort_order")
+        let rows = sqlx::query!("SELECT id FROM models WHERE enabled = TRUE ORDER BY sort_order")
             .fetch_all(&conn)
             .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to list model IDs: {e}")))?;
+            .db_context("Failed to list model IDs")?;
 
         Ok(rows.into_iter().map(|row| row.id).collect())
     }
@@ -98,7 +98,7 @@ impl ModelsStore {
     pub async fn get_pricing(&self, model_id: &str) -> Option<ModelPricing> {
         let conn = db::get_conn().await.ok()?;
         let row = sqlx::query!(
-            "SELECT input_price, output_price, cache_read_price, cache_write_price FROM models WHERE id = $1 AND enabled = 1",
+            "SELECT input_price, output_price, cache_read_price, cache_write_price FROM models WHERE id = $1 AND enabled = TRUE",
             model_id,
         )
         .fetch_optional(&conn)
@@ -127,12 +127,10 @@ impl ModelsStore {
             sqlx::query_scalar!("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM models")
                 .fetch_one(&conn)
                 .await
-                .map_err(|e| {
-                    ProxyError::DatabaseError(format!("Failed to get max sort_order: {e}"))
-                })?;
+                .db_context("Failed to get max sort_order")?;
 
         sqlx::query!(
-            "INSERT INTO models (id, sort_order, enabled, input_price, output_price, cache_read_price, cache_write_price) VALUES ($1, $2, 1, $3, $4, $5, $6)",
+            "INSERT INTO models (id, sort_order, enabled, input_price, output_price, cache_read_price, cache_write_price) VALUES ($1, $2, TRUE, $3, $4, $5, $6)",
             id,
             next_order,
             input_price,
@@ -142,7 +140,7 @@ impl ModelsStore {
         )
         .execute(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to add model: {e}")))?;
+        .db_context("Failed to add model")?;
         Ok(())
     }
 
@@ -152,7 +150,7 @@ impl ModelsStore {
         let affected = sqlx::query!("DELETE FROM models WHERE id = $1", id)
             .execute(&conn)
             .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to remove model: {e}")))?
+            .db_context("Failed to remove model")?
             .rows_affected();
         Ok(affected > 0)
     }
@@ -168,7 +166,7 @@ impl ModelsStore {
             )
             .execute(&conn)
             .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to reorder models: {e}")))?;
+            .db_context("Failed to reorder models")?;
         }
         Ok(())
     }
@@ -176,15 +174,11 @@ impl ModelsStore {
     /// Toggle model enabled/disabled
     pub async fn set_enabled(&self, id: &str, enabled: bool) -> Result<bool, ProxyError> {
         let conn = db::get_conn().await?;
-        let affected = sqlx::query!(
-            "UPDATE models SET enabled = $1 WHERE id = $2",
-            enabled as i64,
-            id
-        )
-        .execute(&conn)
-        .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to set model enabled: {e}")))?
-        .rows_affected();
+        let affected = sqlx::query!("UPDATE models SET enabled = $1 WHERE id = $2", enabled, id)
+            .execute(&conn)
+            .await
+            .db_context("Failed to set model enabled")?
+            .rows_affected();
         Ok(affected > 0)
     }
 
@@ -199,7 +193,6 @@ impl ModelsStore {
         enabled: Option<bool>,
     ) -> Result<bool, ProxyError> {
         let conn = db::get_conn().await?;
-        let enabled_i64 = enabled.map(|v| v as i64);
 
         let affected = sqlx::query!(
             "UPDATE models SET \
@@ -213,12 +206,12 @@ impl ModelsStore {
             output_price,
             cache_read_price,
             cache_write_price,
-            enabled_i64,
+            enabled,
             id,
         )
         .execute(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to update model: {e}")))?
+        .db_context("Failed to update model")?
         .rows_affected();
         Ok(affected > 0)
     }
@@ -227,12 +220,12 @@ impl ModelsStore {
     pub async fn is_valid(&self, model_id: &str) -> Result<bool, ProxyError> {
         let conn = db::get_conn().await?;
         let count = sqlx::query_scalar!(
-            "SELECT COUNT(*) FROM models WHERE id = $1 AND enabled = 1",
+            "SELECT COUNT(*) FROM models WHERE id = $1 AND enabled = TRUE",
             model_id
         )
         .fetch_one(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to check model: {e}")))?;
+        .db_context("Failed to check model")?;
         Ok(count.unwrap_or(0) > 0)
     }
 }

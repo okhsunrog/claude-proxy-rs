@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT COUNT(*) FROM models WHERE id = $1 AND enabled = 1",
+  "query": "SELECT COUNT(*) FROM models WHERE id = $1 AND enabled = TRUE",
   "describe": {
     "columns": [
       {
@@ -19,5 +19,5 @@
       null
     ]
   },
-  "hash": "1a425911037ac1ee0268f44bfdf463900fa33076bd96cc6b8bd5c2c55368312c"
+  "hash": "db45bd1623415a75e57cd51ad95a0e46860bdb9177107bfce58511c72d1e44c2"
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO client_keys (id, key, name, enabled, created_at) VALUES ($1, $2, $3, 1, $4)",
+  "query": "INSERT INTO client_keys (id, key, name, enabled, created_at) VALUES ($1, $2, $3, TRUE, $4)",
   "describe": {
     "columns": [],
     "parameters": {
@@ -13,5 +13,5 @@
     },
     "nullable": []
   },
-  "hash": "5ca969c9f3cc828251407f00c9b3556550370c80c81b1443a7c3f0ee88360730"
+  "hash": "9615a646fd721be91509525106278fb6644b174837c7d4023136783132b25212"
 }

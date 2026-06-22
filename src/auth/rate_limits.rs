@@ -6,7 +6,7 @@ use super::client_keys::{
     ClientKeysStore, TokenLimits, TokenUsage, UsageResetType, i64_to_u64, opt_i64_to_u64,
 };
 use crate::db;
-use crate::error::ProxyError;
+use crate::error::{DbResultExt, ProxyError};
 use crate::subscription::timestamp_millis;
 use crate::usage::SubscriptionState;
 
@@ -141,7 +141,7 @@ impl ClientKeysStore {
         )
         .fetch_optional(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to read timestamps: {e}")))?;
+        .db_context("Failed to read timestamps")?;
 
         if let Some(row) = row {
             let five_hour_reset_at = i64_to_u64(row.five_hour_reset_at);
@@ -196,7 +196,7 @@ impl ClientKeysStore {
         )
         .execute(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to insert request log: {e}")))?;
+        .db_context("Failed to insert request log")?;
 
         Ok(())
     }
@@ -219,7 +219,7 @@ impl ClientKeysStore {
         )
         .fetch_optional(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to read count_from: {e}")))?;
+        .db_context("Failed to read count_from")?;
         let Some(count_from_row) = count_from_row else {
             return Ok(None);
         };
@@ -280,7 +280,7 @@ impl ClientKeysStore {
             )
             .execute(&conn)
             .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to reset usage: {e}")))?
+            .db_context("Failed to reset usage")?
             .rows_affected(),
             UsageResetType::Weekly => sqlx::query!(
                 "UPDATE client_keys SET weekly_count_from = $1, weekly_reset_at = 0 WHERE id = $2",
@@ -289,7 +289,7 @@ impl ClientKeysStore {
             )
             .execute(&conn)
             .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to reset usage: {e}")))?
+            .db_context("Failed to reset usage")?
             .rows_affected(),
             UsageResetType::Total => sqlx::query!(
                 "UPDATE client_keys SET total_count_from = $1 WHERE id = $2",
@@ -298,7 +298,7 @@ impl ClientKeysStore {
             )
             .execute(&conn)
             .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to reset usage: {e}")))?
+            .db_context("Failed to reset usage")?
             .rows_affected(),
             UsageResetType::All => sqlx::query!(
                 "UPDATE client_keys SET five_hour_count_from = $1, weekly_count_from = $2, total_count_from = $3, five_hour_reset_at = 0, weekly_reset_at = 0 WHERE id = $4",
@@ -309,7 +309,7 @@ impl ClientKeysStore {
             )
                 .execute(&conn)
                 .await
-                .map_err(|e| ProxyError::DatabaseError(format!("Failed to reset usage: {e}")))?
+                .db_context("Failed to reset usage")?
                 .rows_affected(),
         };
 
@@ -329,7 +329,7 @@ impl ClientKeysStore {
         )
         .fetch_all(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to get allowed models: {e}")))?;
+        .db_context("Failed to get allowed models")?;
         Ok(rows.into_iter().map(|row| row.model).collect())
     }
 
@@ -343,9 +343,7 @@ impl ClientKeysStore {
         sqlx::query!("DELETE FROM key_allowed_models WHERE key_id = $1", key_id)
             .execute(&conn)
             .await
-            .map_err(|e| {
-                ProxyError::DatabaseError(format!("Failed to clear allowed models: {e}"))
-            })?;
+            .db_context("Failed to clear allowed models")?;
 
         for model in &models {
             sqlx::query!(
@@ -355,9 +353,7 @@ impl ClientKeysStore {
             )
             .execute(&conn)
             .await
-            .map_err(|e| {
-                ProxyError::DatabaseError(format!("Failed to insert allowed model: {e}"))
-            })?;
+            .db_context("Failed to insert allowed model")?;
         }
         Ok(())
     }
@@ -373,7 +369,7 @@ impl ClientKeysStore {
         )
         .fetch_one(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to check model access: {e}")))?;
+        .db_context("Failed to check model access")?;
         let total = total.unwrap_or(0);
 
         if total == 0 {
@@ -388,7 +384,7 @@ impl ClientKeysStore {
         )
         .fetch_one(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to check model access: {e}")))?;
+        .db_context("Failed to check model access")?;
         let count = count.unwrap_or(0);
         Ok(count > 0)
     }
@@ -490,7 +486,7 @@ impl ClientKeysStore {
         )
         .fetch_optional(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to read window state: {e}")))?;
+        .db_context("Failed to read window state")?;
         let Some(ts_row) = ts_row else {
             return Ok(Vec::new());
         };
@@ -521,7 +517,7 @@ impl ClientKeysStore {
         )
         .fetch_all(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to read model limits: {e}")))?;
+        .db_context("Failed to read model limits")?;
 
         let mut model_limits: Vec<(String, TokenLimits, u64)> = Vec::new();
         for row in limit_rows {
@@ -565,7 +561,7 @@ impl ClientKeysStore {
         )
         .fetch_all(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to query model usage: {e}")))?;
+        .db_context("Failed to query model usage")?;
 
         // Collect usage data from request_log
         let mut usage_map: std::collections::HashMap<
@@ -662,7 +658,7 @@ impl ClientKeysStore {
         )
         .execute(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to upsert model limits: {e}")))?;
+        .db_context("Failed to upsert model limits")?;
         Ok(())
     }
 
@@ -676,7 +672,7 @@ impl ClientKeysStore {
         )
         .execute(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to remove model limits: {e}")))?
+        .db_context("Failed to remove model limits")?
         .rows_affected();
         Ok(affected > 0)
     }
@@ -701,7 +697,7 @@ impl ClientKeysStore {
         )
         .execute(&conn)
         .await
-        .map_err(|e| ProxyError::DatabaseError(format!("Failed to reset model usage: {e}")))?
+        .db_context("Failed to reset model usage")?
         .rows_affected();
         Ok(affected > 0)
     }
