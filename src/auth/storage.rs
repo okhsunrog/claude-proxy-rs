@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use tracing::warn;
+use sqlx::Row;
 
 use crate::db;
 use crate::error::ProxyError;
@@ -54,50 +54,50 @@ impl AuthStore {
 
     pub async fn get(&self, provider: &str) -> Option<Auth> {
         let conn = db::get_conn().await.ok()?;
-        let mut rows = conn
-            .query(
-                "SELECT auth_type, access_token, refresh_token, expires_at, account_id, enterprise_url FROM auth WHERE provider = ?",
-                [provider],
-            )
-            .await
+        let row = sqlx::query(
+            "SELECT auth_type, access_token, refresh_token, expires_at, account_id, enterprise_url FROM auth WHERE provider = $1",
+        )
+        .bind(provider)
+        .fetch_optional(&conn)
+        .await
             .ok()?;
 
-        let row = rows.next().await.ok()??;
-        let auth_type: String = row.get(0).ok()?;
+        let row = row?;
+        let auth_type: String = row.try_get(0).ok()?;
 
         match auth_type.as_str() {
             "oauth" => Some(Auth::OAuth {
-                access: row.get(1).ok()?,
-                refresh: row.get(2).ok()?,
-                expires: row.get::<i64>(3).ok()? as u64,
+                access: row.try_get(1).ok()?,
+                refresh: row.try_get(2).ok()?,
+                expires: row.try_get::<i64, _>(3).ok()? as u64,
                 account_id: row
-                    .get::<Option<String>>(4)
+                    .try_get::<Option<String>, _>(4)
                     .ok()
                     .flatten()
                     .filter(|s| !s.is_empty()),
                 enterprise_url: row
-                    .get::<Option<String>>(5)
+                    .try_get::<Option<String>, _>(5)
                     .ok()
                     .flatten()
                     .filter(|s| !s.is_empty()),
             }),
             "api" => Some(Auth::Api {
-                key: row.get(1).ok()?,
+                key: row.try_get(1).ok()?,
             }),
             "wellknown" => Some(Auth::WellKnown {
-                key: row.get(1).ok()?,
-                token: row.get(2).ok()?,
+                key: row.try_get(1).ok()?,
+                token: row.try_get(2).ok()?,
             }),
             "web_session" => Some(Auth::WebSession {
-                session_key: row.get(1).ok()?,
-                org_uuid: row.get(2).ok()?,
+                session_key: row.try_get(1).ok()?,
+                org_uuid: row.try_get(2).ok()?,
                 device_id: row
-                    .get::<Option<String>>(4)
+                    .try_get::<Option<String>, _>(4)
                     .ok()
                     .flatten()
                     .unwrap_or_default(),
                 anonymous_id: row
-                    .get::<Option<String>>(5)
+                    .try_get::<Option<String>, _>(5)
                     .ok()
                     .flatten()
                     .unwrap_or_default(),
@@ -117,52 +117,61 @@ impl AuthStore {
                 account_id,
                 enterprise_url,
             } => {
-                // Insert core fields first
-                conn.execute(
-                    r#"INSERT OR REPLACE INTO auth (provider, auth_type, access_token, refresh_token, expires_at)
-                       VALUES (?, 'oauth', ?, ?, ?)"#,
-                    (provider, access.as_str(), refresh.as_str(), *expires as i64),
+                sqlx::query(
+                    r#"INSERT INTO auth (provider, auth_type, access_token, refresh_token, expires_at, account_id, enterprise_url)
+                       VALUES ($1, 'oauth', $2, $3, $4, $5, $6)
+                       ON CONFLICT (provider) DO UPDATE SET
+                           auth_type = EXCLUDED.auth_type,
+                           access_token = EXCLUDED.access_token,
+                           refresh_token = EXCLUDED.refresh_token,
+                           expires_at = EXCLUDED.expires_at,
+                           account_id = EXCLUDED.account_id,
+                           enterprise_url = EXCLUDED.enterprise_url"#,
                 )
+                .bind(provider)
+                .bind(access.as_str())
+                .bind(refresh.as_str())
+                .bind(*expires as i64)
+                .bind(account_id.as_deref())
+                .bind(enterprise_url.as_deref())
+                .execute(&conn)
                 .await
                 .map_err(|e| ProxyError::DatabaseError(format!("Failed to save auth: {e}")))?;
-
-                // Set optional fields
-                if let Some(aid) = account_id
-                    && let Err(e) = conn
-                        .execute(
-                            "UPDATE auth SET account_id = ? WHERE provider = ?",
-                            (aid.as_str(), provider),
-                        )
-                        .await
-                {
-                    warn!("Failed to save account_id for {provider}: {e}");
-                }
-                if let Some(eurl) = enterprise_url
-                    && let Err(e) = conn
-                        .execute(
-                            "UPDATE auth SET enterprise_url = ? WHERE provider = ?",
-                            (eurl.as_str(), provider),
-                        )
-                        .await
-                {
-                    warn!("Failed to save enterprise_url for {provider}: {e}");
-                }
             }
             Auth::Api { key } => {
-                conn.execute(
-                    r#"INSERT OR REPLACE INTO auth (provider, auth_type, access_token, refresh_token, expires_at)
-                       VALUES (?, 'api', ?, '', 0)"#,
-                    (provider, key.as_str()),
+                sqlx::query(
+                    r#"INSERT INTO auth (provider, auth_type, access_token, refresh_token, expires_at, account_id, enterprise_url)
+                       VALUES ($1, 'api', $2, '', 0, NULL, NULL)
+                       ON CONFLICT (provider) DO UPDATE SET
+                           auth_type = EXCLUDED.auth_type,
+                           access_token = EXCLUDED.access_token,
+                           refresh_token = EXCLUDED.refresh_token,
+                           expires_at = EXCLUDED.expires_at,
+                           account_id = EXCLUDED.account_id,
+                           enterprise_url = EXCLUDED.enterprise_url"#,
                 )
+                .bind(provider)
+                .bind(key.as_str())
+                .execute(&conn)
                 .await
                 .map_err(|e| ProxyError::DatabaseError(format!("Failed to save auth: {e}")))?;
             }
             Auth::WellKnown { key, token } => {
-                conn.execute(
-                    r#"INSERT OR REPLACE INTO auth (provider, auth_type, access_token, refresh_token, expires_at)
-                       VALUES (?, 'wellknown', ?, ?, 0)"#,
-                    (provider, key.as_str(), token.as_str()),
+                sqlx::query(
+                    r#"INSERT INTO auth (provider, auth_type, access_token, refresh_token, expires_at, account_id, enterprise_url)
+                       VALUES ($1, 'wellknown', $2, $3, 0, NULL, NULL)
+                       ON CONFLICT (provider) DO UPDATE SET
+                           auth_type = EXCLUDED.auth_type,
+                           access_token = EXCLUDED.access_token,
+                           refresh_token = EXCLUDED.refresh_token,
+                           expires_at = EXCLUDED.expires_at,
+                           account_id = EXCLUDED.account_id,
+                           enterprise_url = EXCLUDED.enterprise_url"#,
                 )
+                .bind(provider)
+                .bind(key.as_str())
+                .bind(token.as_str())
+                .execute(&conn)
                 .await
                 .map_err(|e| ProxyError::DatabaseError(format!("Failed to save auth: {e}")))?;
             }
@@ -172,17 +181,23 @@ impl AuthStore {
                 device_id,
                 anonymous_id,
             } => {
-                conn.execute(
-                    r#"INSERT OR REPLACE INTO auth (provider, auth_type, access_token, refresh_token, expires_at, account_id, enterprise_url)
-                       VALUES (?, 'web_session', ?, ?, 0, ?, ?)"#,
-                    (
-                        provider,
-                        session_key.as_str(),
-                        org_uuid.as_str(),
-                        device_id.as_str(),
-                        anonymous_id.as_str(),
-                    ),
+                sqlx::query(
+                    r#"INSERT INTO auth (provider, auth_type, access_token, refresh_token, expires_at, account_id, enterprise_url)
+                       VALUES ($1, 'web_session', $2, $3, 0, $4, $5)
+                       ON CONFLICT (provider) DO UPDATE SET
+                           auth_type = EXCLUDED.auth_type,
+                           access_token = EXCLUDED.access_token,
+                           refresh_token = EXCLUDED.refresh_token,
+                           expires_at = EXCLUDED.expires_at,
+                           account_id = EXCLUDED.account_id,
+                           enterprise_url = EXCLUDED.enterprise_url"#,
                 )
+                .bind(provider)
+                .bind(session_key.as_str())
+                .bind(org_uuid.as_str())
+                .bind(device_id.as_str())
+                .bind(anonymous_id.as_str())
+                .execute(&conn)
                 .await
                 .map_err(|e| ProxyError::DatabaseError(format!("Failed to save auth: {e}")))?;
             }
@@ -193,7 +208,9 @@ impl AuthStore {
 
     pub async fn remove(&self, provider: &str) -> Result<(), ProxyError> {
         let conn = db::get_conn().await?;
-        conn.execute("DELETE FROM auth WHERE provider = ?", [provider])
+        sqlx::query("DELETE FROM auth WHERE provider = $1")
+            .bind(provider)
+            .execute(&conn)
             .await
             .map_err(|e| ProxyError::DatabaseError(format!("Failed to remove auth: {e}")))?;
         Ok(())
@@ -201,11 +218,12 @@ impl AuthStore {
 
     pub async fn has(&self, provider: &str) -> Result<bool, ProxyError> {
         let conn = db::get_conn().await?;
-        let mut rows = conn
-            .query("SELECT 1 FROM auth WHERE provider = ? LIMIT 1", [provider])
+        let row = sqlx::query("SELECT 1 FROM auth WHERE provider = $1 LIMIT 1")
+            .bind(provider)
+            .fetch_optional(&conn)
             .await
             .map_err(|e| ProxyError::DatabaseError(format!("Failed to check auth: {e}")))?;
-        Ok(rows.next().await.ok().flatten().is_some())
+        Ok(row.is_some())
     }
 
     pub async fn update_tokens(
@@ -216,10 +234,14 @@ impl AuthStore {
         expires: u64,
     ) -> Result<(), ProxyError> {
         let conn = db::get_conn().await?;
-        conn.execute(
-            "UPDATE auth SET access_token = ?, refresh_token = ?, expires_at = ? WHERE provider = ? AND auth_type = 'oauth'",
-            (access.as_str(), refresh.as_str(), expires as i64, provider),
+        sqlx::query(
+            "UPDATE auth SET access_token = $1, refresh_token = $2, expires_at = $3 WHERE provider = $4 AND auth_type = 'oauth'",
         )
+        .bind(access.as_str())
+        .bind(refresh.as_str())
+        .bind(expires as i64)
+        .bind(provider)
+        .execute(&conn)
         .await
         .map_err(|e| ProxyError::DatabaseError(format!("Failed to update tokens: {e}")))?;
         Ok(())
@@ -233,10 +255,12 @@ impl AuthStore {
         new_session_key: &str,
     ) -> Result<(), ProxyError> {
         let conn = db::get_conn().await?;
-        conn.execute(
-            "UPDATE auth SET access_token = ? WHERE provider = ? AND auth_type = 'web_session'",
-            (new_session_key, provider),
+        sqlx::query(
+            "UPDATE auth SET access_token = $1 WHERE provider = $2 AND auth_type = 'web_session'",
         )
+        .bind(new_session_key)
+        .bind(provider)
+        .execute(&conn)
         .await
         .map_err(|e| ProxyError::DatabaseError(format!("Failed to update web session: {e}")))?;
         Ok(())

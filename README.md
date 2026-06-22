@@ -40,13 +40,21 @@ Use your existing Claude Pro/Max subscription with AI coding assistants and tool
 - [Bun](https://bun.sh/) >= 1.3.0
 - [Vite+](https://viteplus.dev/) (`vp` CLI) — unified frontend toolchain
 - [just](https://github.com/casey/just) command runner
+- PostgreSQL
 
 ### Build & run
+
+Create a PostgreSQL database and user:
+
+```bash
+sudo -u postgres createuser --pwprompt claude_proxy
+sudo -u postgres createdb -O claude_proxy claude_proxy
+```
 
 ```bash
 # Create .env with required admin credentials
 cp .env.example .env
-# Edit .env with your credentials
+# Edit .env with your credentials and PostgreSQL URL
 
 just build   # builds admin UI + release binary
 just run     # or: cargo run
@@ -62,6 +70,7 @@ Environment variables are loaded from `.env` or the environment.
 |----------|---------|-------------|
 | `CLAUDE_PROXY_ADMIN_USERNAME` | *(required)* | Admin username |
 | `CLAUDE_PROXY_ADMIN_PASSWORD` | *(required)* | Admin password |
+| `CLAUDE_PROXY_DATABASE_URL` / `DATABASE_URL` | *(required)* | PostgreSQL connection URL |
 | `CLAUDE_PROXY_HOST` | `127.0.0.1` | Bind address |
 | `CLAUDE_PROXY_PORT` | `4096` | Port |
 | `CLAUDE_PROXY_CORS_ORIGINS` | `localhost` | CORS: `localhost`, `*`, or comma-separated origins |
@@ -78,10 +87,74 @@ Capture files may contain prompts, tool results, code, and model outputs. API ke
 
 ### Data storage
 
-All data (OAuth credentials, API keys, usage) is stored in a [Turso](https://github.com/tursodatabase/turso) embedded database:
-- **Linux**: `~/.local/share/claude-proxy/proxy.db`
-- **macOS**: `~/Library/Application Support/claude-proxy/proxy.db`
-- **Windows**: `%APPDATA%\claude-proxy\proxy.db`
+All data (OAuth credentials, API keys, usage) is stored in PostgreSQL. Configure the connection with `CLAUDE_PROXY_DATABASE_URL` or `DATABASE_URL`.
+
+---
+
+## Deployment
+
+The repository includes a systemd unit (`claude-proxy.service`) and a `just deploy` recipe. The recipe builds the embedded admin UI, builds the release binary, copies it to the server, installs the systemd unit, restarts the service, and checks `/health`.
+
+### Server prerequisites
+
+Install PostgreSQL on the server and create a dedicated database/user:
+
+```bash
+sudo -u postgres createuser --pwprompt claude_proxy
+sudo -u postgres createdb -O claude_proxy claude_proxy
+```
+
+Create `/opt/claude-proxy/.env` on the server:
+
+```bash
+sudo mkdir -p /opt/claude-proxy
+sudo install -m 600 /dev/null /opt/claude-proxy/.env
+sudoedit /opt/claude-proxy/.env
+```
+
+Required server environment:
+
+```dotenv
+CLAUDE_PROXY_ADMIN_USERNAME=admin
+CLAUDE_PROXY_ADMIN_PASSWORD=change-this
+CLAUDE_PROXY_DATABASE_URL=postgresql://claude_proxy:change-this@127.0.0.1:5432/claude_proxy
+```
+
+The service binds to `0.0.0.0:4096` via `claude-proxy.service`.
+
+### Deploy from this repo
+
+Set the target host used by the `justfile`:
+
+```bash
+export HOME_SRV_IP=10.77.77.100
+```
+
+Then deploy:
+
+```bash
+just deploy
+```
+
+Useful server commands:
+
+```bash
+just status
+just logs
+just restart
+```
+
+Manual equivalent:
+
+```bash
+just build
+rsync -avz target/release/claude-proxy-rs root@$HOME_SRV_IP:/opt/claude-proxy/
+scp claude-proxy.service root@$HOME_SRV_IP:/etc/systemd/system/
+ssh root@$HOME_SRV_IP "systemctl daemon-reload && systemctl enable claude-proxy && systemctl restart claude-proxy"
+ssh root@$HOME_SRV_IP "curl -fsS http://127.0.0.1:4096/health"
+```
+
+Open `http://<server>:4096/admin`, log in, connect OAuth, and create `sk-proxy-*` API keys.
 
 ---
 

@@ -10,6 +10,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use serde::{Deserialize, Serialize};
+use sqlx::Row;
 use std::sync::Arc;
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
@@ -231,17 +232,19 @@ pub async fn get_my_timeseries(
         )
     })?;
 
-    let Ok(mut rows) = conn
-        .query(
-            "SELECT (created_at / ?1) * ?1 AS bucket, \
+    let Ok(rows) = sqlx::query(
+        "SELECT (created_at / $1) * $1 AS bucket, \
              COUNT(*), SUM(cost_microdollars), \
              SUM(input_tokens), SUM(output_tokens), \
              SUM(cache_read_tokens), SUM(cache_write_tokens) \
-             FROM request_log WHERE key_id = ?3 AND created_at >= ?2 \
+             FROM request_log WHERE key_id = $3 AND created_at >= $2 \
              GROUP BY bucket ORDER BY bucket",
-            (bucket_ms as i64, cutoff as i64, key_id.as_str()),
-        )
-        .await
+    )
+    .bind(bucket_ms as i64)
+    .bind(cutoff as i64)
+    .bind(key_id.as_str())
+    .fetch_all(&conn)
+    .await
     else {
         return Ok(Json(TimeseriesResponse {
             period: period_str.to_string(),
@@ -251,7 +254,7 @@ pub async fn get_my_timeseries(
     };
 
     let mut data_map = std::collections::HashMap::new();
-    while let Ok(Some(row)) = rows.next().await {
+    for row in rows {
         let ts = get_u64(&row, 0);
         data_map.insert(
             ts,
@@ -325,16 +328,17 @@ pub async fn get_my_by_model(
         )
     })?;
 
-    let Ok(mut rows) = conn
-        .query(
-            "SELECT model, COUNT(*), SUM(cost_microdollars), \
+    let Ok(rows) = sqlx::query(
+        "SELECT model, COUNT(*), SUM(cost_microdollars), \
              SUM(input_tokens), SUM(output_tokens), \
              SUM(cache_read_tokens), SUM(cache_write_tokens) \
-             FROM request_log WHERE key_id = ?2 AND created_at >= ?1 \
+             FROM request_log WHERE key_id = $2 AND created_at >= $1 \
              GROUP BY model ORDER BY SUM(cost_microdollars) DESC",
-            (cutoff as i64, key_id.as_str()),
-        )
-        .await
+    )
+    .bind(cutoff as i64)
+    .bind(key_id.as_str())
+    .fetch_all(&conn)
+    .await
     else {
         return Ok(Json(ModelBreakdownResponse {
             period: period_str.to_string(),
@@ -343,8 +347,8 @@ pub async fn get_my_by_model(
     };
 
     let mut models = Vec::new();
-    while let Ok(Some(row)) = rows.next().await {
-        let Ok(model) = row.get::<String>(0) else {
+    for row in rows {
+        let Ok(model) = row.try_get::<String, _>(0) else {
             continue;
         };
         models.push(ModelBreakdown {

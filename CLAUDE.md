@@ -26,25 +26,19 @@ just restart          # Restart server service
 
 Unified API proxy that lets AI coding assistants (Cline, Roo Code, etc.) use a Claude Pro/Max subscription via either **OpenAI-compatible** or **Anthropic native** API formats.
 
-**Stack**: Axum web framework, Turso embedded database, reqwest HTTP client, tokio async runtime. Rust 2024 edition.
+**Stack**: Axum web framework, PostgreSQL via sqlx, reqwest HTTP client, tokio async runtime. Rust 2024 edition.
 
 **Admin UI**: Vue 3 + TypeScript SPA in `admin-ui/`, using [Vite+](https://viteplus.dev/) as the unified toolchain. The build output (`admin-ui/dist/`) is embedded into the binary at compile time via `build.rs` using `memory-serve`. See `admin-ui/AGENTS.md` for Vite+ workflow details.
 
-**Database**: Turso (a database engine written in Rust from scratch — NOT SQLite, NOT libSQL, and NOT a fork of either). Stored at `~/.local/share/claude-proxy/proxy.db`. Global singleton via `OnceCell` in `src/db.rs`. Inspect with the Turso CLI: `tursodb ~/.local/share/claude-proxy/proxy.db "SELECT ..."`.
+**Database**: PostgreSQL. Configure with `CLAUDE_PROXY_DATABASE_URL` or `DATABASE_URL`. A global `sqlx::PgPool` is initialized via `OnceCell` in `src/db.rs`.
 
-### Database Migrations
+### Database Schema
 
-Schema changes are managed via a versioned migration system in `src/db.rs`. Key points:
+Schema setup is managed in `src/db.rs`. Key points:
 
-- **`schema_version` table** tracks the current version (single integer row)
-- **`MIGRATIONS` array** holds ordered migrations — each has a version, description, and async function
-- On startup, `run_migrations()` runs any pending migrations (version > current) in order
-- **Pre-migration detection**: if `auth` table exists but no `schema_version`, sets version to 1 (original schema) so only newer migrations run
-- **Adding a new migration**: append to `MIGRATIONS` array, write a `migrate_vN` function
-
-Current migrations:
-- **v1**: `auth`, `client_keys` (original schema)
-- **v2**: `models` (with seed data), `key_allowed_models`, `key_model_usage`
+- On startup, `create_current_schema()` ensures all current PostgreSQL tables and indexes exist
+- `seed_models_if_empty()` inserts default model pricing when the `models` table is empty
+- Schema changes should be applied explicitly when needed
 
 ## Module Structure
 
@@ -65,11 +59,11 @@ Current migrations:
   - `oauth.rs` — Anthropic OAuth 2.0 with PKCE, token refresh
   - `client_keys.rs` — API key generation (`sk-proxy-*`), validation, per-key rate limiting (hourly/weekly/total), per-model usage tracking, per-key model access control
   - `models.rs` — Dynamic model management (CRUD), pricing (input/output/cache_read/cache_write in $/MTok)
-  - `storage.rs` — Auth credential persistence in Turso
+  - `storage.rs` — Auth credential persistence in PostgreSQL
   - `usage.rs` — Token usage tracking, cost calculation in microdollars (1 USD = 1,000,000 microdollars)
-- **`src/config.rs`** — Environment variable config (`CLAUDE_PROXY_HOST`, `CLAUDE_PROXY_PORT`, `CLAUDE_PROXY_ADMIN_USERNAME`, `CLAUDE_PROXY_ADMIN_PASSWORD`, `CLAUDE_PROXY_CORS_ORIGINS`)
+- **`src/config.rs`** — Environment variable config (`CLAUDE_PROXY_HOST`, `CLAUDE_PROXY_PORT`, `CLAUDE_PROXY_DATABASE_URL`/`DATABASE_URL`, `CLAUDE_PROXY_ADMIN_USERNAME`, `CLAUDE_PROXY_ADMIN_PASSWORD`, `CLAUDE_PROXY_CORS_ORIGINS`)
 - **`src/constants.rs`** — API URLs, seed model list with pricing, beta headers, output token limits
-- **`src/db.rs`** — Database initialization, versioned migration system
+- **`src/db.rs`** — PostgreSQL initialization and current schema setup
 - **`src/error.rs`** — `ProxyError` enum with OpenAI and Anthropic error response formats
 
 ## Frontend (`admin-ui/`)

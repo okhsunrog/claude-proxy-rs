@@ -1,7 +1,5 @@
-use std::env;
-use std::path::PathBuf;
-
 use dotenvy::dotenv;
+use std::env;
 
 /// Cloaking mode — controls when Claude Code identity spoofing is applied
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,7 +26,7 @@ pub enum CorsMode {
 pub struct Config {
     pub host: String,
     pub port: u16,
-    pub data_dir: PathBuf,
+    pub database_url: String,
     pub admin_username: String,
     pub admin_password: String,
     pub cors_mode: CorsMode,
@@ -46,9 +44,9 @@ impl Config {
             .and_then(|p| p.parse().ok())
             .unwrap_or(4096);
 
-        let data_dir = dirs::data_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("claude-proxy");
+        let database_url = env::var("CLAUDE_PROXY_DATABASE_URL")
+            .or_else(|_| env::var("DATABASE_URL"))
+            .expect("CLAUDE_PROXY_DATABASE_URL or DATABASE_URL must be set");
 
         let disable_auth = env::var("CLAUDE_PROXY_DISABLE_AUTH")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
@@ -89,16 +87,12 @@ impl Config {
         Self {
             host,
             port,
-            data_dir,
+            database_url,
             admin_username,
             admin_password,
             cors_mode,
             disable_auth,
             cloak_mode,
         }
-    }
-
-    pub fn db_path(&self) -> PathBuf {
-        self.data_dir.join("proxy.db")
     }
 }

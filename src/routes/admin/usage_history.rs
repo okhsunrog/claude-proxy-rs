@@ -1,5 +1,6 @@
 use axum::{Json, http::StatusCode};
 use serde::{Deserialize, Serialize};
+use sqlx::Row;
 use utoipa::ToSchema;
 
 use super::{ErrorResponse, SuccessResponse};
@@ -110,17 +111,18 @@ pub async fn get_usage_history_timeseries(
         });
     };
 
-    let Ok(mut rows) = conn
-        .query(
-            "SELECT (created_at / ?1) * ?1 AS bucket, \
+    let Ok(rows) = sqlx::query(
+        "SELECT (created_at / $1) * $1 AS bucket, \
              COUNT(*), SUM(cost_microdollars), \
              SUM(input_tokens), SUM(output_tokens), \
              SUM(cache_read_tokens), SUM(cache_write_tokens) \
-             FROM request_log WHERE created_at >= ?2 \
+             FROM request_log WHERE created_at >= $2 \
              GROUP BY bucket ORDER BY bucket",
-            (bucket_ms as i64, cutoff as i64),
-        )
-        .await
+    )
+    .bind(bucket_ms as i64)
+    .bind(cutoff as i64)
+    .fetch_all(&conn)
+    .await
     else {
         return Json(TimeseriesResponse {
             period: period_str.to_string(),
@@ -130,7 +132,7 @@ pub async fn get_usage_history_timeseries(
     };
 
     let mut data_map = std::collections::HashMap::new();
-    while let Ok(Some(row)) = rows.next().await {
+    for row in rows {
         let ts = get_u64(&row, 0);
         data_map.insert(
             ts,
@@ -194,16 +196,16 @@ pub async fn get_usage_history_by_model(
         });
     };
 
-    let Ok(mut rows) = conn
-        .query(
-            "SELECT model, COUNT(*), SUM(cost_microdollars), \
+    let Ok(rows) = sqlx::query(
+        "SELECT model, COUNT(*), SUM(cost_microdollars), \
              SUM(input_tokens), SUM(output_tokens), \
              SUM(cache_read_tokens), SUM(cache_write_tokens) \
-             FROM request_log WHERE created_at >= ? \
+             FROM request_log WHERE created_at >= $1 \
              GROUP BY model ORDER BY SUM(cost_microdollars) DESC",
-            [cutoff as i64],
-        )
-        .await
+    )
+    .bind(cutoff as i64)
+    .fetch_all(&conn)
+    .await
     else {
         return Json(ModelBreakdownResponse {
             period: period_str.to_string(),
@@ -212,8 +214,8 @@ pub async fn get_usage_history_by_model(
     };
 
     let mut models = Vec::new();
-    while let Ok(Some(row)) = rows.next().await {
-        let Ok(model) = row.get::<String>(0) else {
+    for row in rows {
+        let Ok(model) = row.try_get::<String, _>(0) else {
             continue;
         };
         models.push(ModelBreakdown {
@@ -256,17 +258,17 @@ pub async fn get_usage_history_by_key(
         });
     };
 
-    let Ok(mut rows) = conn
-        .query(
-            "SELECT r.key_id, k.name, COUNT(*), SUM(r.cost_microdollars), \
+    let Ok(rows) = sqlx::query(
+        "SELECT r.key_id, k.name, COUNT(*), SUM(r.cost_microdollars), \
              SUM(r.input_tokens), SUM(r.output_tokens), \
              SUM(r.cache_read_tokens), SUM(r.cache_write_tokens) \
              FROM request_log r LEFT JOIN client_keys k ON r.key_id = k.id \
-             WHERE r.created_at >= ? \
-             GROUP BY r.key_id ORDER BY SUM(r.cost_microdollars) DESC",
-            [cutoff as i64],
-        )
-        .await
+             WHERE r.created_at >= $1 \
+             GROUP BY r.key_id, k.name ORDER BY SUM(r.cost_microdollars) DESC",
+    )
+    .bind(cutoff as i64)
+    .fetch_all(&conn)
+    .await
     else {
         return Json(KeyBreakdownResponse {
             period: period_str.to_string(),
@@ -275,13 +277,13 @@ pub async fn get_usage_history_by_key(
     };
 
     let mut keys = Vec::new();
-    while let Ok(Some(row)) = rows.next().await {
-        let Ok(key_id) = row.get::<String>(0) else {
+    for row in rows {
+        let Ok(key_id) = row.try_get::<String, _>(0) else {
             continue;
         };
         keys.push(KeyBreakdown {
             key_id,
-            key_name: row.get::<Option<String>>(1).ok().flatten(),
+            key_name: row.try_get::<Option<String>, _>(1).ok().flatten(),
             request_count: get_u64(&row, 2),
             cost_microdollars: get_u64(&row, 3),
             input_tokens: get_u64(&row, 4),
@@ -316,7 +318,8 @@ pub async fn delete_usage_history()
         )
     })?;
 
-    conn.execute("DELETE FROM request_log", ())
+    sqlx::query("DELETE FROM request_log")
+        .execute(&conn)
         .await
         .map_err(|e| {
             (

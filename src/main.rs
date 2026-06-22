@@ -24,6 +24,7 @@ use capture::CaptureConfig;
 use clap::Parser;
 use config::{CloakMode, Config, CorsMode};
 use reqwest::Client;
+use sqlx::Row;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -89,12 +90,14 @@ impl AppState {
 /// Save a session token to the database
 pub async fn save_session(token: &str, expires_at: u64) {
     if let Ok(conn) = db::get_conn().await
-        && let Err(e) = conn
-            .execute(
-                "INSERT OR REPLACE INTO admin_sessions (token, expires_at) VALUES (?, ?)",
-                (token, expires_at as i64),
-            )
-            .await
+        && let Err(e) = sqlx::query(
+            "INSERT INTO admin_sessions (token, expires_at) VALUES ($1, $2) \
+             ON CONFLICT (token) DO UPDATE SET expires_at = EXCLUDED.expires_at",
+        )
+        .bind(token)
+        .bind(expires_at as i64)
+        .execute(&conn)
+        .await
     {
         warn!("Failed to save session: {e}");
     }
@@ -106,37 +109,35 @@ pub async fn validate_session(token: &str) -> bool {
     let Ok(conn) = db::get_conn().await else {
         return false;
     };
-    let Ok(mut rows) = conn
-        .query(
-            "SELECT expires_at FROM admin_sessions WHERE token = ?",
-            [token],
-        )
+    let Ok(row) = sqlx::query("SELECT expires_at FROM admin_sessions WHERE token = $1")
+        .bind(token)
+        .fetch_optional(&conn)
         .await
     else {
         return false;
     };
-    let Some(row) = rows.next().await.ok().flatten() else {
+    let Some(row) = row else {
         return false;
     };
-    let Ok(expires_at) = row.get::<i64>(0) else {
+    let Ok(expires_at) = row.try_get::<i64, _>(0) else {
         return false;
     };
     let now = now_secs() as i64;
     if now >= expires_at {
         // Expired — clean it up
-        let _ = conn
-            .execute("DELETE FROM admin_sessions WHERE token = ?", [token])
+        let _ = sqlx::query("DELETE FROM admin_sessions WHERE token = $1")
+            .bind(token)
+            .execute(&conn)
             .await;
         return false;
     }
     // Sliding expiration: renew if more than 1 day has passed since last renewal
     let new_expires = now + SESSION_TTL_SECS as i64;
     if new_expires - expires_at > 24 * 3600 {
-        let _ = conn
-            .execute(
-                "UPDATE admin_sessions SET expires_at = ? WHERE token = ?",
-                (new_expires, token),
-            )
+        let _ = sqlx::query("UPDATE admin_sessions SET expires_at = $1 WHERE token = $2")
+            .bind(new_expires)
+            .bind(token)
+            .execute(&conn)
             .await;
     }
     true
@@ -145,8 +146,9 @@ pub async fn validate_session(token: &str) -> bool {
 /// Remove a session token from the database
 pub async fn remove_session(token: &str) {
     if let Ok(conn) = db::get_conn().await {
-        let _ = conn
-            .execute("DELETE FROM admin_sessions WHERE token = ?", [token])
+        let _ = sqlx::query("DELETE FROM admin_sessions WHERE token = $1")
+            .bind(token)
+            .execute(&conn)
             .await;
     }
 }
@@ -350,7 +352,7 @@ async fn main() {
     let config = Config::from_env();
 
     // Initialize database (before moving fields out of config)
-    db::init_db(&config.db_path())
+    db::init_db(&config.database_url)
         .await
         .expect("Failed to initialize database");
 
