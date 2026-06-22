@@ -270,37 +270,18 @@ async fn compute_cost(conn: &Connection, model: &str, report: &Usage) -> u64 {
 impl ClientKeysStore {
     /// Check if a key's usage is within limits.
     /// Derives global usage from request_log aggregation.
-    /// Returns `Ok(())` if the key is within its global limits, or `Err(reason)`
-    /// if a configured limit is exceeded. Transient DB conflicts are retried;
-    /// a persistent DB error fails open (allows the request) so a database
-    /// hiccup can never masquerade as a rate-limit rejection.
     pub async fn check_limits(
         &self,
         id: &str,
         window_resets: &SubscriptionState,
     ) -> Result<(), String> {
-        match db::with_stale_retry(|| self.check_limits_once(id, window_resets)).await {
-            Ok(None) => Ok(()),
-            Ok(Some(reason)) => Err(reason),
-            Err(e) => {
-                warn!("check_limits DB error for key {id}, allowing request: {e}");
-                Ok(())
-            }
-        }
-    }
-
-    /// One attempt of the global-limit check. `Ok(None)` = within limits,
-    /// `Ok(Some(reason))` = a limit is exceeded, `Err` = a DB error (retryable).
-    async fn check_limits_once(
-        &self,
-        id: &str,
-        window_resets: &SubscriptionState,
-    ) -> Result<Option<String>, ProxyError> {
         let now = timestamp_millis();
-        let conn = db::get_conn().await?;
+        let conn = db::get_conn().await.map_err(|e| e.to_string())?;
 
         // Update window boundaries
-        let ws = maybe_reset_expired_windows(&conn, id, now, window_resets).await?;
+        let ws = maybe_reset_expired_windows(&conn, id, now, window_resets)
+            .await
+            .map_err(|e| e.to_string())?;
 
         // Read limits
         let mut rows = conn
@@ -309,13 +290,13 @@ impl ClientKeysStore {
                 [id],
             )
             .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to read limits: {e}")))?;
+            .map_err(|e| format!("DB error: {e}"))?;
 
         let row = rows
             .next()
             .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to read limit row: {e}")))?
-            .ok_or_else(|| ProxyError::DatabaseError("Key not found".to_string()))?;
+            .map_err(|e| format!("DB error: {e}"))?
+            .ok_or_else(|| "Key not found".to_string())?;
 
         let five_hour_limit = opt_u64(&row, 0);
         let weekly_limit = opt_u64(&row, 1);
@@ -323,60 +304,47 @@ impl ClientKeysStore {
 
         // Skip aggregation if no limits are set
         if five_hour_limit.is_none() && weekly_limit.is_none() && total_limit.is_none() {
-            return Ok(None);
+            return Ok(());
         }
 
         // Aggregate usage from request_log
-        let (five_hour_cost, weekly_cost, total_cost) =
-            aggregate_usage_costs(&conn, id, &ws).await?;
+        let (five_hour_cost, weekly_cost, total_cost) = aggregate_usage_costs(&conn, id, &ws)
+            .await
+            .map_err(|e| e.to_string())?;
 
         if let Some(limit) = five_hour_limit
             && five_hour_cost >= limit
         {
-            return Ok(Some(format!(
+            return Err(format!(
                 "5-hour token limit exceeded ({}/{})",
                 five_hour_cost, limit
-            )));
+            ));
         }
 
         if let Some(limit) = weekly_limit
             && weekly_cost >= limit
         {
-            return Ok(Some(format!(
+            return Err(format!(
                 "Weekly token limit exceeded ({}/{})",
                 weekly_cost, limit
-            )));
+            ));
         }
 
         if let Some(limit) = total_limit
             && total_cost >= limit
         {
-            return Ok(Some(format!(
+            return Err(format!(
                 "Total token limit exceeded ({}/{})",
                 total_cost, limit
-            )));
+            ));
         }
 
-        Ok(None)
+        Ok(())
     }
 
-    /// Record usage by inserting into request_log, retrying on transient
-    /// stale-snapshot conflicts so usage accounting isn't silently dropped
-    /// under concurrent writes.
-    pub async fn record_model_usage(
-        &self,
-        key_id: &str,
-        model: &str,
-        report: &Usage,
-        window_resets: &SubscriptionState,
-    ) -> Result<(), ProxyError> {
-        db::with_stale_retry(|| self.record_model_usage_once(key_id, model, report, window_resets))
-            .await
-    }
-
-    /// One attempt of [`record_model_usage`].
+    /// Record usage by inserting into request_log.
     /// Window boundaries are updated via maybe_reset_expired_windows.
-    async fn record_model_usage_once(
+    pub async fn record_model_usage(
         &self,
         key_id: &str,
         model: &str,
@@ -657,39 +625,19 @@ impl ClientKeysStore {
 
     /// Check per-model limits for a key. Returns Ok(()) if no limits set.
     /// Computes cost from request_log aggregation.
-    /// Per-model limit check. Same fail-open-on-DB-error semantics as
-    /// [`check_limits`]: transient conflicts are retried, persistent DB errors
-    /// allow the request rather than blocking it.
     pub async fn check_model_limits(
         &self,
         key_id: &str,
         model: &str,
         window_resets: &SubscriptionState,
     ) -> Result<(), String> {
-        match db::with_stale_retry(|| self.check_model_limits_once(key_id, model, window_resets))
-            .await
-        {
-            Ok(None) => Ok(()),
-            Ok(Some(reason)) => Err(reason),
-            Err(e) => {
-                warn!("check_model_limits DB error for key {key_id}/{model}, allowing request: {e}");
-                Ok(())
-            }
-        }
-    }
-
-    /// One attempt of the per-model limit check (see [`check_limits_once`]).
-    async fn check_model_limits_once(
-        &self,
-        key_id: &str,
-        model: &str,
-        window_resets: &SubscriptionState,
-    ) -> Result<Option<String>, ProxyError> {
         let now = timestamp_millis();
-        let conn = db::get_conn().await?;
+        let conn = db::get_conn().await.map_err(|e| e.to_string())?;
 
         // Update window boundaries
-        let ws = maybe_reset_expired_windows(&conn, key_id, now, window_resets).await?;
+        let ws = maybe_reset_expired_windows(&conn, key_id, now, window_resets)
+            .await
+            .map_err(|e| e.to_string())?;
 
         let mut rows = conn
             .query(
@@ -697,14 +645,10 @@ impl ClientKeysStore {
                 (key_id, model),
             )
             .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to read model limits: {e}")))?;
+            .map_err(|e| format!("DB error: {e}"))?;
 
-        let Some(row) = rows
-            .next()
-            .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to read model limit row: {e}")))?
-        else {
-            return Ok(None); // No row = no limits
+        let Some(row) = rows.next().await.map_err(|e| format!("DB error: {e}"))? else {
+            return Ok(()); // No row = no limits
         };
 
         let five_hour_limit = opt_u64(&row, 0);
@@ -718,39 +662,45 @@ impl ClientKeysStore {
         let total_from = ws.total_count_from.max(model_count_from);
 
         if let Some(limit) = five_hour_limit {
-            let cost = query_model_cost(&conn, key_id, model, five_hour_from).await?;
+            let cost = query_model_cost(&conn, key_id, model, five_hour_from)
+                .await
+                .map_err(|e| e.to_string())?;
             if cost >= limit {
-                return Ok(Some(format!(
+                return Err(format!(
                     "5-hour model limit exceeded for {model} (${:.2}/${:.2})",
                     cost as f64 / 1_000_000.0,
                     limit as f64 / 1_000_000.0
-                )));
+                ));
             }
         }
 
         if let Some(limit) = weekly_limit {
-            let cost = query_model_cost(&conn, key_id, model, weekly_from).await?;
+            let cost = query_model_cost(&conn, key_id, model, weekly_from)
+                .await
+                .map_err(|e| e.to_string())?;
             if cost >= limit {
-                return Ok(Some(format!(
+                return Err(format!(
                     "Weekly model limit exceeded for {model} (${:.2}/${:.2})",
                     cost as f64 / 1_000_000.0,
                     limit as f64 / 1_000_000.0
-                )));
+                ));
             }
         }
 
         if let Some(limit) = total_limit {
-            let cost = query_model_cost(&conn, key_id, model, total_from).await?;
+            let cost = query_model_cost(&conn, key_id, model, total_from)
+                .await
+                .map_err(|e| e.to_string())?;
             if cost >= limit {
-                return Ok(Some(format!(
+                return Err(format!(
                     "Total model limit exceeded for {model} (${:.2}/${:.2})",
                     cost as f64 / 1_000_000.0,
                     limit as f64 / 1_000_000.0
-                )));
+                ));
             }
         }
 
-        Ok(None)
+        Ok(())
     }
 
     /// Get per-model usage entries for a key (from request_log + key_model_limits)
