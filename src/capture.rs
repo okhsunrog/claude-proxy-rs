@@ -1,10 +1,16 @@
+use std::env;
 use std::path::{Path, PathBuf};
+use std::pin::pin;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_stream::stream;
+use axum::http::HeaderMap;
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
+use reqwest::header::HeaderMap as ReqwestHeaderMap;
+use serde_json::to_string_pretty;
 use serde_json::{Value, json};
+use tokio::fs::{self, File, OpenOptions};
 use tokio::io::AsyncWriteExt;
 use tracing::warn;
 use uuid::Uuid;
@@ -21,7 +27,7 @@ pub struct Capture {
 
 impl CaptureConfig {
     pub fn from_env() -> Self {
-        let dir = std::env::var("CLAUDE_PROXY_CAPTURE_DIR")
+        let dir = env::var("CLAUDE_PROXY_CAPTURE_DIR")
             .ok()
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty())
@@ -41,7 +47,7 @@ impl Capture {
         endpoint: &str,
         model: &str,
         stream: bool,
-        client_headers: &axum::http::HeaderMap,
+        client_headers: &HeaderMap,
         inbound_body: &Value,
     ) -> Option<Self> {
         let base_dir = config.dir.as_ref()?;
@@ -52,7 +58,7 @@ impl Capture {
             Uuid::new_v4()
         );
         let dir = base_dir.join(id);
-        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+        if let Err(e) = fs::create_dir_all(&dir).await {
             warn!("Failed to create capture directory {}: {e}", dir.display());
             return None;
         }
@@ -90,7 +96,7 @@ impl Capture {
     pub async fn write_upstream_response(
         &self,
         status: reqwest::StatusCode,
-        headers: &reqwest::header::HeaderMap,
+        headers: &ReqwestHeaderMap,
     ) {
         self.write_json(
             "upstream_response.json",
@@ -111,7 +117,7 @@ impl Capture {
     }
 
     async fn write_json(&self, name: &str, value: &Value) {
-        match serde_json::to_string_pretty(value) {
+        match to_string_pretty(value) {
             Ok(text) => self.write_text(name, &format!("{text}\n")).await,
             Err(e) => warn!("Failed to serialize capture file {name}: {e}"),
         }
@@ -119,7 +125,7 @@ impl Capture {
 
     async fn write_text(&self, name: &str, text: &str) {
         let path = self.dir.join(name);
-        if let Err(e) = tokio::fs::write(&path, text).await {
+        if let Err(e) = fs::write(&path, text).await {
             warn!("Failed to write capture file {}: {e}", path.display());
         }
     }
@@ -134,7 +140,7 @@ where
     E: Send + 'static,
 {
     stream! {
-        let mut body = std::pin::pin!(body);
+        let mut body = pin!(body);
         let mut file = match path {
             Some(path) => open_append(&path).await,
             None => None,
@@ -152,8 +158,8 @@ where
     }
 }
 
-async fn open_append(path: &Path) -> Option<tokio::fs::File> {
-    match tokio::fs::OpenOptions::new()
+async fn open_append(path: &Path) -> Option<File> {
+    match OpenOptions::new()
         .create(true)
         .append(true)
         .open(path)
@@ -167,7 +173,7 @@ async fn open_append(path: &Path) -> Option<tokio::fs::File> {
     }
 }
 
-fn headers_to_json(headers: &axum::http::HeaderMap) -> Value {
+fn headers_to_json(headers: &HeaderMap) -> Value {
     Value::Object(
         headers
             .iter()
@@ -184,7 +190,7 @@ fn headers_to_json(headers: &axum::http::HeaderMap) -> Value {
     )
 }
 
-fn reqwest_headers_to_json(headers: &reqwest::header::HeaderMap) -> Value {
+fn reqwest_headers_to_json(headers: &ReqwestHeaderMap) -> Value {
     Value::Object(
         headers
             .iter()

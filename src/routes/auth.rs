@@ -1,5 +1,6 @@
 use axum::http::{HeaderMap, header};
 use reqwest::{Client, RequestBuilder};
+use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::warn;
 
@@ -190,7 +191,7 @@ pub fn extract_client_betas(headers: &HeaderMap) -> Vec<String> {
 /// Merge the base OAuth betas with caller-supplied extras, preserving order and
 /// de-duplicating both against the base set and within the extras themselves.
 fn build_beta_header(extras: &[String]) -> String {
-    let mut seen: std::collections::HashSet<&str> = OAUTH_BETA_HEADER.split(',').collect();
+    let mut seen: HashSet<&str> = OAUTH_BETA_HEADER.split(',').collect();
     let mut result = OAUTH_BETA_HEADER.to_string();
     for beta in extras {
         let beta = beta.trim();

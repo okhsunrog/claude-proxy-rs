@@ -1,6 +1,7 @@
 //! Data types for subscription usage: the on-wire response shape from
 //! Anthropic, plus the cache metadata we layer on top of it.
 
+use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -112,7 +113,7 @@ impl CachedUsage {
             return SubscriptionState::default();
         };
         let parse_reset = |s: &str| -> Option<u64> {
-            chrono::DateTime::parse_from_rfc3339(s)
+            DateTime::parse_from_rfc3339(s)
                 .ok()
                 .map(|dt| dt.timestamp_millis() as u64)
         };

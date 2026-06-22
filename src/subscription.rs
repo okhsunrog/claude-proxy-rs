@@ -6,7 +6,9 @@
 //! `fetch_plan_name` (used by `/oauth/status`) and `timestamp_millis`
 //! (used by rate-limit bookkeeping and request logging).
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use serde_json::Value;
 
 use crate::AppState;
 use crate::constants::{ANTHROPIC_PROFILE_URL, OAUTH_USAGE_BETA};
@@ -29,11 +31,11 @@ pub async fn fetch_plan_name(state: &AppState) -> Option<String> {
         .header("authorization", format!("Bearer {token}"))
         .header("anthropic-beta", OAUTH_USAGE_BETA)
         .header("content-type", "application/json")
-        .timeout(std::time::Duration::from_secs(5))
+        .timeout(Duration::from_secs(5))
         .send()
         .await
         .ok()?;
-    let body: serde_json::Value = resp.json().await.ok()?;
+    let body: Value = resp.json().await.ok()?;
     let account = body.get("account")?;
     if account.get("has_claude_max")?.as_bool() == Some(true) {
         return Some("Max".into());

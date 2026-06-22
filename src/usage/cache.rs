@@ -33,6 +33,8 @@
 //! no modes, no state machine.
 
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use chrono::DateTime;
 use tokio::sync::RwLock;
 use tracing::info;
 
@@ -212,7 +214,7 @@ fn apply_header_patch(snapshot: &mut SubscriptionUsageResponse, patch: &HeaderPa
 }
 
 fn iso_from_epoch_ms(ms: u64) -> Option<String> {
-    chrono::DateTime::from_timestamp_millis(ms as i64).map(|dt| dt.to_rfc3339())
+    DateTime::from_timestamp_millis(ms as i64).map(|dt| dt.to_rfc3339())
 }
 
 fn now_ms() -> u64 {

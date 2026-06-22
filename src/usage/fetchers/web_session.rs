@@ -7,6 +7,9 @@
 //! is not, because it's the endpoint the web UI polls. This fetcher
 //! impersonates the browser request using a manually-scraped session cookie.
 
+use std::time::Duration;
+
+use serde_json::from_str;
 use tracing::{info, warn};
 
 use super::super::error::FetchError;
@@ -71,7 +74,7 @@ pub async fn fetch(state: &AppState) -> Result<SubscriptionUsageResponse, FetchE
             "user-agent",
             "Mozilla/5.0 (X11; Linux x86_64; rv:149.0) Gecko/20100101 Firefox/149.0",
         )
-        .timeout(std::time::Duration::from_secs(5))
+        .timeout(Duration::from_secs(5))
         .send()
         .await
         .map_err(|e| FetchError::Network(e.to_string()))?;
@@ -113,8 +116,7 @@ pub async fn fetch(state: &AppState) -> Result<SubscriptionUsageResponse, FetchE
         }
     }
 
-    serde_json::from_str::<SubscriptionUsageResponse>(&body)
-        .map_err(|e| FetchError::Parse(e.to_string()))
+    from_str::<SubscriptionUsageResponse>(&body).map_err(|e| FetchError::Parse(e.to_string()))
 }
 
 /// Parse a `sessionKey=...; ...` Set-Cookie value and return the cookie value.

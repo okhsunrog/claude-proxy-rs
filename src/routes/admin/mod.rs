@@ -13,6 +13,7 @@ pub use session::*;
 pub use usage_history::*;
 
 use axum::Router;
+use memory_serve::load;
 use serde::Serialize;
 use std::sync::Arc;
 use utoipa::ToSchema;
@@ -83,7 +84,7 @@ pub(super) fn validate_price(price: f64) -> Result<(), &'static str> {
 // --- Static file serving ---
 
 pub fn static_routes() -> Router<Arc<AppState>> {
-    memory_serve::load!()
+    load!()
         .index_file(Some("/index.html"))
         .fallback(Some("/index.html"))
         .into_router()

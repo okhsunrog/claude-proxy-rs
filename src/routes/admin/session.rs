@@ -1,7 +1,7 @@
 use axum::{
     Json,
     extract::State,
-    http::{StatusCode, header},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
@@ -67,10 +67,7 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(body): Json<LoginReq
 }
 
 /// Logout and clear session cookie
-pub async fn logout(
-    State(state): State<Arc<AppState>>,
-    headers: axum::http::HeaderMap,
-) -> Response {
+pub async fn logout(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
     if let Some(cookie_header) = headers.get(header::COOKIE).and_then(|v| v.to_str().ok())
         && let Some(token) = parse_cookie(cookie_header, "admin_session")
     {
@@ -88,7 +85,7 @@ pub async fn logout(
 }
 
 /// Check if the current request is authenticated
-pub async fn auth_check(headers: axum::http::HeaderMap) -> Json<AuthCheckResponse> {
+pub async fn auth_check(headers: HeaderMap) -> Json<AuthCheckResponse> {
     let authenticated = if let Some(cookie_header) =
         headers.get(header::COOKIE).and_then(|v| v.to_str().ok())
         && let Some(token) = parse_cookie(cookie_header, "admin_session")

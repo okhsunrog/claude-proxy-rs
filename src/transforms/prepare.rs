@@ -278,7 +278,7 @@ mod tests {
 
     #[test]
     fn test_extract_betas() {
-        let body = serde_json::json!({
+        let body = json!({
             "model": "claude-3",
             "betas": ["beta1", "beta2"]
         });
@@ -289,7 +289,7 @@ mod tests {
 
     #[test]
     fn test_disable_thinking_when_forced() {
-        let body = serde_json::json!({
+        let body = json!({
             "tool_choice": {"type": "any"},
             "thinking": {"type": "enabled", "budget_tokens": 1000}
         });
@@ -299,7 +299,7 @@ mod tests {
 
     #[test]
     fn test_thinking_preserved_with_auto() {
-        let body = serde_json::json!({
+        let body = json!({
             "tool_choice": {"type": "auto"},
             "thinking": {"type": "enabled", "budget_tokens": 1000}
         });
@@ -309,7 +309,7 @@ mod tests {
 
     #[test]
     fn test_inject_fake_user_id() {
-        let body = serde_json::json!({"model": "claude-3"});
+        let body = json!({"model": "claude-3"});
         let result = inject_fake_user_id(body);
         let user_id = result["metadata"]["user_id"].as_str().unwrap();
         assert!(user_id.starts_with("user_"));
@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn test_inject_system_message() {
-        let body = serde_json::json!({"model": "claude-3"});
+        let body = json!({"model": "claude-3"});
         let result = inject_system_message(body);
         let system = result["system"].as_array().unwrap();
         assert_eq!(system[0]["text"], SYSTEM_PREFIX);
@@ -325,7 +325,7 @@ mod tests {
 
     #[test]
     fn test_sanitize_system_replaces_opencode() {
-        let body = serde_json::json!({
+        let body = json!({
             "system": "You are OpenCode, an AI assistant. Use opencode tools."
         });
         let result = inject_system_message(body);
@@ -340,7 +340,7 @@ mod tests {
 
     #[test]
     fn test_sanitize_system_array_format() {
-        let body = serde_json::json!({
+        let body = json!({
             "system": [
                 {"type": "text", "text": "You are OpenCode assistant"},
                 {"type": "text", "text": "Use opencode for help"}
@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn test_sanitize_system_rewords_env_preamble() {
-        let body = serde_json::json!({
+        let body = json!({
             "system": "Here is some useful information about the environment you are running in:\n<env>x</env>"
         });
         let result = inject_system_message(body);

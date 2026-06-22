@@ -4,6 +4,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde_json::json;
+use std::io::Error as StdIoError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProxyError {
@@ -29,7 +30,7 @@ pub enum ProxyError {
     NetworkError(#[from] reqwest::Error),
 
     #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
+    IoError(#[from] StdIoError),
 
     #[error("Missing required header: {0}")]
     MissingHeader(String),

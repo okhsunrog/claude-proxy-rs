@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use llm_relay::Usage;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -564,10 +566,8 @@ impl ClientKeysStore {
         .db_context("Failed to query model usage")?;
 
         // Collect usage data from request_log
-        let mut usage_map: std::collections::HashMap<
-            String,
-            (TokenBreakdown, TokenBreakdown, TokenBreakdown),
-        > = std::collections::HashMap::new();
+        let mut usage_map: HashMap<String, (TokenBreakdown, TokenBreakdown, TokenBreakdown)> =
+            HashMap::new();
         for row in usage_rows {
             usage_map.insert(
                 row.model,
@@ -595,7 +595,7 @@ impl ClientKeysStore {
         }
 
         // Merge: models from limits + models from usage
-        let mut all_models: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut all_models: HashSet<String> = HashSet::new();
         for (model, _, _) in &model_limits {
             all_models.insert(model.clone());
         }

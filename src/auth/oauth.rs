@@ -3,11 +3,13 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rand::RngExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tracing::warn;
+use urlencoding::encode;
 
 use super::storage::{Auth, AuthStore};
 use crate::error::ProxyError;
@@ -38,7 +40,7 @@ pub struct OAuthManager {
     auth_store: Arc<AuthStore>,
     /// Prevents concurrent token refreshes (Anthropic rotates refresh tokens,
     /// so two simultaneous refreshes would invalidate each other).
-    refresh_lock: tokio::sync::Mutex<()>,
+    refresh_lock: Mutex<()>,
 }
 
 impl OAuthManager {
@@ -47,7 +49,7 @@ impl OAuthManager {
             client,
             verifier: RwLock::new(None),
             auth_store,
-            refresh_lock: tokio::sync::Mutex::new(()),
+            refresh_lock: Mutex::new(()),
         }
     }
 
@@ -75,8 +77,8 @@ impl OAuthManager {
             "{}?code=true&client_id={}&response_type=code&redirect_uri={}&scope={}&code_challenge={}&code_challenge_method=S256&state={}",
             AUTHORIZE_URL,
             CLIENT_ID,
-            urlencoding::encode(REDIRECT_URI),
-            urlencoding::encode(AUTHORIZE_SCOPES),
+            encode(REDIRECT_URI),
+            encode(AUTHORIZE_SCOPES),
             challenge,
             verifier
         )
@@ -95,7 +97,7 @@ impl OAuthManager {
         let actual_code = parts[0];
         let state = parts.get(1).copied().unwrap_or("");
 
-        let body = serde_json::json!({
+        let body = json!({
             "code": actual_code,
             "state": state,
             "grant_type": "authorization_code",
@@ -156,7 +158,7 @@ impl OAuthManager {
             .unwrap()
             .as_millis() as u64;
 
-        let body = serde_json::json!({
+        let body = json!({
             "grant_type": "refresh_token",
             "refresh_token": refresh,
             "client_id": CLIENT_ID,

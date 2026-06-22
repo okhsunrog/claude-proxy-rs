@@ -14,7 +14,7 @@ use llm_relay::convert::to_anthropic::inbound_request_to_anthropic;
 use llm_relay::convert::to_openai::anthropic_response_to_openai;
 use llm_relay::convert::tool_names::strip_mcp_prefix;
 use llm_relay::types::openai::{ChatResponse, InboundChatRequest};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::constants::{DEFAULT_MAX_OUTPUT, OPUS_4_6_MAX_OUTPUT};
 
@@ -58,10 +58,10 @@ pub fn transform_openai_request(req: InboundChatRequest) -> Value {
 
     // Add fields not handled by inbound_request_to_anthropic
     if let Some(s) = stream {
-        request["stream"] = serde_json::json!(s);
+        request["stream"] = json!(s);
     }
     if let Some(p) = top_p {
-        request["top_p"] = serde_json::json!(p);
+        request["top_p"] = json!(p);
     }
 
     // Convert reasoning_effort or suffix to thinking config
@@ -118,7 +118,7 @@ pub fn transform_openai_request(req: InboundChatRequest) -> Value {
 
     // Cap at model's max output
     max_tokens = max_tokens.min(model_max_output);
-    request["max_tokens"] = serde_json::json!(max_tokens);
+    request["max_tokens"] = json!(max_tokens);
 
     request
 }
@@ -252,7 +252,7 @@ mod tests {
     fn test_convert_openai_tool() {
         use llm_relay::convert::to_anthropic::openai_tool_to_anthropic;
 
-        let openai_tool = serde_json::json!({
+        let openai_tool = json!({
             "type": "function",
             "function": {
                 "name": "get_weather",

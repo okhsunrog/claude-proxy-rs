@@ -1,5 +1,6 @@
-use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+
+use serde_json::Value;
 
 const CLAUDE_CODE_TOOLS: &[&str] = &[
     "mcp_Agent",
@@ -315,10 +316,11 @@ fn restore_unaliased(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn normalizes_common_tool_aliases() {
-        let mut body = serde_json::json!({
+        let mut body = json!({
             "tools": [
                 {"name": "mcp_shell"},
                 {"name": "mcp_fs_search"},
@@ -354,7 +356,7 @@ mod tests {
     fn wraps_unknown_tool_names() {
         // OpenCode-style flat MCP names and bare builtins it doesn't share with
         // Claude Code get wrapped into the mcp__ namespace instead of a 400.
-        let mut body = serde_json::json!({
+        let mut body = json!({
             "tools": [
                 {"name": "chrome-devtools_click"},
                 {"name": "telegram_send_message"},
@@ -382,7 +384,7 @@ mod tests {
     fn wraps_colliding_aliases() {
         // grep and glob both alias to mcp_WebSearch — the first wins the
         // canonical name, the second is wrapped uniquely (no more 400).
-        let mut body = serde_json::json!({
+        let mut body = json!({
             "tools": [{"name": "grep"}, {"name": "glob"}]
         });
 
@@ -397,7 +399,7 @@ mod tests {
     #[test]
     fn history_tool_use_matches_definition() {
         // A collision-wrapped name must be applied identically in history.
-        let mut body = serde_json::json!({
+        let mut body = json!({
             "tools": [{"name": "grep"}, {"name": "glob"}],
             "messages": [{
                 "role": "assistant",
@@ -412,7 +414,7 @@ mod tests {
 
     #[test]
     fn leaves_typed_and_genuine_mcp_tools_untouched() {
-        let mut body = serde_json::json!({
+        let mut body = json!({
             "tools": [
                 {"type": "web_search_20250305", "name": "web_search"},
                 {"name": "mcp__flashprobe__list_ports"},
@@ -435,7 +437,7 @@ mod tests {
 
     #[test]
     fn normalizes_roo_code_aliases() {
-        let mut body = serde_json::json!({
+        let mut body = json!({
             "tools": [
                 {"name": "ask_followup_question"},
                 {"name": "attempt_completion"},
@@ -481,11 +483,11 @@ mod tests {
 
     #[test]
     fn restores_response_tool_names() {
-        let mut body = serde_json::json!({
+        let mut body = json!({
             "tools": [{"name": "mcp_shell"}]
         });
         let map = normalize_claude_code_tool_names(&mut body);
-        let mut response = serde_json::json!({
+        let mut response = json!({
             "content": [{"type": "tool_use", "name": "mcp_Bash"}]
         });
 

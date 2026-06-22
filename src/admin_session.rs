@@ -1,10 +1,12 @@
 use axum::{
+    extract::Request,
     extract::State,
     http::{StatusCode, header},
     middleware::Next,
     response::{IntoResponse, Response},
 };
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -127,7 +129,7 @@ pub(crate) fn parse_cookie(header: &str, name: &str) -> Option<String> {
 /// Middleware for admin routes authentication (session cookie or Basic Auth).
 pub(crate) async fn admin_auth_middleware(
     State(state): State<Arc<AppState>>,
-    request: axum::extract::Request,
+    request: Request,
     next: Next,
 ) -> Response {
     if state.disable_auth {
@@ -166,7 +168,7 @@ pub(crate) async fn admin_auth_middleware(
         return unauthorized_response();
     };
 
-    let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded) else {
+    let Ok(decoded) = STANDARD.decode(encoded) else {
         return unauthorized_response();
     };
 

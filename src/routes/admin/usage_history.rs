@@ -1,10 +1,12 @@
-use axum::{Json, http::StatusCode};
+use axum::{Json, extract::Query, http::StatusCode};
 use serde::Deserialize;
 use utoipa::ToSchema;
 
 use super::{ErrorResponse, SuccessResponse};
+use crate::db;
 use crate::usage::history::{
-    HistoryPeriod, KeyBreakdownResponse, ModelBreakdownResponse, TimeseriesResponse,
+    HistoryPeriod, KeyBreakdownResponse, ModelBreakdownResponse, TimeseriesResponse, by_key,
+    by_model, timeseries,
 };
 
 // --- Types ---
@@ -26,16 +28,16 @@ pub struct UsageHistoryQuery {
     )
 )]
 pub async fn get_usage_history_timeseries(
-    axum::extract::Query(query): axum::extract::Query<UsageHistoryQuery>,
+    Query(query): Query<UsageHistoryQuery>,
 ) -> Json<TimeseriesResponse> {
     let period = HistoryPeriod::parse(query.period.as_deref());
 
-    let Ok(conn) = crate::db::get_conn().await else {
+    let Ok(conn) = db::get_conn().await else {
         return Json(period.empty_timeseries());
     };
 
     Json(
-        crate::usage::history::timeseries(&conn, &period, None)
+        timeseries(&conn, &period, None)
             .await
             .unwrap_or_else(|_| period.empty_timeseries()),
     )
@@ -50,16 +52,16 @@ pub async fn get_usage_history_timeseries(
     )
 )]
 pub async fn get_usage_history_by_model(
-    axum::extract::Query(query): axum::extract::Query<UsageHistoryQuery>,
+    Query(query): Query<UsageHistoryQuery>,
 ) -> Json<ModelBreakdownResponse> {
     let period = HistoryPeriod::parse(query.period.as_deref());
 
-    let Ok(conn) = crate::db::get_conn().await else {
+    let Ok(conn) = db::get_conn().await else {
         return Json(period.empty_models());
     };
 
     Json(
-        crate::usage::history::by_model(&conn, &period, None)
+        by_model(&conn, &period, None)
             .await
             .unwrap_or_else(|_| period.empty_models()),
     )
@@ -74,16 +76,16 @@ pub async fn get_usage_history_by_model(
     )
 )]
 pub async fn get_usage_history_by_key(
-    axum::extract::Query(query): axum::extract::Query<UsageHistoryQuery>,
+    Query(query): Query<UsageHistoryQuery>,
 ) -> Json<KeyBreakdownResponse> {
     let period = HistoryPeriod::parse(query.period.as_deref());
 
-    let Ok(conn) = crate::db::get_conn().await else {
+    let Ok(conn) = db::get_conn().await else {
         return Json(period.empty_keys());
     };
 
     Json(
-        crate::usage::history::by_key(&conn, &period)
+        by_key(&conn, &period)
             .await
             .unwrap_or_else(|_| period.empty_keys()),
     )
@@ -99,7 +101,7 @@ pub async fn get_usage_history_by_key(
 )]
 pub async fn delete_usage_history()
 -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let conn = crate::db::get_conn().await.map_err(|e| {
+    let conn = db::get_conn().await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse {

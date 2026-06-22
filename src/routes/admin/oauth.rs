@@ -9,6 +9,7 @@ use utoipa::ToSchema;
 
 use super::{ErrorResponse, SuccessResponse};
 use crate::AppState;
+use crate::auth::storage::Auth;
 use crate::subscription::fetch_plan_name;
 use crate::usage::{SubscriptionUsageResponse, WEB_SESSION_PROVIDER};
 
@@ -212,8 +213,6 @@ pub async fn save_web_session(
     State(state): State<Arc<AppState>>,
     Json(body): Json<WebSessionRequest>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
-    use crate::auth::storage::Auth;
-
     state
         .auth_store
         .set(

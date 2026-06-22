@@ -11,10 +11,13 @@ use async_stream::stream;
 use bytes::Bytes;
 use futures_util::Stream;
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, from_str, json, to_string};
+use std::io::Error as IoError;
+use std::pin::pin;
+use std::str::from_utf8;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::time::interval;
+use tokio::{select, time::interval};
 use tracing::warn;
 
 use llm_relay::Usage;
@@ -103,7 +106,7 @@ pub fn stream_anthropic_to_openai_with_usage(
     model: String,
     state: Arc<AppState>,
     key_id: String,
-) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
+) -> impl Stream<Item = Result<Bytes, IoError>> + Send {
     stream! {
         use futures_util::StreamExt;
 
@@ -117,12 +120,12 @@ pub fn stream_anthropic_to_openai_with_usage(
         let mut tool_call_index: u32 = 0;
         let mut usage_report = Usage::default();
 
-        let mut body = std::pin::pin!(body);
+        let mut body = pin!(body);
         let mut keep_alive = interval(KEEP_ALIVE_INTERVAL);
         keep_alive.reset(); // Don't fire immediately
 
         loop {
-            tokio::select! {
+            select! {
                 biased; // Prefer data over keep-alive when both ready
 
                 // Data chunk received
@@ -134,12 +137,12 @@ pub fn stream_anthropic_to_openai_with_usage(
                     let chunk = match chunk_result {
                         Ok(c) => c,
                         Err(e) => {
-                            yield Err(std::io::Error::other(e));
+                            yield Err(IoError::other(e));
                             return;
                         }
                     };
 
-                    let text = match std::str::from_utf8(&chunk) {
+                    let text = match from_utf8(&chunk) {
                         Ok(t) => t,
                         Err(_) => continue,
                     };
@@ -160,7 +163,7 @@ pub fn stream_anthropic_to_openai_with_usage(
                             continue;
                         }
 
-                        let event: StreamEvent = match serde_json::from_str(data) {
+                        let event: StreamEvent = match from_str(data) {
                             Ok(e) => e,
                             Err(_) => continue,
                         };
@@ -188,7 +191,7 @@ pub fn stream_anthropic_to_openai_with_usage(
                                     current_tool_call_id = block.id.clone();
                                     let name = block.name.as_ref().map(|n| strip_mcp_prefix(n));
 
-                                    let chunk = serde_json::json!({
+                                    let chunk = json!({
                                         "id": format!("chatcmpl-{}", now),
                                         "object": "chat.completion.chunk",
                                         "created": now,
@@ -218,7 +221,7 @@ pub fn stream_anthropic_to_openai_with_usage(
                                 if let Some(delta) = &event.delta {
                                     // Handle thinking content
                                     if let Some(thinking) = &delta.thinking {
-                                        let chunk = serde_json::json!({
+                                        let chunk = json!({
                                             "id": format!("chatcmpl-{}", now),
                                             "object": "chat.completion.chunk",
                                             "created": now,
@@ -238,7 +241,7 @@ pub fn stream_anthropic_to_openai_with_usage(
 
                                     // Handle regular text content
                                     if let Some(text) = &delta.text {
-                                        let chunk = serde_json::json!({
+                                        let chunk = json!({
                                             "id": format!("chatcmpl-{}", now),
                                             "object": "chat.completion.chunk",
                                             "created": now,
@@ -258,7 +261,7 @@ pub fn stream_anthropic_to_openai_with_usage(
 
                                     // Handle tool call arguments
                                     if let Some(partial_json) = &delta.partial_json {
-                                        let chunk = serde_json::json!({
+                                        let chunk = json!({
                                             "id": format!("chatcmpl-{}", now),
                                             "object": "chat.completion.chunk",
                                             "created": now,
@@ -292,7 +295,7 @@ pub fn stream_anthropic_to_openai_with_usage(
                                 {
                                     let finish_reason = map_stop_reason(stop_reason);
 
-                                    let chunk = serde_json::json!({
+                                    let chunk = json!({
                                         "id": format!("chatcmpl-{}", now),
                                         "object": "chat.completion.chunk",
                                         "created": now,
@@ -337,7 +340,7 @@ pub fn stream_restore_native_tool_names_with_usage(
     key_id: String,
     model: String,
     tool_name_map: ToolNameMap,
-) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
+) -> impl Stream<Item = Result<Bytes, IoError>> + Send {
     stream_transform_native_tool_names_with_usage(body, state, key_id, model, tool_name_map)
 }
 
@@ -347,18 +350,18 @@ fn stream_transform_native_tool_names_with_usage(
     key_id: String,
     model: String,
     tool_name_map: ToolNameMap,
-) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
+) -> impl Stream<Item = Result<Bytes, IoError>> + Send {
     use futures_util::StreamExt;
 
     stream! {
-        let mut body = std::pin::pin!(body);
+        let mut body = pin!(body);
         let mut buffer = String::new();
         let mut keep_alive = interval(KEEP_ALIVE_INTERVAL);
         keep_alive.reset();
         let mut usage_report = Usage::default();
 
         loop {
-            tokio::select! {
+            select! {
                 biased;
 
                 chunk_opt = body.next() => {
@@ -369,12 +372,12 @@ fn stream_transform_native_tool_names_with_usage(
                     let chunk = match chunk_result {
                         Ok(c) => c,
                         Err(e) => {
-                            yield Err(std::io::Error::other(e));
+                            yield Err(IoError::other(e));
                             return;
                         }
                     };
 
-                    let text = match std::str::from_utf8(&chunk) {
+                    let text = match from_utf8(&chunk) {
                         Ok(t) => t,
                         Err(_) => {
                             yield Ok(chunk);
@@ -390,7 +393,7 @@ fn stream_transform_native_tool_names_with_usage(
 
                         if line.starts_with("data: ") {
                             let data = &line[6..line.len()].trim();
-                            if let Ok(event) = serde_json::from_str::<Value>(data) {
+                            if let Ok(event) = from_str::<Value>(data) {
                                 if event.get("type").and_then(|t| t.as_str()) == Some("message_start")
                                     && let Some(usage) = event
                                         .get("message")
@@ -409,7 +412,7 @@ fn stream_transform_native_tool_names_with_usage(
 
                         if line.starts_with("data: ") && line.contains("content_block_start") {
                             let data = &line[6..line.len()].trim();
-                            if let Ok(mut event) = serde_json::from_str::<Value>(data) {
+                            if let Ok(mut event) = from_str::<Value>(data) {
                                 if let Some(content_block) = event.get_mut("content_block")
                                     && content_block.get("type").and_then(|t| t.as_str()) == Some("tool_use")
                                     && let Some(name) = content_block.get("name").and_then(|n| n.as_str()).map(|s| s.to_string())
@@ -420,7 +423,7 @@ fn stream_transform_native_tool_names_with_usage(
                                     obj.insert("name".to_string(), Value::String(client_name));
                                 }
                                 output.push_str("data: ");
-                                output.push_str(&serde_json::to_string(&event).unwrap_or_else(|_| data.to_string()));
+                                output.push_str(&to_string(&event).unwrap_or_else(|_| data.to_string()));
                                 output.push('\n');
                             } else {
                                 output.push_str(line);
@@ -460,6 +463,7 @@ mod tests {
     use crate::auth::usage::add_usage;
     use llm_relay::Usage;
     use llm_relay::convert::tool_names::strip_mcp_prefix;
+    use serde_json::from_str;
 
     #[test]
     fn test_map_stop_reason() {
@@ -472,7 +476,7 @@ mod tests {
     #[test]
     fn test_parse_message_start_event() {
         let data = r#"{"type":"message_start","message":{"model":"claude-sonnet-4-5-20250514","usage":{"input_tokens":100,"output_tokens":0,"cache_read_input_tokens":50}}}"#;
-        let event: StreamEvent = serde_json::from_str(data).unwrap();
+        let event: StreamEvent = from_str(data).unwrap();
         assert_eq!(event.event_type, "message_start");
         let msg = event.message.unwrap();
         let usage = msg.usage.unwrap();
@@ -485,7 +489,7 @@ mod tests {
     fn test_parse_content_block_start_text() {
         let data =
             r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#;
-        let event: StreamEvent = serde_json::from_str(data).unwrap();
+        let event: StreamEvent = from_str(data).unwrap();
         assert_eq!(event.event_type, "content_block_start");
         let block = event.content_block.unwrap();
         assert_eq!(block.block_type, "text");
@@ -495,7 +499,7 @@ mod tests {
     #[test]
     fn test_parse_content_block_start_tool_use() {
         let data = r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_123","name":"mcp_read_file"}}"#;
-        let event: StreamEvent = serde_json::from_str(data).unwrap();
+        let event: StreamEvent = from_str(data).unwrap();
         let block = event.content_block.unwrap();
         assert_eq!(block.block_type, "tool_use");
         assert_eq!(block.id.as_deref(), Some("toolu_123"));
@@ -505,7 +509,7 @@ mod tests {
     #[test]
     fn test_parse_content_block_delta_text() {
         let data = r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}"#;
-        let event: StreamEvent = serde_json::from_str(data).unwrap();
+        let event: StreamEvent = from_str(data).unwrap();
         let delta = event.delta.unwrap();
         assert_eq!(delta.text.as_deref(), Some("Hello"));
         assert!(delta.thinking.is_none());
@@ -515,7 +519,7 @@ mod tests {
     #[test]
     fn test_parse_content_block_delta_thinking() {
         let data = r#"{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me think..."}}"#;
-        let event: StreamEvent = serde_json::from_str(data).unwrap();
+        let event: StreamEvent = from_str(data).unwrap();
         let delta = event.delta.unwrap();
         assert_eq!(delta.thinking.as_deref(), Some("Let me think..."));
         assert!(delta.text.is_none());
@@ -524,7 +528,7 @@ mod tests {
     #[test]
     fn test_parse_content_block_delta_partial_json() {
         let data = r#"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"src/"}}"#;
-        let event: StreamEvent = serde_json::from_str(data).unwrap();
+        let event: StreamEvent = from_str(data).unwrap();
         let delta = event.delta.unwrap();
         assert_eq!(delta.partial_json.as_deref(), Some("{\"path\":\"src/"));
     }
@@ -532,7 +536,7 @@ mod tests {
     #[test]
     fn test_parse_message_delta_with_stop_reason() {
         let data = r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":0,"output_tokens":42}}"#;
-        let event: StreamEvent = serde_json::from_str(data).unwrap();
+        let event: StreamEvent = from_str(data).unwrap();
         assert_eq!(event.event_type, "message_delta");
         let delta = event.delta.unwrap();
         assert_eq!(delta.stop_reason.as_deref(), Some("end_turn"));
@@ -543,7 +547,7 @@ mod tests {
     #[test]
     fn test_parse_message_stop() {
         let data = r#"{"type":"message_stop"}"#;
-        let event: StreamEvent = serde_json::from_str(data).unwrap();
+        let event: StreamEvent = from_str(data).unwrap();
         assert_eq!(event.event_type, "message_stop");
     }
 
@@ -553,7 +557,7 @@ mod tests {
 
         // message_start with input tokens
         let start_data = r#"{"type":"message_start","message":{"model":"claude-sonnet-4-5-20250514","usage":{"input_tokens":150,"output_tokens":0,"cache_read_input_tokens":80,"cache_creation_input_tokens":20}}}"#;
-        let start_event: StreamEvent = serde_json::from_str(start_data).unwrap();
+        let start_event: StreamEvent = from_str(start_data).unwrap();
         if let Some(msg) = &start_event.message
             && let Some(usage) = &msg.usage
         {
@@ -562,7 +566,7 @@ mod tests {
 
         // message_delta with output tokens
         let delta_data = r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":0,"output_tokens":75}}"#;
-        let delta_event: StreamEvent = serde_json::from_str(delta_data).unwrap();
+        let delta_event: StreamEvent = from_str(delta_data).unwrap();
         if let Some(usage) = &delta_event.usage {
             add_usage(&mut usage_report, usage);
         }
@@ -576,7 +580,7 @@ mod tests {
     #[test]
     fn test_mcp_prefix_stripping_in_tool_name() {
         let data = r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_abc","name":"mcp_read_file"}}"#;
-        let event: StreamEvent = serde_json::from_str(data).unwrap();
+        let event: StreamEvent = from_str(data).unwrap();
         let block = event.content_block.unwrap();
         let stripped = block.name.as_ref().map(|n| strip_mcp_prefix(n));
         assert_eq!(stripped.as_deref(), Some("read_file"));
@@ -585,7 +589,7 @@ mod tests {
     #[test]
     fn test_mcp_prefix_not_stripped_when_absent() {
         let data = r#"{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_abc","name":"my_tool"}}"#;
-        let event: StreamEvent = serde_json::from_str(data).unwrap();
+        let event: StreamEvent = from_str(data).unwrap();
         let block = event.content_block.unwrap();
         let stripped = block.name.as_ref().map(|n| strip_mcp_prefix(n));
         assert_eq!(stripped.as_deref(), Some("my_tool"));
@@ -596,7 +600,7 @@ mod tests {
         let line = "data: {\"type\":\"message_stop\"}";
         assert!(line.starts_with("data: "));
         let data = &line[6..];
-        let event: StreamEvent = serde_json::from_str(data).unwrap();
+        let event: StreamEvent = from_str(data).unwrap();
         assert_eq!(event.event_type, "message_stop");
     }
 

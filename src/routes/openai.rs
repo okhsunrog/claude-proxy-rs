@@ -5,7 +5,7 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use serde_json::{Value, json};
+use serde_json::{Value, from_str, from_value, json};
 use std::sync::Arc;
 use tracing::warn;
 
@@ -53,7 +53,7 @@ pub async fn chat_completions(
     headers: HeaderMap,
     Json(raw_body): Json<Value>,
 ) -> Response {
-    let body: InboundChatRequest = match serde_json::from_value(raw_body.clone()) {
+    let body: InboundChatRequest = match from_value(raw_body.clone()) {
         Ok(body) => body,
         Err(e) => {
             return (
@@ -181,7 +181,7 @@ pub async fn chat_completions(
             capture.write_upstream_body(&text).await;
         }
 
-        let anthropic_response = match serde_json::from_str::<MessagesResponse>(&text) {
+        let anthropic_response = match from_str::<MessagesResponse>(&text) {
             Ok(r) => r,
             Err(e) => {
                 return ProxyError::ParseError(format!("Failed to parse response: {}", e))

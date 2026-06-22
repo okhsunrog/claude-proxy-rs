@@ -17,7 +17,10 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use crate::AppState;
 use crate::auth::ModelUsageEntry;
 use crate::auth::client_keys::{TokenLimits, TokenUsage};
-use crate::usage::history::{HistoryPeriod, ModelBreakdownResponse, TimeseriesResponse};
+use crate::db;
+use crate::usage::history::{
+    HistoryPeriod, ModelBreakdownResponse, TimeseriesResponse, by_model, timeseries,
+};
 
 // ── auth helper ────────────────────────────────────────────────────────────────
 
@@ -170,7 +173,7 @@ pub async fn get_my_timeseries(
 
     let period = HistoryPeriod::parse(query.period.as_deref());
 
-    let conn = crate::db::get_conn().await.map_err(|e| {
+    let conn = db::get_conn().await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorBody {
@@ -180,7 +183,7 @@ pub async fn get_my_timeseries(
     })?;
 
     Ok(Json(
-        crate::usage::history::timeseries(&conn, &period, Some(key_id.as_str()))
+        timeseries(&conn, &period, Some(key_id.as_str()))
             .await
             .unwrap_or_else(|_| period.empty_timeseries()),
     ))
@@ -208,7 +211,7 @@ pub async fn get_my_by_model(
 
     let period = HistoryPeriod::parse(query.period.as_deref());
 
-    let conn = crate::db::get_conn().await.map_err(|e| {
+    let conn = db::get_conn().await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorBody {
@@ -218,7 +221,7 @@ pub async fn get_my_by_model(
     })?;
 
     Ok(Json(
-        crate::usage::history::by_model(&conn, &period, Some(key_id.as_str()))
+        by_model(&conn, &period, Some(key_id.as_str()))
             .await
             .unwrap_or_else(|_| period.empty_models()),
     ))

@@ -5,6 +5,10 @@
 //! [`super::web_session::fetch`] for why we prefer the web-session path
 //! when available.
 
+use std::time::Duration;
+
+use serde_json::from_str;
+
 use super::super::error::FetchError;
 use super::super::types::SubscriptionUsageResponse;
 use crate::AppState;
@@ -29,7 +33,7 @@ pub async fn fetch(state: &AppState) -> Result<SubscriptionUsageResponse, FetchE
         .header("content-type", "application/json")
         .header("user-agent", USER_AGENT)
         .header("accept", "application/json")
-        .timeout(std::time::Duration::from_secs(5))
+        .timeout(Duration::from_secs(5))
         .send()
         .await
         .map_err(|e| FetchError::Network(e.to_string()))?;
@@ -49,6 +53,5 @@ pub async fn fetch(state: &AppState) -> Result<SubscriptionUsageResponse, FetchE
         .await
         .map_err(|e| FetchError::Network(format!("read body: {e}")))?;
 
-    serde_json::from_str::<SubscriptionUsageResponse>(&body)
-        .map_err(|e| FetchError::Parse(e.to_string()))
+    from_str::<SubscriptionUsageResponse>(&body).map_err(|e| FetchError::Parse(e.to_string()))
 }

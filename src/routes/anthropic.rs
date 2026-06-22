@@ -5,7 +5,7 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use serde_json::Value;
+use serde_json::{Value, from_str};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
@@ -199,7 +199,7 @@ pub async fn messages(
             capture.write_upstream_body(&text).await;
         }
 
-        let mut json_response = match serde_json::from_str::<Value>(&text) {
+        let mut json_response = match from_str::<Value>(&text) {
             Ok(r) => r,
             Err(e) => {
                 return ProxyError::ParseError(format!("Failed to parse response: {}", e))
@@ -321,7 +321,7 @@ pub async fn count_tokens(
         capture.write_upstream_body(&text).await;
     }
 
-    let json_response: Value = match serde_json::from_str(&text) {
+    let json_response: Value = match from_str(&text) {
         Ok(r) => r,
         Err(e) => {
             return ProxyError::ParseError(format!("Failed to parse response: {}", e))

@@ -40,6 +40,7 @@ pub fn usage_from_json(value: &Value) -> Usage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_add_usage() {
@@ -64,7 +65,7 @@ mod tests {
 
     #[test]
     fn test_usage_from_json() {
-        let json = serde_json::json!({
+        let json = json!({
             "input_tokens": 100,
             "output_tokens": 50,
             "cache_creation_input_tokens": 20,

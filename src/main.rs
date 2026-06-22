@@ -16,9 +16,11 @@ use auth::{AuthStore, ClientKeysStore, ModelsStore, OAuthManager};
 use axum::ServiceExt;
 use axum::{
     Router,
-    http::{HeaderValue, Method, header},
+    extract::{DefaultBodyLimit, Request},
+    http::{HeaderName, HeaderValue, Method, header},
     middleware,
     routing::{get, post},
+    serve,
 };
 use capture::CaptureConfig;
 use clap::Parser;
@@ -27,17 +29,22 @@ use reqwest::Client;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::net::TcpListener;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::normalize_path::NormalizePath;
 use tracing::{info, warn};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use url::Url;
+use usage::UsageCache;
+use utoipa::openapi::{InfoBuilder, OpenApi, OpenApiBuilder};
 use utoipa_axum::{router::OpenApiRouter, routes};
+use uuid::Uuid;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const GIT_HASH: &str = env!("GIT_HASH");
 pub const BUILD_TIME: &str = env!("BUILD_TIME");
 
-use usage::UsageCache;
+use crate::routes::{admin, anthropic, health, openai, user_usage};
 
 pub struct AppState {
     pub auth_store: Arc<AuthStore>,
@@ -95,14 +102,14 @@ struct Args {
 }
 
 fn full_openapi_router() -> OpenApiRouter<Arc<AppState>> {
-    admin_openapi_router().merge(routes::user_usage::user_usage_router())
+    admin_openapi_router().merge(user_usage::user_usage_router())
 }
 
 fn admin_openapi_router() -> OpenApiRouter<Arc<AppState>> {
     OpenApiRouter::with_openapi(
-        utoipa::openapi::OpenApiBuilder::new()
+        OpenApiBuilder::new()
             .info(
-                utoipa::openapi::InfoBuilder::new()
+                InfoBuilder::new()
                     .title("Claude Proxy Admin API")
                     .description(Some("Admin API for Claude Proxy"))
                     .version(VERSION)
@@ -111,53 +118,47 @@ fn admin_openapi_router() -> OpenApiRouter<Arc<AppState>> {
             .build(),
     )
     // OAuth
-    .routes(routes!(routes::admin::get_oauth_status))
-    .routes(routes!(routes::admin::start_oauth_flow))
-    .routes(routes!(routes::admin::exchange_oauth_code))
-    .routes(routes!(routes::admin::delete_oauth))
-    .routes(routes!(routes::admin::get_subscription_usage))
+    .routes(routes!(admin::get_oauth_status))
+    .routes(routes!(admin::start_oauth_flow))
+    .routes(routes!(admin::exchange_oauth_code))
+    .routes(routes!(admin::delete_oauth))
+    .routes(routes!(admin::get_subscription_usage))
     .routes(routes!(
-        routes::admin::get_web_session_status,
-        routes::admin::save_web_session,
-        routes::admin::delete_web_session
+        admin::get_web_session_status,
+        admin::save_web_session,
+        admin::delete_web_session
     ))
     // Keys
-    .routes(routes!(routes::admin::create_key))
-    .routes(routes!(routes::admin::list_keys))
-    .routes(routes!(routes::admin::delete_key))
-    .routes(routes!(routes::admin::set_key_enabled))
-    .routes(routes!(routes::admin::set_allow_extra_usage))
-    .routes(routes!(routes::admin::get_key_usage))
-    .routes(routes!(routes::admin::update_key_limits))
-    .routes(routes!(routes::admin::reset_key_usage))
+    .routes(routes!(admin::create_key))
+    .routes(routes!(admin::list_keys))
+    .routes(routes!(admin::delete_key))
+    .routes(routes!(admin::set_key_enabled))
+    .routes(routes!(admin::set_allow_extra_usage))
+    .routes(routes!(admin::get_key_usage))
+    .routes(routes!(admin::update_key_limits))
+    .routes(routes!(admin::reset_key_usage))
     // Models
-    .routes(routes!(routes::admin::list_models_admin))
-    .routes(routes!(routes::admin::add_model))
-    .routes(routes!(
-        routes::admin::delete_model,
-        routes::admin::update_model
-    ))
-    .routes(routes!(routes::admin::reorder_models))
+    .routes(routes!(admin::list_models_admin))
+    .routes(routes!(admin::add_model))
+    .routes(routes!(admin::delete_model, admin::update_model))
+    .routes(routes!(admin::reorder_models))
     // Per-key model access
-    .routes(routes!(
-        routes::admin::get_key_models,
-        routes::admin::set_key_models
-    ))
+    .routes(routes!(admin::get_key_models, admin::set_key_models))
     // Per-key per-model usage
-    .routes(routes!(routes::admin::get_key_model_usage))
+    .routes(routes!(admin::get_key_model_usage))
     .routes(routes!(
-        routes::admin::set_key_model_limits,
-        routes::admin::remove_key_model_limits
+        admin::set_key_model_limits,
+        admin::remove_key_model_limits
     ))
-    .routes(routes!(routes::admin::reset_key_model_usage))
+    .routes(routes!(admin::reset_key_model_usage))
     // Usage history (charts)
-    .routes(routes!(routes::admin::get_usage_history_timeseries))
-    .routes(routes!(routes::admin::get_usage_history_by_model))
-    .routes(routes!(routes::admin::get_usage_history_by_key))
-    .routes(routes!(routes::admin::delete_usage_history))
+    .routes(routes!(admin::get_usage_history_timeseries))
+    .routes(routes!(admin::get_usage_history_by_model))
+    .routes(routes!(admin::get_usage_history_by_key))
+    .routes(routes!(admin::delete_usage_history))
 }
 
-fn build_openapi() -> utoipa::openapi::OpenApi {
+fn build_openapi() -> OpenApi {
     let (_, openapi) = full_openapi_router().split_for_parts();
     openapi
 }
@@ -179,11 +180,8 @@ async fn main() -> Result<()> {
     }
 
     tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .with(tracing_subscriber::fmt::layer())
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with(fmt::layer())
         .init();
     let config = Config::from_env();
 
@@ -239,7 +237,7 @@ async fn main() -> Result<()> {
         disable_auth,
         cloak_mode,
         usage_cache: UsageCache::new(),
-        session_id: uuid::Uuid::new_v4().to_string(),
+        session_id: Uuid::new_v4().to_string(),
         capture,
     });
 
@@ -254,7 +252,7 @@ async fn main() -> Result<()> {
             match &cors_origins {
                 CorsMode::AllowAll => true,
                 CorsMode::LocalhostOnly => {
-                    let Ok(url) = url::Url::parse(origin_str) else {
+                    let Ok(url) = Url::parse(origin_str) else {
                         return false;
                     };
                     matches!(
@@ -275,8 +273,8 @@ async fn main() -> Result<()> {
         .allow_headers([
             header::CONTENT_TYPE,
             header::AUTHORIZATION,
-            header::HeaderName::from_static("x-api-key"),
-            header::HeaderName::from_static("anthropic-version"),
+            HeaderName::from_static("x-api-key"),
+            HeaderName::from_static("anthropic-version"),
         ])
         .allow_credentials(true);
 
@@ -290,13 +288,13 @@ async fn main() -> Result<()> {
     let (api_router, _) = admin_openapi_router().split_for_parts();
 
     // User-facing usage routes (unprotected — Bearer key auth handled in handlers)
-    let (user_router, _) = routes::user_usage::user_usage_router().split_for_parts();
+    let (user_router, _) = user_usage::user_usage_router().split_for_parts();
 
     // Auth endpoints (accessible without authentication)
     let auth_routes = Router::new()
-        .route("/auth/login", post(routes::admin::login))
-        .route("/auth/logout", post(routes::admin::logout))
-        .route("/auth/check", get(routes::admin::auth_check))
+        .route("/auth/login", post(admin::login))
+        .route("/auth/logout", post(admin::logout))
+        .route("/auth/check", get(admin::auth_check))
         .with_state(state.clone());
 
     // Protected admin routes (session cookie or Basic Auth)
@@ -310,26 +308,23 @@ async fn main() -> Result<()> {
         .merge(auth_routes)
         .merge(user_router)
         .merge(protected_routes)
-        .merge(routes::admin::static_routes());
+        .merge(admin::static_routes());
 
     // API routes
     let api_routes = Router::new()
-        .route("/chat/completions", post(routes::openai::chat_completions))
-        .route("/models", get(routes::openai::list_models))
-        .route("/messages", post(routes::anthropic::messages))
-        .route(
-            "/messages/count_tokens",
-            post(routes::anthropic::count_tokens),
-        );
+        .route("/chat/completions", post(openai::chat_completions))
+        .route("/models", get(openai::list_models))
+        .route("/messages", post(anthropic::messages))
+        .route("/messages/count_tokens", post(anthropic::count_tokens));
 
     let app = NormalizePath::trim_trailing_slash(
         Router::new()
-            .route("/health", get(routes::health::health))
-            .route("/version", get(routes::health::version))
+            .route("/health", get(health::health))
+            .route("/version", get(health::version))
             .nest("/admin", admin_routes)
             .nest("/v1", api_routes)
             .layer(cors)
-            .layer(axum::extract::DefaultBodyLimit::max(100 * 1024 * 1024)) // 100 MB
+            .layer(DefaultBodyLimit::max(100 * 1024 * 1024)) // 100 MB
             .with_state(state),
     );
 
@@ -344,15 +339,12 @@ async fn main() -> Result<()> {
     info!("Listening on http://{}", addr);
     info!("Admin UI: http://{}/admin", addr);
 
-    let listener = tokio::net::TcpListener::bind(addr)
+    let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("Failed to bind {addr}"))?;
-    axum::serve(
-        listener,
-        ServiceExt::<axum::extract::Request>::into_make_service(app),
-    )
-    .await
-    .context("HTTP server failed")?;
+    serve(listener, ServiceExt::<Request>::into_make_service(app))
+        .await
+        .context("HTTP server failed")?;
 
     Ok(())
 }
