@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        CREATE TABLE IF NOT EXISTS auth (\n            provider TEXT PRIMARY KEY,\n            auth_type TEXT NOT NULL,\n            access_token TEXT NOT NULL,\n            refresh_token TEXT NOT NULL,\n            expires_at BIGINT NOT NULL,\n            account_id TEXT,\n            enterprise_url TEXT\n        )\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "340375e08174691d24c21cfcc3fb2cee2053ae530c0d795a6bf2ca1e17e6fe83"
+}

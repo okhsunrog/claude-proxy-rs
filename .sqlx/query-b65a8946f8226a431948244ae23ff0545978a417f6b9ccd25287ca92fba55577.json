@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE models SET input_price = COALESCE($1, input_price), output_price = COALESCE($2, output_price), cache_read_price = COALESCE($3, cache_read_price), cache_write_price = COALESCE($4, cache_write_price), enabled = COALESCE($5, enabled) WHERE id = $6",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Float8",
+        "Float8",
+        "Float8",
+        "Float8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b65a8946f8226a431948244ae23ff0545978a417f6b9ccd25287ca92fba55577"
+}

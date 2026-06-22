@@ -1,0 +1,158 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, key, name, enabled, created_at, last_used_at, five_hour_limit, weekly_limit, total_limit, five_hour_reset_at, weekly_reset_at, allow_extra_usage FROM client_keys",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "key"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "enabled",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "last_used_at",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "last_used_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "five_hour_limit",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "five_hour_limit"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "weekly_limit",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "weekly_limit"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "total_limit",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "total_limit"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "five_hour_reset_at",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "five_hour_reset_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "weekly_reset_at",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "weekly_reset_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "allow_extra_usage",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "allow_extra_usage"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b9de1eaa8c51a3f47b9f0204943d090fb123088d877b873e4d0a5e734a3f28b7"
+}

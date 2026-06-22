@@ -1,5 +1,5 @@
-use sqlx::postgres::{PgPoolOptions, PgRow};
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
+use sqlx::postgres::PgPoolOptions;
 use tokio::sync::OnceCell;
 use tracing::info;
 
@@ -10,7 +10,6 @@ use crate::error::ProxyError;
 static DATABASE: OnceCell<PgPool> = OnceCell::const_new();
 
 pub type Connection = PgPool;
-pub type DbRow = PgRow;
 
 /// Initialize the PostgreSQL database and ensure the current schema exists.
 pub async fn init_db(database_url: &str) -> Result<(), ProxyError> {
@@ -40,7 +39,7 @@ pub async fn get_conn() -> Result<Connection, ProxyError> {
 }
 
 async fn create_current_schema(conn: &Connection) -> Result<(), ProxyError> {
-    sqlx::query(
+    sqlx::query!(
         r#"
         CREATE TABLE IF NOT EXISTS auth (
             provider TEXT PRIMARY KEY,
@@ -57,7 +56,7 @@ async fn create_current_schema(conn: &Connection) -> Result<(), ProxyError> {
     .await
     .map_err(|e| ProxyError::DatabaseError(format!("Failed to create auth table: {e}")))?;
 
-    sqlx::query(
+    sqlx::query!(
         r#"
         CREATE TABLE IF NOT EXISTS client_keys (
             id TEXT PRIMARY KEY,
@@ -82,7 +81,7 @@ async fn create_current_schema(conn: &Connection) -> Result<(), ProxyError> {
     .await
     .map_err(|e| ProxyError::DatabaseError(format!("Failed to create client_keys table: {e}")))?;
 
-    sqlx::query(
+    sqlx::query!(
         r#"
         CREATE TABLE IF NOT EXISTS models (
             id TEXT PRIMARY KEY,
@@ -99,7 +98,7 @@ async fn create_current_schema(conn: &Connection) -> Result<(), ProxyError> {
     .await
     .map_err(|e| ProxyError::DatabaseError(format!("Failed to create models table: {e}")))?;
 
-    sqlx::query(
+    sqlx::query!(
         r#"
         CREATE TABLE IF NOT EXISTS key_allowed_models (
             key_id TEXT NOT NULL REFERENCES client_keys(id) ON DELETE CASCADE,
@@ -114,7 +113,7 @@ async fn create_current_schema(conn: &Connection) -> Result<(), ProxyError> {
         ProxyError::DatabaseError(format!("Failed to create key_allowed_models table: {e}"))
     })?;
 
-    sqlx::query(
+    sqlx::query!(
         r#"
         CREATE TABLE IF NOT EXISTS admin_sessions (
             token TEXT PRIMARY KEY,
@@ -128,7 +127,7 @@ async fn create_current_schema(conn: &Connection) -> Result<(), ProxyError> {
         ProxyError::DatabaseError(format!("Failed to create admin_sessions table: {e}"))
     })?;
 
-    sqlx::query(
+    sqlx::query!(
         r#"
         CREATE TABLE IF NOT EXISTS request_log (
             id BIGSERIAL PRIMARY KEY,
@@ -147,21 +146,21 @@ async fn create_current_schema(conn: &Connection) -> Result<(), ProxyError> {
     .await
     .map_err(|e| ProxyError::DatabaseError(format!("Failed to create request_log table: {e}")))?;
 
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_request_log_created_at ON request_log(created_at)")
-        .execute(conn)
-        .await
-        .map_err(|e| {
-            ProxyError::DatabaseError(format!("Failed to create created_at index: {e}"))
-        })?;
+    sqlx::query!(
+        "CREATE INDEX IF NOT EXISTS idx_request_log_created_at ON request_log(created_at)"
+    )
+    .execute(conn)
+    .await
+    .map_err(|e| ProxyError::DatabaseError(format!("Failed to create created_at index: {e}")))?;
 
-    sqlx::query(
+    sqlx::query!(
         "CREATE INDEX IF NOT EXISTS idx_request_log_key_created ON request_log(key_id, created_at)",
     )
     .execute(conn)
     .await
     .map_err(|e| ProxyError::DatabaseError(format!("Failed to create key_created index: {e}")))?;
 
-    sqlx::query(
+    sqlx::query!(
         r#"
         CREATE TABLE IF NOT EXISTS key_model_limits (
             key_id TEXT NOT NULL REFERENCES client_keys(id) ON DELETE CASCADE,
@@ -184,13 +183,12 @@ async fn create_current_schema(conn: &Connection) -> Result<(), ProxyError> {
 }
 
 async fn seed_models_if_empty(conn: &Connection) -> Result<(), ProxyError> {
-    let row = sqlx::query("SELECT COUNT(*) FROM models")
+    let model_count = sqlx::query_scalar!("SELECT COUNT(*) FROM models")
         .fetch_one(conn)
         .await
         .map_err(|e| ProxyError::DatabaseError(format!("Failed to count models: {e}")))?;
-    let model_count = row.try_get::<i64, _>(0).unwrap_or(0);
 
-    if model_count == 0 {
+    if model_count.unwrap_or(0) == 0 {
         info!(
             "Seeding models table with {} default models",
             SEED_MODELS.len()
@@ -198,15 +196,15 @@ async fn seed_models_if_empty(conn: &Connection) -> Result<(), ProxyError> {
         for (i, &(id, input_price, output_price, cache_read_price, cache_write_price)) in
             SEED_MODELS.iter().enumerate()
         {
-            sqlx::query(
+            sqlx::query!(
                 "INSERT INTO models (id, sort_order, enabled, input_price, output_price, cache_read_price, cache_write_price) VALUES ($1, $2, 1, $3, $4, $5, $6)",
+                id,
+                i as i64,
+                input_price,
+                output_price,
+                cache_read_price,
+                cache_write_price,
             )
-            .bind(id)
-            .bind(i as i64)
-            .bind(input_price)
-            .bind(output_price)
-            .bind(cache_read_price)
-            .bind(cache_write_price)
             .execute(conn)
             .await
             .map_err(|e| ProxyError::DatabaseError(format!("Failed to seed model {id}: {e}")))?;

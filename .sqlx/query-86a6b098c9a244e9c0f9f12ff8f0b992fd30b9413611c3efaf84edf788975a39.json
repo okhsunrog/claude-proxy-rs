@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE auth SET access_token = $1 WHERE provider = $2 AND auth_type = 'web_session'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "86a6b098c9a244e9c0f9f12ff8f0b992fd30b9413611c3efaf84edf788975a39"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        CREATE TABLE IF NOT EXISTS key_allowed_models (\n            key_id TEXT NOT NULL REFERENCES client_keys(id) ON DELETE CASCADE,\n            model TEXT NOT NULL,\n            PRIMARY KEY (key_id, model)\n        )\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "1fc3e794fdfa88bc704bf91067657292873d88ec2279c3d9d3b7ed21911837ab"
+}

@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT model, five_hour_limit, weekly_limit, total_limit, count_from FROM key_model_limits WHERE key_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "key_model_limits",
+            "name": "model"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "five_hour_limit",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "key_model_limits",
+            "name": "five_hour_limit"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "weekly_limit",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "key_model_limits",
+            "name": "weekly_limit"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "total_limit",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "key_model_limits",
+            "name": "total_limit"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "count_from",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "key_model_limits",
+            "name": "count_from"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "23ab5abf61bcd6514dc0918700e46fc526df5cca4a3b196f62a2d9f51d04f04c"
+}

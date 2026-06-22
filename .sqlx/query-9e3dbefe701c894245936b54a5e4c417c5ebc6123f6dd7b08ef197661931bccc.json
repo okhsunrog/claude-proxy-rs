@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT five_hour_count_from, weekly_count_from, total_count_from FROM client_keys WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "five_hour_count_from",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "five_hour_count_from"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "weekly_count_from",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "weekly_count_from"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "total_count_from",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "total_count_from"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9e3dbefe701c894245936b54a5e4c417c5ebc6123f6dd7b08ef197661931bccc"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE client_keys SET allow_extra_usage = $1 WHERE id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1d4b9958ade78b43df32dc4cbd4d7664620c7dff01882f7cbefa520b5cfd0b07"
+}

@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO request_log (key_id, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_microdollars, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "32300a4a2017d9d125ace26f599ce9559b0792ae5d823d11f4ac2a0ac84574b3"
+}

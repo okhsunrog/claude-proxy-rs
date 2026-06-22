@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE client_keys SET five_hour_count_from = $1, five_hour_reset_at = 0 WHERE id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e47ecd3f3ebbb1aaca6a5acdf911a2ee26386253fc85c518f049b0766c7a7a5a"
+}

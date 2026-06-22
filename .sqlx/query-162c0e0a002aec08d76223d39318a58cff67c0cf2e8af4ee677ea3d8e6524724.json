@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT five_hour_reset_at, weekly_reset_at FROM client_keys WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "five_hour_reset_at",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "five_hour_reset_at"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "weekly_reset_at",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "weekly_reset_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "162c0e0a002aec08d76223d39318a58cff67c0cf2e8af4ee677ea3d8e6524724"
+}

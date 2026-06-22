@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT input_price, output_price, cache_read_price, cache_write_price FROM models WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "input_price",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "input_price"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "output_price",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "output_price"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "cache_read_price",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "cache_read_price"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "cache_write_price",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "cache_write_price"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "15065568abf70cc0c346cb3b47f93b70deffb7cedab374d5cd849994bac35745"
+}

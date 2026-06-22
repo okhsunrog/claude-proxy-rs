@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE auth SET access_token = $1, refresh_token = $2, expires_at = $3 WHERE provider = $4 AND auth_type = 'oauth'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8e19b47ff052bfc676d210cf2ce95bd19bfa91489efa1bf7fee7c9160fc4a6dc"
+}

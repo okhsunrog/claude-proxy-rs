@@ -2,6 +2,7 @@ set dotenv-load
 
 # Use clang 18 for building (clang 22 breaks aegis crate's AVX-512 code)
 export PATH := "/usr/lib/llvm18/bin:" + env("PATH")
+export SQLX_OFFLINE := "true"
 
 server := "root@" + env_var("HOME_SRV_IP")
 deploy_dir := "/opt/claude-proxy"
@@ -37,6 +38,16 @@ fmt:
 lint:
     cargo clippy -- -D warnings
     cd admin-ui && vp lint
+
+# Regenerate sqlx compile-time query metadata after changing SQL.
+sqlx-prepare:
+    SQLX_OFFLINE=false cargo sqlx migrate run
+    SQLX_OFFLINE=false cargo sqlx prepare -- --all-targets
+
+# Check committed sqlx metadata against DATABASE_URL.
+sqlx-check:
+    SQLX_OFFLINE=false cargo sqlx migrate run
+    SQLX_OFFLINE=false cargo sqlx prepare --check -- --all-targets
 
 # Regenerate OpenAPI TypeScript client (no running backend needed)
 openapi:

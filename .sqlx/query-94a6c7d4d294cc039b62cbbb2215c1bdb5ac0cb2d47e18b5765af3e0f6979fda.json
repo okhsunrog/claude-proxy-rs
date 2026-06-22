@@ -1,0 +1,116 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT model, COALESCE(SUM(CASE WHEN created_at >= $1 THEN input_tokens ELSE 0 END), 0)::BIGINT AS \"five_hour_input!\", COALESCE(SUM(CASE WHEN created_at >= $1 THEN output_tokens ELSE 0 END), 0)::BIGINT AS \"five_hour_output!\", COALESCE(SUM(CASE WHEN created_at >= $1 THEN cache_read_tokens ELSE 0 END), 0)::BIGINT AS \"five_hour_cache_read!\", COALESCE(SUM(CASE WHEN created_at >= $1 THEN cache_write_tokens ELSE 0 END), 0)::BIGINT AS \"five_hour_cache_write!\", COALESCE(SUM(CASE WHEN created_at >= $2 THEN input_tokens ELSE 0 END), 0)::BIGINT AS \"weekly_input!\", COALESCE(SUM(CASE WHEN created_at >= $2 THEN output_tokens ELSE 0 END), 0)::BIGINT AS \"weekly_output!\", COALESCE(SUM(CASE WHEN created_at >= $2 THEN cache_read_tokens ELSE 0 END), 0)::BIGINT AS \"weekly_cache_read!\", COALESCE(SUM(CASE WHEN created_at >= $2 THEN cache_write_tokens ELSE 0 END), 0)::BIGINT AS \"weekly_cache_write!\", COALESCE(SUM(CASE WHEN created_at >= $3 THEN input_tokens ELSE 0 END), 0)::BIGINT AS \"total_input!\", COALESCE(SUM(CASE WHEN created_at >= $3 THEN output_tokens ELSE 0 END), 0)::BIGINT AS \"total_output!\", COALESCE(SUM(CASE WHEN created_at >= $3 THEN cache_read_tokens ELSE 0 END), 0)::BIGINT AS \"total_cache_read!\", COALESCE(SUM(CASE WHEN created_at >= $3 THEN cache_write_tokens ELSE 0 END), 0)::BIGINT AS \"total_cache_write!\" FROM request_log WHERE key_id = $4 AND created_at >= $5 GROUP BY model",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_log",
+            "name": "model"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "five_hour_input!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "five_hour_output!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "five_hour_cache_read!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "five_hour_cache_write!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "weekly_input!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "weekly_output!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "weekly_cache_read!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "weekly_cache_write!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
+        "name": "total_input!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "total_output!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 11,
+        "name": "total_cache_read!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 12,
+        "name": "total_cache_write!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "94a6c7d4d294cc039b62cbbb2215c1bdb5ac0cb2d47e18b5765af3e0f6979fda"
+}

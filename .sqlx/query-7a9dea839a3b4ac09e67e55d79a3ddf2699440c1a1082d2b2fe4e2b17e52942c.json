@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO key_model_limits (key_id, model, five_hour_limit, weekly_limit, total_limit) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (key_id, model) DO UPDATE SET five_hour_limit = EXCLUDED.five_hour_limit, weekly_limit = EXCLUDED.weekly_limit, total_limit = EXCLUDED.total_limit",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7a9dea839a3b4ac09e67e55d79a3ddf2699440c1a1082d2b2fe4e2b17e52942c"
+}

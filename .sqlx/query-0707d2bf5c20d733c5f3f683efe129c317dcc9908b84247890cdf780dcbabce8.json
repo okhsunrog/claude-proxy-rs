@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT model, COUNT(*) AS \"request_count!\", COALESCE(SUM(cost_microdollars), 0)::BIGINT AS \"cost_microdollars!\", COALESCE(SUM(input_tokens), 0)::BIGINT AS \"input_tokens!\", COALESCE(SUM(output_tokens), 0)::BIGINT AS \"output_tokens!\", COALESCE(SUM(cache_read_tokens), 0)::BIGINT AS \"cache_read_tokens!\", COALESCE(SUM(cache_write_tokens), 0)::BIGINT AS \"cache_write_tokens!\" FROM request_log WHERE created_at >= $1 GROUP BY model ORDER BY SUM(cost_microdollars) DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_log",
+            "name": "model"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "request_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "cost_microdollars!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "input_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "output_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "cache_read_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "cache_write_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "0707d2bf5c20d733c5f3f683efe129c317dcc9908b84247890cdf780dcbabce8"
+}

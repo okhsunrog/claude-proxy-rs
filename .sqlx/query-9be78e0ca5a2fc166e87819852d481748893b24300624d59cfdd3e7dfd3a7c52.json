@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM key_model_limits WHERE key_id = $1 AND model = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9be78e0ca5a2fc166e87819852d481748893b24300624d59cfdd3e7dfd3a7c52"
+}

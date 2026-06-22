@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT five_hour_reset_at, weekly_reset_at, five_hour_count_from, weekly_count_from, total_count_from FROM client_keys WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "five_hour_reset_at",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "five_hour_reset_at"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "weekly_reset_at",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "weekly_reset_at"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "five_hour_count_from",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "five_hour_count_from"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "weekly_count_from",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "weekly_count_from"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "total_count_from",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "total_count_from"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8b7dfaeca505bd50f735965e27923eb0f965b023c71d7a5ee72b7c8d06d29906"
+}

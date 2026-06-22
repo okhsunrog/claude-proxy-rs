@@ -10,14 +10,13 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use std::sync::Arc;
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::AppState;
 use crate::auth::ModelUsageEntry;
-use crate::auth::client_keys::{TokenLimits, TokenUsage, get_u64};
+use crate::auth::client_keys::{TokenLimits, TokenUsage, i64_to_u64};
 use crate::subscription::timestamp_millis;
 
 // ── auth helper ────────────────────────────────────────────────────────────────
@@ -232,17 +231,17 @@ pub async fn get_my_timeseries(
         )
     })?;
 
-    let Ok(rows) = sqlx::query(
-        "SELECT (created_at / $1) * $1 AS bucket, \
-             COUNT(*), SUM(cost_microdollars), \
-             SUM(input_tokens), SUM(output_tokens), \
-             SUM(cache_read_tokens), SUM(cache_write_tokens) \
+    let Ok(rows) = sqlx::query!(
+            "SELECT (created_at / $1) * $1 AS bucket, \
+             COUNT(*) AS \"request_count!\", COALESCE(SUM(cost_microdollars), 0)::BIGINT AS \"cost_microdollars!\", \
+             COALESCE(SUM(input_tokens), 0)::BIGINT AS \"input_tokens!\", COALESCE(SUM(output_tokens), 0)::BIGINT AS \"output_tokens!\", \
+             COALESCE(SUM(cache_read_tokens), 0)::BIGINT AS \"cache_read_tokens!\", COALESCE(SUM(cache_write_tokens), 0)::BIGINT AS \"cache_write_tokens!\" \
              FROM request_log WHERE key_id = $3 AND created_at >= $2 \
              GROUP BY bucket ORDER BY bucket",
+        bucket_ms as i64,
+        cutoff as i64,
+        key_id.as_str(),
     )
-    .bind(bucket_ms as i64)
-    .bind(cutoff as i64)
-    .bind(key_id.as_str())
     .fetch_all(&conn)
     .await
     else {
@@ -255,17 +254,17 @@ pub async fn get_my_timeseries(
 
     let mut data_map = std::collections::HashMap::new();
     for row in rows {
-        let ts = get_u64(&row, 0);
+        let ts = i64_to_u64(row.bucket.unwrap_or(0));
         data_map.insert(
             ts,
             TimeseriesPoint {
                 timestamp: ts,
-                request_count: get_u64(&row, 1),
-                cost_microdollars: get_u64(&row, 2),
-                input_tokens: get_u64(&row, 3),
-                output_tokens: get_u64(&row, 4),
-                cache_read_tokens: get_u64(&row, 5),
-                cache_write_tokens: get_u64(&row, 6),
+                request_count: i64_to_u64(row.request_count),
+                cost_microdollars: i64_to_u64(row.cost_microdollars),
+                input_tokens: i64_to_u64(row.input_tokens),
+                output_tokens: i64_to_u64(row.output_tokens),
+                cache_read_tokens: i64_to_u64(row.cache_read_tokens),
+                cache_write_tokens: i64_to_u64(row.cache_write_tokens),
             },
         );
     }
@@ -328,15 +327,15 @@ pub async fn get_my_by_model(
         )
     })?;
 
-    let Ok(rows) = sqlx::query(
-        "SELECT model, COUNT(*), SUM(cost_microdollars), \
-             SUM(input_tokens), SUM(output_tokens), \
-             SUM(cache_read_tokens), SUM(cache_write_tokens) \
+    let Ok(rows) = sqlx::query!(
+        "SELECT model, COUNT(*) AS \"request_count!\", COALESCE(SUM(cost_microdollars), 0)::BIGINT AS \"cost_microdollars!\", \
+             COALESCE(SUM(input_tokens), 0)::BIGINT AS \"input_tokens!\", COALESCE(SUM(output_tokens), 0)::BIGINT AS \"output_tokens!\", \
+             COALESCE(SUM(cache_read_tokens), 0)::BIGINT AS \"cache_read_tokens!\", COALESCE(SUM(cache_write_tokens), 0)::BIGINT AS \"cache_write_tokens!\" \
              FROM request_log WHERE key_id = $2 AND created_at >= $1 \
              GROUP BY model ORDER BY SUM(cost_microdollars) DESC",
+        cutoff as i64,
+        key_id.as_str(),
     )
-    .bind(cutoff as i64)
-    .bind(key_id.as_str())
     .fetch_all(&conn)
     .await
     else {
@@ -348,17 +347,14 @@ pub async fn get_my_by_model(
 
     let mut models = Vec::new();
     for row in rows {
-        let Ok(model) = row.try_get::<String, _>(0) else {
-            continue;
-        };
         models.push(ModelBreakdown {
-            model,
-            request_count: get_u64(&row, 1),
-            cost_microdollars: get_u64(&row, 2),
-            input_tokens: get_u64(&row, 3),
-            output_tokens: get_u64(&row, 4),
-            cache_read_tokens: get_u64(&row, 5),
-            cache_write_tokens: get_u64(&row, 6),
+            model: row.model,
+            request_count: i64_to_u64(row.request_count),
+            cost_microdollars: i64_to_u64(row.cost_microdollars),
+            input_tokens: i64_to_u64(row.input_tokens),
+            output_tokens: i64_to_u64(row.output_tokens),
+            cache_read_tokens: i64_to_u64(row.cache_read_tokens),
+            cache_write_tokens: i64_to_u64(row.cache_write_tokens),
         });
     }
 

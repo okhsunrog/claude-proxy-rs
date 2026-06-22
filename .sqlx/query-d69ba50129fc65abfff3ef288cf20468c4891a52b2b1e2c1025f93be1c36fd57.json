@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(SUM(CASE WHEN created_at >= $1 THEN cost_microdollars ELSE 0 END), 0)::BIGINT AS \"five_hour!\", COALESCE(SUM(CASE WHEN created_at >= $2 THEN cost_microdollars ELSE 0 END), 0)::BIGINT AS \"weekly!\", COALESCE(SUM(CASE WHEN created_at >= $3 THEN cost_microdollars ELSE 0 END), 0)::BIGINT AS \"total!\" FROM request_log WHERE key_id = $4 AND created_at >= $5",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "five_hour!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "weekly!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "total!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "d69ba50129fc65abfff3ef288cf20468c4891a52b2b1e2c1025f93be1c36fd57"
+}

@@ -12,6 +12,7 @@ just test             # Run Rust unit tests (cargo test)
 just check            # Full check: cargo fmt --check, clippy -D warnings, cargo test, vp check
 just fmt              # Format Rust code
 just lint             # Clippy + vp lint
+just sqlx-prepare     # Regenerate committed sqlx query metadata after SQL changes
 just openapi          # Regenerate OpenAPI TypeScript client (no running backend needed)
 just test-openai      # Run OpenAI compatibility test (uv run with openai SDK)
 just test-anthropic   # Run Anthropic native API test (uv run with anthropic SDK)
@@ -31,6 +32,8 @@ Unified API proxy that lets AI coding assistants (Cline, Roo Code, etc.) use a C
 **Admin UI**: Vue 3 + TypeScript SPA in `admin-ui/`, using [Vite+](https://viteplus.dev/) as the unified toolchain. The build output (`admin-ui/dist/`) is embedded into the binary at compile time via `build.rs` using `memory-serve`. See `admin-ui/AGENTS.md` for Vite+ workflow details.
 
 **Database**: PostgreSQL. Configure with `CLAUDE_PROXY_DATABASE_URL` or `DATABASE_URL`. A global `sqlx::PgPool` is initialized via `OnceCell` in `src/db.rs`.
+
+SQL must use `sqlx::query!`, `query_as!`, or `query_scalar!` macros so queries are checked at compile time. Keep `.sqlx/` committed; run `just sqlx-prepare` with `DATABASE_URL` pointed at a PostgreSQL schema matching `src/db.rs` whenever SQL changes.
 
 ### Database Schema
 

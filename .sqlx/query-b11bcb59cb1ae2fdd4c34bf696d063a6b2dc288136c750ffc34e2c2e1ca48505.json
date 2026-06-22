@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT auth_type, access_token, refresh_token, expires_at, account_id, enterprise_url FROM auth WHERE provider = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "auth_type",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "auth",
+            "name": "auth_type"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "access_token",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "auth",
+            "name": "access_token"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "refresh_token",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "auth",
+            "name": "refresh_token"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "expires_at",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "auth",
+            "name": "expires_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "account_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "auth",
+            "name": "account_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "enterprise_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "auth",
+            "name": "enterprise_url"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "b11bcb59cb1ae2fdd4c34bf696d063a6b2dc288136c750ffc34e2c2e1ca48505"
+}

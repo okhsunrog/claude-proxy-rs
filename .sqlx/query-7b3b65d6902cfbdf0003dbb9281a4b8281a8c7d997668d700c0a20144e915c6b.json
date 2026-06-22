@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE client_keys SET five_hour_count_from = $1, weekly_count_from = $2, total_count_from = $3, five_hour_reset_at = 0, weekly_reset_at = 0 WHERE id = $4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7b3b65d6902cfbdf0003dbb9281a4b8281a8c7d997668d700c0a20144e915c6b"
+}

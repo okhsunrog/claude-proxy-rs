@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE key_model_limits SET count_from = $1 WHERE key_id = $2 AND model = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1398626d6d272e7f0c217a118f972776bc71160258ae6594663eeacc8a6c228d"
+}

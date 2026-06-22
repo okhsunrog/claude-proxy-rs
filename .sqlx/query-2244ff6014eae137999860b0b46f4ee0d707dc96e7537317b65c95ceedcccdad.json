@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO auth (provider, auth_type, access_token, refresh_token, expires_at, account_id, enterprise_url)\n                       VALUES ($1, 'api', $2, '', 0, NULL, NULL)\n                       ON CONFLICT (provider) DO UPDATE SET\n                           auth_type = EXCLUDED.auth_type,\n                           access_token = EXCLUDED.access_token,\n                           refresh_token = EXCLUDED.refresh_token,\n                           expires_at = EXCLUDED.expires_at,\n                           account_id = EXCLUDED.account_id,\n                           enterprise_url = EXCLUDED.enterprise_url",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2244ff6014eae137999860b0b46f4ee0d707dc96e7537317b65c95ceedcccdad"
+}

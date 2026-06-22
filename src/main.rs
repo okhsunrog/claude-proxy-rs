@@ -24,7 +24,6 @@ use capture::CaptureConfig;
 use clap::Parser;
 use config::{CloakMode, Config, CorsMode};
 use reqwest::Client;
-use sqlx::Row;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -90,12 +89,12 @@ impl AppState {
 /// Save a session token to the database
 pub async fn save_session(token: &str, expires_at: u64) {
     if let Ok(conn) = db::get_conn().await
-        && let Err(e) = sqlx::query(
+        && let Err(e) = sqlx::query!(
             "INSERT INTO admin_sessions (token, expires_at) VALUES ($1, $2) \
              ON CONFLICT (token) DO UPDATE SET expires_at = EXCLUDED.expires_at",
+            token,
+            expires_at as i64,
         )
-        .bind(token)
-        .bind(expires_at as i64)
         .execute(&conn)
         .await
     {
@@ -109,24 +108,23 @@ pub async fn validate_session(token: &str) -> bool {
     let Ok(conn) = db::get_conn().await else {
         return false;
     };
-    let Ok(row) = sqlx::query("SELECT expires_at FROM admin_sessions WHERE token = $1")
-        .bind(token)
-        .fetch_optional(&conn)
-        .await
+    let Ok(row) = sqlx::query!(
+        "SELECT expires_at FROM admin_sessions WHERE token = $1",
+        token
+    )
+    .fetch_optional(&conn)
+    .await
     else {
         return false;
     };
     let Some(row) = row else {
         return false;
     };
-    let Ok(expires_at) = row.try_get::<i64, _>(0) else {
-        return false;
-    };
+    let expires_at = row.expires_at;
     let now = now_secs() as i64;
     if now >= expires_at {
         // Expired — clean it up
-        let _ = sqlx::query("DELETE FROM admin_sessions WHERE token = $1")
-            .bind(token)
+        let _ = sqlx::query!("DELETE FROM admin_sessions WHERE token = $1", token)
             .execute(&conn)
             .await;
         return false;
@@ -134,11 +132,13 @@ pub async fn validate_session(token: &str) -> bool {
     // Sliding expiration: renew if more than 1 day has passed since last renewal
     let new_expires = now + SESSION_TTL_SECS as i64;
     if new_expires - expires_at > 24 * 3600 {
-        let _ = sqlx::query("UPDATE admin_sessions SET expires_at = $1 WHERE token = $2")
-            .bind(new_expires)
-            .bind(token)
-            .execute(&conn)
-            .await;
+        let _ = sqlx::query!(
+            "UPDATE admin_sessions SET expires_at = $1 WHERE token = $2",
+            new_expires,
+            token
+        )
+        .execute(&conn)
+        .await;
     }
     true
 }
@@ -146,8 +146,7 @@ pub async fn validate_session(token: &str) -> bool {
 /// Remove a session token from the database
 pub async fn remove_session(token: &str) {
     if let Ok(conn) = db::get_conn().await {
-        let _ = sqlx::query("DELETE FROM admin_sessions WHERE token = $1")
-            .bind(token)
+        let _ = sqlx::query!("DELETE FROM admin_sessions WHERE token = $1", token)
             .execute(&conn)
             .await;
     }

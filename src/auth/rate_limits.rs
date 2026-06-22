@@ -1,11 +1,10 @@
 use llm_relay::Usage;
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use tracing::warn;
 use utoipa::ToSchema;
 
 use super::client_keys::{
-    ClientKeysStore, TokenLimits, TokenUsage, UsageResetType, get_u64, opt_u64,
+    ClientKeysStore, TokenLimits, TokenUsage, UsageResetType, i64_to_u64, opt_i64_to_u64,
 };
 use crate::db::{self, Connection};
 use crate::error::ProxyError;
@@ -66,10 +65,10 @@ async fn maybe_reset_expired_windows(
     let five_hour_ms: u64 = 5 * 60 * 60 * 1000;
     let one_week_ms: u64 = 7 * 24 * 60 * 60 * 1000;
 
-    let row = sqlx::query(
+    let row = sqlx::query!(
         "SELECT five_hour_reset_at, weekly_reset_at, five_hour_count_from, weekly_count_from, total_count_from FROM client_keys WHERE id = $1",
+        key_id,
     )
-    .bind(key_id)
     .fetch_optional(conn)
     .await
     .map_err(|e| ProxyError::DatabaseError(format!("Failed to read window state: {e}")))?;
@@ -82,11 +81,11 @@ async fn maybe_reset_expired_windows(
         });
     };
 
-    let mut five_hour_reset_at = get_u64(&row, 0);
-    let mut weekly_reset_at = get_u64(&row, 1);
-    let mut five_hour_count_from = get_u64(&row, 2);
-    let mut weekly_count_from = get_u64(&row, 3);
-    let total_count_from = get_u64(&row, 4);
+    let mut five_hour_reset_at = i64_to_u64(row.five_hour_reset_at);
+    let mut weekly_reset_at = i64_to_u64(row.weekly_reset_at);
+    let mut five_hour_count_from = i64_to_u64(row.five_hour_count_from);
+    let mut weekly_count_from = i64_to_u64(row.weekly_count_from);
+    let total_count_from = i64_to_u64(row.total_count_from);
 
     let reset_five_hour = five_hour_reset_at > 0 && now >= five_hour_reset_at;
     let reset_weekly = weekly_reset_at > 0 && now >= weekly_reset_at;
@@ -103,12 +102,12 @@ async fn maybe_reset_expired_windows(
             .unwrap_or(weekly_reset_at);
 
         if new_five_hour != five_hour_reset_at || new_weekly != weekly_reset_at {
-            let _ = sqlx::query(
+            let _ = sqlx::query!(
                 "UPDATE client_keys SET five_hour_reset_at = $1, weekly_reset_at = $2 WHERE id = $3",
+                new_five_hour as i64,
+                new_weekly as i64,
+                key_id,
             )
-            .bind(new_five_hour as i64)
-            .bind(new_weekly as i64)
-            .bind(key_id)
             .execute(conn)
                 .await;
         }
@@ -137,14 +136,14 @@ async fn maybe_reset_expired_windows(
     }
 
     // Update client_keys with new count_from + reset_at values
-    sqlx::query(
+    sqlx::query!(
         "UPDATE client_keys SET five_hour_reset_at = $1, weekly_reset_at = $2, five_hour_count_from = $3, weekly_count_from = $4 WHERE id = $5",
+        five_hour_reset_at as i64,
+        weekly_reset_at as i64,
+        five_hour_count_from as i64,
+        weekly_count_from as i64,
+        key_id,
     )
-    .bind(five_hour_reset_at as i64)
-    .bind(weekly_reset_at as i64)
-    .bind(five_hour_count_from as i64)
-    .bind(weekly_count_from as i64)
-    .bind(key_id)
     .execute(conn)
     .await
     .map_err(|e| ProxyError::DatabaseError(format!("Failed to update window state: {e}")))?;
@@ -168,27 +167,27 @@ async fn aggregate_usage_costs(
         .min(ws.weekly_count_from)
         .min(ws.total_count_from);
 
-    let row = sqlx::query(
+    let row = sqlx::query!(
         "SELECT \
-         COALESCE(SUM(CASE WHEN created_at >= $1 THEN cost_microdollars ELSE 0 END), 0), \
-         COALESCE(SUM(CASE WHEN created_at >= $2 THEN cost_microdollars ELSE 0 END), 0), \
-         COALESCE(SUM(CASE WHEN created_at >= $3 THEN cost_microdollars ELSE 0 END), 0) \
+         COALESCE(SUM(CASE WHEN created_at >= $1 THEN cost_microdollars ELSE 0 END), 0)::BIGINT AS \"five_hour!\", \
+         COALESCE(SUM(CASE WHEN created_at >= $2 THEN cost_microdollars ELSE 0 END), 0)::BIGINT AS \"weekly!\", \
+         COALESCE(SUM(CASE WHEN created_at >= $3 THEN cost_microdollars ELSE 0 END), 0)::BIGINT AS \"total!\" \
          FROM request_log WHERE key_id = $4 AND created_at >= $5",
+        ws.five_hour_count_from as i64,
+        ws.weekly_count_from as i64,
+        ws.total_count_from as i64,
+        key_id,
+        min_from as i64,
     )
-    .bind(ws.five_hour_count_from as i64)
-    .bind(ws.weekly_count_from as i64)
-    .bind(ws.total_count_from as i64)
-    .bind(key_id)
-    .bind(min_from as i64)
     .fetch_one(conn)
     .await
     .map_err(|e| ProxyError::DatabaseError(format!("Failed to aggregate usage: {e}")))?;
 
-    let five_hour = row.try_get::<i64, _>(0).unwrap_or(0) as u64;
-    let weekly = row.try_get::<i64, _>(1).unwrap_or(0) as u64;
-    let total = row.try_get::<i64, _>(2).unwrap_or(0) as u64;
-
-    Ok((five_hour, weekly, total))
+    Ok((
+        i64_to_u64(row.five_hour),
+        i64_to_u64(row.weekly),
+        i64_to_u64(row.total),
+    ))
 }
 
 /// Query the sum of cost_microdollars from request_log for a specific key+model
@@ -199,28 +198,26 @@ async fn query_model_cost(
     model: &str,
     from: u64,
 ) -> Result<u64, ProxyError> {
-    let row = sqlx::query(
-        "SELECT COALESCE(SUM(cost_microdollars), 0) FROM request_log WHERE key_id = $1 AND model = $2 AND created_at >= $3",
+    let cost = sqlx::query_scalar!(
+        "SELECT COALESCE(SUM(cost_microdollars), 0)::BIGINT AS \"cost!\" FROM request_log WHERE key_id = $1 AND model = $2 AND created_at >= $3",
+        key_id,
+        model,
+        from as i64,
     )
-    .bind(key_id)
-    .bind(model)
-    .bind(from as i64)
     .fetch_one(conn)
     .await
     .map_err(|e| ProxyError::DatabaseError(format!("Failed to query model cost: {e}")))?;
 
-    let cost = row.try_get::<i64, _>(0).unwrap_or(0) as u64;
-
-    Ok(cost)
+    Ok(i64_to_u64(cost))
 }
 
 /// Look up model pricing and compute cost in microdollars.
 /// Returns 0 if model is not found in the models table.
 async fn compute_cost(conn: &Connection, model: &str, report: &Usage) -> u64 {
-    let Ok(row) = sqlx::query(
+    let Ok(row) = sqlx::query!(
         "SELECT input_price, output_price, cache_read_price, cache_write_price FROM models WHERE id = $1",
+        model,
     )
-    .bind(model)
     .fetch_optional(conn)
     .await
     else {
@@ -233,15 +230,10 @@ async fn compute_cost(conn: &Connection, model: &str, report: &Usage) -> u64 {
         return 0;
     };
 
-    let input_price: f64 = row.try_get(0).unwrap_or(0.0);
-    let output_price: f64 = row.try_get(1).unwrap_or(0.0);
-    let cache_read_price: f64 = row.try_get(2).unwrap_or(0.0);
-    let cache_write_price: f64 = row.try_get(3).unwrap_or(0.0);
-
-    let cost = report.input_tokens as f64 * input_price
-        + report.output_tokens as f64 * output_price
-        + report.cache_read_input_tokens.unwrap_or(0) as f64 * cache_read_price
-        + report.cache_creation_input_tokens.unwrap_or(0) as f64 * cache_write_price;
+    let cost = report.input_tokens as f64 * row.input_price
+        + report.output_tokens as f64 * row.output_price
+        + report.cache_read_input_tokens.unwrap_or(0) as f64 * row.cache_read_price
+        + report.cache_creation_input_tokens.unwrap_or(0) as f64 * row.cache_write_price;
 
     cost.round() as u64
 }
@@ -267,18 +259,18 @@ impl ClientKeysStore {
             .map_err(|e| e.to_string())?;
 
         // Read limits
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "SELECT five_hour_limit, weekly_limit, total_limit FROM client_keys WHERE id = $1",
+            id,
         )
-        .bind(id)
         .fetch_optional(&conn)
         .await
         .map_err(|e| format!("DB error: {e}"))?
         .ok_or_else(|| "Key not found".to_string())?;
 
-        let five_hour_limit = opt_u64(&row, 0);
-        let weekly_limit = opt_u64(&row, 1);
-        let total_limit = opt_u64(&row, 2);
+        let five_hour_limit = opt_i64_to_u64(row.five_hour_limit);
+        let weekly_limit = opt_i64_to_u64(row.weekly_limit);
+        let total_limit = opt_i64_to_u64(row.total_limit);
 
         // Skip aggregation if no limits are set
         if five_hour_limit.is_none() && weekly_limit.is_none() && total_limit.is_none() {
@@ -336,17 +328,17 @@ impl ClientKeysStore {
         maybe_reset_expired_windows(&conn, key_id, now, window_resets).await?;
 
         // Initialize reset timestamps if not yet set
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "SELECT five_hour_reset_at, weekly_reset_at FROM client_keys WHERE id = $1",
+            key_id,
         )
-        .bind(key_id)
         .fetch_optional(&conn)
         .await
         .map_err(|e| ProxyError::DatabaseError(format!("Failed to read timestamps: {e}")))?;
 
         if let Some(row) = row {
-            let five_hour_reset_at = get_u64(&row, 0);
-            let weekly_reset_at = get_u64(&row, 1);
+            let five_hour_reset_at = i64_to_u64(row.five_hour_reset_at);
+            let weekly_reset_at = i64_to_u64(row.weekly_reset_at);
 
             let mut needs_init = false;
             let new_five_hour = if five_hour_reset_at == 0 {
@@ -369,12 +361,12 @@ impl ClientKeysStore {
             };
 
             if needs_init {
-                let _ = sqlx::query(
+                let _ = sqlx::query!(
                     "UPDATE client_keys SET five_hour_reset_at = $1, weekly_reset_at = $2 WHERE id = $3",
+                    new_five_hour as i64,
+                    new_weekly as i64,
+                    key_id,
                 )
-                .bind(new_five_hour as i64)
-                .bind(new_weekly as i64)
-                .bind(key_id)
                 .execute(&conn)
                     .await;
             }
@@ -384,17 +376,17 @@ impl ClientKeysStore {
         let cost = compute_cost(&conn, model, report).await;
 
         // Single INSERT into request_log
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO request_log (key_id, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_microdollars, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            key_id,
+            model,
+            report.input_tokens as i64,
+            report.output_tokens as i64,
+            report.cache_read_input_tokens.unwrap_or(0) as i64,
+            report.cache_creation_input_tokens.unwrap_or(0) as i64,
+            cost as i64,
+            now as i64,
         )
-        .bind(key_id)
-        .bind(model)
-        .bind(report.input_tokens as i64)
-        .bind(report.output_tokens as i64)
-        .bind(report.cache_read_input_tokens.unwrap_or(0) as i64)
-        .bind(report.cache_creation_input_tokens.unwrap_or(0) as i64)
-        .bind(cost as i64)
-        .bind(now as i64)
         .execute(&conn)
         .await
         .map_err(|e| ProxyError::DatabaseError(format!("Failed to insert request log: {e}")))?;
@@ -414,19 +406,19 @@ impl ClientKeysStore {
         let conn = db::get_conn().await?;
 
         // Read count_from values
-        let count_from_row = sqlx::query(
+        let count_from_row = sqlx::query!(
             "SELECT five_hour_count_from, weekly_count_from, total_count_from FROM client_keys WHERE id = $1",
+            id,
         )
-        .bind(id)
         .fetch_optional(&conn)
         .await
         .map_err(|e| ProxyError::DatabaseError(format!("Failed to read count_from: {e}")))?;
         let Some(count_from_row) = count_from_row else {
             return Ok(None);
         };
-        let five_hour_count_from = get_u64(&count_from_row, 0);
-        let weekly_count_from = get_u64(&count_from_row, 1);
-        let total_count_from = get_u64(&count_from_row, 2);
+        let five_hour_count_from = i64_to_u64(count_from_row.five_hour_count_from);
+        let weekly_count_from = i64_to_u64(count_from_row.weekly_count_from);
+        let total_count_from = i64_to_u64(count_from_row.total_count_from);
 
         let mut five_hour_reset_at = key.usage.five_hour_reset_at;
         let mut weekly_reset_at = key.usage.weekly_reset_at;
@@ -473,34 +465,41 @@ impl ClientKeysStore {
         let now = timestamp_millis();
         let conn = db::get_conn().await?;
 
-        let sql = match reset_type {
-            UsageResetType::FiveHour => {
-                "UPDATE client_keys SET five_hour_count_from = $1, five_hour_reset_at = 0 WHERE id = $2"
-            }
-            UsageResetType::Weekly => {
-                "UPDATE client_keys SET weekly_count_from = $1, weekly_reset_at = 0 WHERE id = $2"
-            }
-            UsageResetType::Total => "UPDATE client_keys SET total_count_from = $1 WHERE id = $2",
-            UsageResetType::All => {
-                "UPDATE client_keys SET five_hour_count_from = $1, weekly_count_from = $2, total_count_from = $3, five_hour_reset_at = 0, weekly_reset_at = 0 WHERE id = $4"
-            }
-        };
-
         let affected = match reset_type {
-            UsageResetType::FiveHour | UsageResetType::Weekly | UsageResetType::Total => {
-                sqlx::query(sql)
-                    .bind(now as i64)
-                    .bind(id)
-                    .execute(&conn)
-                    .await
-                    .map_err(|e| ProxyError::DatabaseError(format!("Failed to reset usage: {e}")))?
-                    .rows_affected()
-            }
-            UsageResetType::All => sqlx::query(sql)
-                .bind(now as i64)
-                .bind(now as i64)
-                .bind(now as i64)
-                .bind(id)
+            UsageResetType::FiveHour => sqlx::query!(
+                "UPDATE client_keys SET five_hour_count_from = $1, five_hour_reset_at = 0 WHERE id = $2",
+                now as i64,
+                id,
+            )
+            .execute(&conn)
+            .await
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to reset usage: {e}")))?
+            .rows_affected(),
+            UsageResetType::Weekly => sqlx::query!(
+                "UPDATE client_keys SET weekly_count_from = $1, weekly_reset_at = 0 WHERE id = $2",
+                now as i64,
+                id,
+            )
+            .execute(&conn)
+            .await
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to reset usage: {e}")))?
+            .rows_affected(),
+            UsageResetType::Total => sqlx::query!(
+                "UPDATE client_keys SET total_count_from = $1 WHERE id = $2",
+                now as i64,
+                id,
+            )
+            .execute(&conn)
+            .await
+            .map_err(|e| ProxyError::DatabaseError(format!("Failed to reset usage: {e}")))?
+            .rows_affected(),
+            UsageResetType::All => sqlx::query!(
+                "UPDATE client_keys SET five_hour_count_from = $1, weekly_count_from = $2, total_count_from = $3, five_hour_reset_at = 0, weekly_reset_at = 0 WHERE id = $4",
+                now as i64,
+                now as i64,
+                now as i64,
+                id,
+            )
                 .execute(&conn)
                 .await
                 .map_err(|e| ProxyError::DatabaseError(format!("Failed to reset usage: {e}")))?
@@ -517,18 +516,14 @@ impl ClientKeysStore {
     /// Get allowed models for a key. Empty vec means "all models allowed".
     pub async fn get_allowed_models(&self, key_id: &str) -> Result<Vec<String>, ProxyError> {
         let conn = db::get_conn().await?;
-        let rows = sqlx::query("SELECT model FROM key_allowed_models WHERE key_id = $1")
-            .bind(key_id)
-            .fetch_all(&conn)
-            .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to get allowed models: {e}")))?;
-        let mut models = Vec::new();
-        for row in rows {
-            if let Ok(model) = row.try_get::<String, _>(0) {
-                models.push(model);
-            }
-        }
-        Ok(models)
+        let rows = sqlx::query!(
+            "SELECT model FROM key_allowed_models WHERE key_id = $1",
+            key_id
+        )
+        .fetch_all(&conn)
+        .await
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to get allowed models: {e}")))?;
+        Ok(rows.into_iter().map(|row| row.model).collect())
     }
 
     /// Set allowed models for a key. Empty vec = allow all.
@@ -538,8 +533,7 @@ impl ClientKeysStore {
         models: Vec<String>,
     ) -> Result<(), ProxyError> {
         let conn = db::get_conn().await?;
-        sqlx::query("DELETE FROM key_allowed_models WHERE key_id = $1")
-            .bind(key_id)
+        sqlx::query!("DELETE FROM key_allowed_models WHERE key_id = $1", key_id)
             .execute(&conn)
             .await
             .map_err(|e| {
@@ -547,14 +541,16 @@ impl ClientKeysStore {
             })?;
 
         for model in &models {
-            sqlx::query("INSERT INTO key_allowed_models (key_id, model) VALUES ($1, $2)")
-                .bind(key_id)
-                .bind(model.as_str())
-                .execute(&conn)
-                .await
-                .map_err(|e| {
-                    ProxyError::DatabaseError(format!("Failed to insert allowed model: {e}"))
-                })?;
+            sqlx::query!(
+                "INSERT INTO key_allowed_models (key_id, model) VALUES ($1, $2)",
+                key_id,
+                model.as_str(),
+            )
+            .execute(&conn)
+            .await
+            .map_err(|e| {
+                ProxyError::DatabaseError(format!("Failed to insert allowed model: {e}"))
+            })?;
         }
         Ok(())
     }
@@ -564,28 +560,29 @@ impl ClientKeysStore {
     pub async fn is_model_allowed(&self, key_id: &str, model: &str) -> Result<bool, ProxyError> {
         let conn = db::get_conn().await?;
         // Count total allowed models for this key
-        let row = sqlx::query("SELECT COUNT(*) FROM key_allowed_models WHERE key_id = $1")
-            .bind(key_id)
-            .fetch_one(&conn)
-            .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to check model access: {e}")))?;
-        let total: i64 = row.try_get::<i64, _>(0).unwrap_or(0);
+        let total = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM key_allowed_models WHERE key_id = $1",
+            key_id
+        )
+        .fetch_one(&conn)
+        .await
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to check model access: {e}")))?;
+        let total = total.unwrap_or(0);
 
         if total == 0 {
             return Ok(true); // No whitelist = allow all
         }
 
         // Check if this specific model is in the whitelist
-        let row =
-            sqlx::query("SELECT COUNT(*) FROM key_allowed_models WHERE key_id = $1 AND model = $2")
-                .bind(key_id)
-                .bind(model)
-                .fetch_one(&conn)
-                .await
-                .map_err(|e| {
-                    ProxyError::DatabaseError(format!("Failed to check model access: {e}"))
-                })?;
-        let count = row.try_get::<i64, _>(0).unwrap_or(0);
+        let count = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM key_allowed_models WHERE key_id = $1 AND model = $2",
+            key_id,
+            model,
+        )
+        .fetch_one(&conn)
+        .await
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to check model access: {e}")))?;
+        let count = count.unwrap_or(0);
         Ok(count > 0)
     }
 
@@ -609,11 +606,11 @@ impl ClientKeysStore {
             .await
             .map_err(|e| e.to_string())?;
 
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "SELECT five_hour_limit, weekly_limit, total_limit, count_from FROM key_model_limits WHERE key_id = $1 AND model = $2",
+            key_id,
+            model,
         )
-        .bind(key_id)
-        .bind(model)
         .fetch_optional(&conn)
         .await
         .map_err(|e| format!("DB error: {e}"))?;
@@ -622,10 +619,10 @@ impl ClientKeysStore {
             return Ok(()); // No row = no limits
         };
 
-        let five_hour_limit = opt_u64(&row, 0);
-        let weekly_limit = opt_u64(&row, 1);
-        let total_limit = opt_u64(&row, 2);
-        let model_count_from = get_u64(&row, 3);
+        let five_hour_limit = opt_i64_to_u64(row.five_hour_limit);
+        let weekly_limit = opt_i64_to_u64(row.weekly_limit);
+        let total_limit = opt_i64_to_u64(row.total_limit);
+        let model_count_from = i64_to_u64(row.count_from);
 
         // Apply per-model count_from as a floor for all windows
         let five_hour_from = ws.five_hour_count_from.max(model_count_from);
@@ -680,21 +677,21 @@ impl ClientKeysStore {
         let conn = db::get_conn().await?;
 
         // Read window state from client_keys
-        let ts_row = sqlx::query(
+        let ts_row = sqlx::query!(
             "SELECT five_hour_reset_at, weekly_reset_at, five_hour_count_from, weekly_count_from, total_count_from FROM client_keys WHERE id = $1",
+            key_id,
         )
-        .bind(key_id)
         .fetch_optional(&conn)
         .await
         .map_err(|e| ProxyError::DatabaseError(format!("Failed to read window state: {e}")))?;
         let Some(ts_row) = ts_row else {
             return Ok(Vec::new());
         };
-        let five_hour_reset_at = get_u64(&ts_row, 0);
-        let weekly_reset_at = get_u64(&ts_row, 1);
-        let five_hour_count_from = get_u64(&ts_row, 2);
-        let weekly_count_from = get_u64(&ts_row, 3);
-        let total_count_from = get_u64(&ts_row, 4);
+        let five_hour_reset_at = i64_to_u64(ts_row.five_hour_reset_at);
+        let weekly_reset_at = i64_to_u64(ts_row.weekly_reset_at);
+        let five_hour_count_from = i64_to_u64(ts_row.five_hour_count_from);
+        let weekly_count_from = i64_to_u64(ts_row.weekly_count_from);
+        let total_count_from = i64_to_u64(ts_row.total_count_from);
 
         let five_hour_expired = five_hour_reset_at > 0 && now >= five_hour_reset_at;
         let weekly_expired = weekly_reset_at > 0 && now >= weekly_reset_at;
@@ -711,27 +708,24 @@ impl ClientKeysStore {
         };
 
         // Read per-model limits and count_from
-        let limit_rows = sqlx::query(
+        let limit_rows = sqlx::query!(
             "SELECT model, five_hour_limit, weekly_limit, total_limit, count_from FROM key_model_limits WHERE key_id = $1",
+            key_id,
         )
-        .bind(key_id)
         .fetch_all(&conn)
         .await
         .map_err(|e| ProxyError::DatabaseError(format!("Failed to read model limits: {e}")))?;
 
         let mut model_limits: Vec<(String, TokenLimits, u64)> = Vec::new();
         for row in limit_rows {
-            let Ok(model) = row.try_get::<String, _>(0) else {
-                continue;
-            };
             model_limits.push((
-                model,
+                row.model,
                 TokenLimits {
-                    five_hour_limit: opt_u64(&row, 1),
-                    weekly_limit: opt_u64(&row, 2),
-                    total_limit: opt_u64(&row, 3),
+                    five_hour_limit: opt_i64_to_u64(row.five_hour_limit),
+                    weekly_limit: opt_i64_to_u64(row.weekly_limit),
+                    total_limit: opt_i64_to_u64(row.total_limit),
                 },
-                get_u64(&row, 4),
+                i64_to_u64(row.count_from),
             ));
         }
 
@@ -741,27 +735,27 @@ impl ClientKeysStore {
             .min(total_count_from);
 
         // Query aggregated usage from request_log grouped by model
-        let usage_rows = sqlx::query(
+        let usage_rows = sqlx::query!(
             "SELECT model, \
-                 COALESCE(SUM(CASE WHEN created_at >= $1 THEN input_tokens ELSE 0 END), 0), \
-                 COALESCE(SUM(CASE WHEN created_at >= $1 THEN output_tokens ELSE 0 END), 0), \
-                 COALESCE(SUM(CASE WHEN created_at >= $1 THEN cache_read_tokens ELSE 0 END), 0), \
-                 COALESCE(SUM(CASE WHEN created_at >= $1 THEN cache_write_tokens ELSE 0 END), 0), \
-                 COALESCE(SUM(CASE WHEN created_at >= $2 THEN input_tokens ELSE 0 END), 0), \
-                 COALESCE(SUM(CASE WHEN created_at >= $2 THEN output_tokens ELSE 0 END), 0), \
-                 COALESCE(SUM(CASE WHEN created_at >= $2 THEN cache_read_tokens ELSE 0 END), 0), \
-                 COALESCE(SUM(CASE WHEN created_at >= $2 THEN cache_write_tokens ELSE 0 END), 0), \
-                 COALESCE(SUM(CASE WHEN created_at >= $3 THEN input_tokens ELSE 0 END), 0), \
-                 COALESCE(SUM(CASE WHEN created_at >= $3 THEN output_tokens ELSE 0 END), 0), \
-                 COALESCE(SUM(CASE WHEN created_at >= $3 THEN cache_read_tokens ELSE 0 END), 0), \
-                 COALESCE(SUM(CASE WHEN created_at >= $3 THEN cache_write_tokens ELSE 0 END), 0) \
+                 COALESCE(SUM(CASE WHEN created_at >= $1 THEN input_tokens ELSE 0 END), 0)::BIGINT AS \"five_hour_input!\", \
+                 COALESCE(SUM(CASE WHEN created_at >= $1 THEN output_tokens ELSE 0 END), 0)::BIGINT AS \"five_hour_output!\", \
+                 COALESCE(SUM(CASE WHEN created_at >= $1 THEN cache_read_tokens ELSE 0 END), 0)::BIGINT AS \"five_hour_cache_read!\", \
+                 COALESCE(SUM(CASE WHEN created_at >= $1 THEN cache_write_tokens ELSE 0 END), 0)::BIGINT AS \"five_hour_cache_write!\", \
+                 COALESCE(SUM(CASE WHEN created_at >= $2 THEN input_tokens ELSE 0 END), 0)::BIGINT AS \"weekly_input!\", \
+                 COALESCE(SUM(CASE WHEN created_at >= $2 THEN output_tokens ELSE 0 END), 0)::BIGINT AS \"weekly_output!\", \
+                 COALESCE(SUM(CASE WHEN created_at >= $2 THEN cache_read_tokens ELSE 0 END), 0)::BIGINT AS \"weekly_cache_read!\", \
+                 COALESCE(SUM(CASE WHEN created_at >= $2 THEN cache_write_tokens ELSE 0 END), 0)::BIGINT AS \"weekly_cache_write!\", \
+                 COALESCE(SUM(CASE WHEN created_at >= $3 THEN input_tokens ELSE 0 END), 0)::BIGINT AS \"total_input!\", \
+                 COALESCE(SUM(CASE WHEN created_at >= $3 THEN output_tokens ELSE 0 END), 0)::BIGINT AS \"total_output!\", \
+                 COALESCE(SUM(CASE WHEN created_at >= $3 THEN cache_read_tokens ELSE 0 END), 0)::BIGINT AS \"total_cache_read!\", \
+                 COALESCE(SUM(CASE WHEN created_at >= $3 THEN cache_write_tokens ELSE 0 END), 0)::BIGINT AS \"total_cache_write!\" \
                  FROM request_log WHERE key_id = $4 AND created_at >= $5 GROUP BY model",
+            effective_five_hour as i64,
+            effective_weekly as i64,
+            total_count_from as i64,
+            key_id,
+            min_from as i64,
         )
-        .bind(effective_five_hour as i64)
-        .bind(effective_weekly as i64)
-        .bind(total_count_from as i64)
-        .bind(key_id)
-        .bind(min_from as i64)
         .fetch_all(&conn)
         .await
         .map_err(|e| ProxyError::DatabaseError(format!("Failed to query model usage: {e}")))?;
@@ -772,29 +766,26 @@ impl ClientKeysStore {
             (TokenBreakdown, TokenBreakdown, TokenBreakdown),
         > = std::collections::HashMap::new();
         for row in usage_rows {
-            let Ok(model) = row.try_get::<String, _>(0) else {
-                continue;
-            };
             usage_map.insert(
-                model,
+                row.model,
                 (
                     TokenBreakdown {
-                        input: get_u64(&row, 1),
-                        output: get_u64(&row, 2),
-                        cache_read: get_u64(&row, 3),
-                        cache_write: get_u64(&row, 4),
+                        input: i64_to_u64(row.five_hour_input),
+                        output: i64_to_u64(row.five_hour_output),
+                        cache_read: i64_to_u64(row.five_hour_cache_read),
+                        cache_write: i64_to_u64(row.five_hour_cache_write),
                     },
                     TokenBreakdown {
-                        input: get_u64(&row, 5),
-                        output: get_u64(&row, 6),
-                        cache_read: get_u64(&row, 7),
-                        cache_write: get_u64(&row, 8),
+                        input: i64_to_u64(row.weekly_input),
+                        output: i64_to_u64(row.weekly_output),
+                        cache_read: i64_to_u64(row.weekly_cache_read),
+                        cache_write: i64_to_u64(row.weekly_cache_write),
                     },
                     TokenBreakdown {
-                        input: get_u64(&row, 9),
-                        output: get_u64(&row, 10),
-                        cache_read: get_u64(&row, 11),
-                        cache_write: get_u64(&row, 12),
+                        input: i64_to_u64(row.total_input),
+                        output: i64_to_u64(row.total_output),
+                        cache_read: i64_to_u64(row.total_cache_read),
+                        cache_write: i64_to_u64(row.total_cache_write),
                     },
                 ),
             );
@@ -849,19 +840,19 @@ impl ClientKeysStore {
         let w = limits.weekly_limit.map(|v| v as i64);
         let t = limits.total_limit.map(|v| v as i64);
 
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO key_model_limits (key_id, model, five_hour_limit, weekly_limit, total_limit) \
              VALUES ($1, $2, $3, $4, $5) \
              ON CONFLICT (key_id, model) DO UPDATE SET \
                  five_hour_limit = EXCLUDED.five_hour_limit, \
                  weekly_limit = EXCLUDED.weekly_limit, \
                  total_limit = EXCLUDED.total_limit",
+            key_id,
+            model,
+            h,
+            w,
+            t,
         )
-        .bind(key_id)
-        .bind(model)
-        .bind(h)
-        .bind(w)
-        .bind(t)
         .execute(&conn)
         .await
         .map_err(|e| ProxyError::DatabaseError(format!("Failed to upsert model limits: {e}")))?;
@@ -871,13 +862,15 @@ impl ClientKeysStore {
     /// Remove per-model limits for a key
     pub async fn remove_model_limits(&self, key_id: &str, model: &str) -> Result<bool, ProxyError> {
         let conn = db::get_conn().await?;
-        let affected = sqlx::query("DELETE FROM key_model_limits WHERE key_id = $1 AND model = $2")
-            .bind(key_id)
-            .bind(model)
-            .execute(&conn)
-            .await
-            .map_err(|e| ProxyError::DatabaseError(format!("Failed to remove model limits: {e}")))?
-            .rows_affected();
+        let affected = sqlx::query!(
+            "DELETE FROM key_model_limits WHERE key_id = $1 AND model = $2",
+            key_id,
+            model,
+        )
+        .execute(&conn)
+        .await
+        .map_err(|e| ProxyError::DatabaseError(format!("Failed to remove model limits: {e}")))?
+        .rows_affected();
         Ok(affected > 0)
     }
 
@@ -893,12 +886,12 @@ impl ClientKeysStore {
         let conn = db::get_conn().await?;
 
         // Single count_from per model — resets all windows for this model
-        let affected = sqlx::query(
+        let affected = sqlx::query!(
             "UPDATE key_model_limits SET count_from = $1 WHERE key_id = $2 AND model = $3",
+            now as i64,
+            key_id,
+            model,
         )
-        .bind(now as i64)
-        .bind(key_id)
-        .bind(model)
         .execute(&conn)
         .await
         .map_err(|e| ProxyError::DatabaseError(format!("Failed to reset model usage: {e}")))?
