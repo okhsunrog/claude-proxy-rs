@@ -1,15 +1,20 @@
 use llm_relay::Usage;
 use serde::{Deserialize, Serialize};
-use tracing::warn;
 use utoipa::ToSchema;
 
 use super::client_keys::{
     ClientKeysStore, TokenLimits, TokenUsage, UsageResetType, i64_to_u64, opt_i64_to_u64,
 };
-use crate::db::{self, Connection};
+use crate::db;
 use crate::error::ProxyError;
 use crate::subscription::timestamp_millis;
 use crate::usage::SubscriptionState;
+
+mod cost;
+mod windows;
+
+use cost::{aggregate_usage_costs, compute_cost, query_model_cost};
+use windows::{WindowState, maybe_reset_expired_windows};
 
 // ============================================================================
 // Structs
@@ -38,204 +43,6 @@ pub struct ModelUsageEntry {
     #[serde(rename = "fiveHourResetAt")]
     pub five_hour_reset_at: u64,
     pub weekly_reset_at: u64,
-}
-
-// ============================================================================
-// Centralized helpers
-// ============================================================================
-
-/// Window boundary state read from client_keys.
-struct WindowState {
-    five_hour_count_from: u64,
-    weekly_count_from: u64,
-    total_count_from: u64,
-}
-
-/// Check and update window boundaries. When a window has expired, advances
-/// the count_from timestamp and updates the reset_at from subscription state.
-/// No counter zeroing — request_log queries use count_from as the lower bound.
-///
-/// Returns the current window state.
-async fn maybe_reset_expired_windows(
-    conn: &Connection,
-    key_id: &str,
-    now: u64,
-    window_resets: &SubscriptionState,
-) -> Result<WindowState, ProxyError> {
-    let five_hour_ms: u64 = 5 * 60 * 60 * 1000;
-    let one_week_ms: u64 = 7 * 24 * 60 * 60 * 1000;
-
-    let row = sqlx::query!(
-        "SELECT five_hour_reset_at, weekly_reset_at, five_hour_count_from, weekly_count_from, total_count_from FROM client_keys WHERE id = $1",
-        key_id,
-    )
-    .fetch_optional(conn)
-    .await
-    .map_err(|e| ProxyError::DatabaseError(format!("Failed to read window state: {e}")))?;
-
-    let Some(row) = row else {
-        return Ok(WindowState {
-            five_hour_count_from: 0,
-            weekly_count_from: 0,
-            total_count_from: 0,
-        });
-    };
-
-    let mut five_hour_reset_at = i64_to_u64(row.five_hour_reset_at);
-    let mut weekly_reset_at = i64_to_u64(row.weekly_reset_at);
-    let mut five_hour_count_from = i64_to_u64(row.five_hour_count_from);
-    let mut weekly_count_from = i64_to_u64(row.weekly_count_from);
-    let total_count_from = i64_to_u64(row.total_count_from);
-
-    let reset_five_hour = five_hour_reset_at > 0 && now >= five_hour_reset_at;
-    let reset_weekly = weekly_reset_at > 0 && now >= weekly_reset_at;
-
-    if !reset_five_hour && !reset_weekly {
-        // Re-sync: adopt subscription timestamps if they're earlier (without changing count_from)
-        let new_five_hour = window_resets
-            .five_hour_reset_at
-            .filter(|&t| t > now && t < five_hour_reset_at)
-            .unwrap_or(five_hour_reset_at);
-        let new_weekly = window_resets
-            .seven_day_reset_at
-            .filter(|&t| t > now && t < weekly_reset_at)
-            .unwrap_or(weekly_reset_at);
-
-        if new_five_hour != five_hour_reset_at || new_weekly != weekly_reset_at {
-            let _ = sqlx::query!(
-                "UPDATE client_keys SET five_hour_reset_at = $1, weekly_reset_at = $2 WHERE id = $3",
-                new_five_hour as i64,
-                new_weekly as i64,
-                key_id,
-            )
-            .execute(conn)
-                .await;
-        }
-
-        return Ok(WindowState {
-            five_hour_count_from,
-            weekly_count_from,
-            total_count_from,
-        });
-    }
-
-    // Window(s) expired: advance count_from to old reset_at (new window starts there)
-    if reset_five_hour {
-        five_hour_count_from = five_hour_reset_at;
-        five_hour_reset_at = window_resets
-            .five_hour_reset_at
-            .filter(|&t| t > now)
-            .unwrap_or(now + five_hour_ms);
-    }
-    if reset_weekly {
-        weekly_count_from = weekly_reset_at;
-        weekly_reset_at = window_resets
-            .seven_day_reset_at
-            .filter(|&t| t > now)
-            .unwrap_or(now + one_week_ms);
-    }
-
-    // Update client_keys with new count_from + reset_at values
-    sqlx::query!(
-        "UPDATE client_keys SET five_hour_reset_at = $1, weekly_reset_at = $2, five_hour_count_from = $3, weekly_count_from = $4 WHERE id = $5",
-        five_hour_reset_at as i64,
-        weekly_reset_at as i64,
-        five_hour_count_from as i64,
-        weekly_count_from as i64,
-        key_id,
-    )
-    .execute(conn)
-    .await
-    .map_err(|e| ProxyError::DatabaseError(format!("Failed to update window state: {e}")))?;
-
-    Ok(WindowState {
-        five_hour_count_from,
-        weekly_count_from,
-        total_count_from,
-    })
-}
-
-/// Aggregate usage cost from request_log for a key across all three windows.
-/// Returns (five_hour_cost, weekly_cost, total_cost) in microdollars.
-async fn aggregate_usage_costs(
-    conn: &Connection,
-    key_id: &str,
-    ws: &WindowState,
-) -> Result<(u64, u64, u64), ProxyError> {
-    let min_from = ws
-        .five_hour_count_from
-        .min(ws.weekly_count_from)
-        .min(ws.total_count_from);
-
-    let row = sqlx::query!(
-        "SELECT \
-         COALESCE(SUM(CASE WHEN created_at >= $1 THEN cost_microdollars ELSE 0 END), 0)::BIGINT AS \"five_hour!\", \
-         COALESCE(SUM(CASE WHEN created_at >= $2 THEN cost_microdollars ELSE 0 END), 0)::BIGINT AS \"weekly!\", \
-         COALESCE(SUM(CASE WHEN created_at >= $3 THEN cost_microdollars ELSE 0 END), 0)::BIGINT AS \"total!\" \
-         FROM request_log WHERE key_id = $4 AND created_at >= $5",
-        ws.five_hour_count_from as i64,
-        ws.weekly_count_from as i64,
-        ws.total_count_from as i64,
-        key_id,
-        min_from as i64,
-    )
-    .fetch_one(conn)
-    .await
-    .map_err(|e| ProxyError::DatabaseError(format!("Failed to aggregate usage: {e}")))?;
-
-    Ok((
-        i64_to_u64(row.five_hour),
-        i64_to_u64(row.weekly),
-        i64_to_u64(row.total),
-    ))
-}
-
-/// Query the sum of cost_microdollars from request_log for a specific key+model
-/// where created_at >= the given threshold.
-async fn query_model_cost(
-    conn: &Connection,
-    key_id: &str,
-    model: &str,
-    from: u64,
-) -> Result<u64, ProxyError> {
-    let cost = sqlx::query_scalar!(
-        "SELECT COALESCE(SUM(cost_microdollars), 0)::BIGINT AS \"cost!\" FROM request_log WHERE key_id = $1 AND model = $2 AND created_at >= $3",
-        key_id,
-        model,
-        from as i64,
-    )
-    .fetch_one(conn)
-    .await
-    .map_err(|e| ProxyError::DatabaseError(format!("Failed to query model cost: {e}")))?;
-
-    Ok(i64_to_u64(cost))
-}
-
-/// Look up model pricing and compute cost in microdollars.
-/// Returns 0 if model is not found in the models table.
-async fn compute_cost(conn: &Connection, model: &str, report: &Usage) -> u64 {
-    let Ok(row) = sqlx::query!(
-        "SELECT input_price, output_price, cache_read_price, cache_write_price FROM models WHERE id = $1",
-        model,
-    )
-    .fetch_optional(conn)
-    .await
-    else {
-        warn!("Failed to look up pricing for model {model}, recording cost as 0");
-        return 0;
-    };
-
-    let Some(row) = row else {
-        warn!("Model {model} not found in models table, recording cost as 0");
-        return 0;
-    };
-
-    let cost = report.input_tokens as f64 * row.input_price
-        + report.output_tokens as f64 * row.output_price
-        + report.cache_read_input_tokens.unwrap_or(0) as f64 * row.cache_read_price
-        + report.cache_creation_input_tokens.unwrap_or(0) as f64 * row.cache_write_price;
-
-    cost.round() as u64
 }
 
 // ============================================================================

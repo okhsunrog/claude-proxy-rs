@@ -2296,6 +2296,7 @@ dependencies = [
  "bitflags",
  "byteorder",
  "bytes",
+ "crc",
  "digest 0.11.2",
  "dotenvy",
  "either",

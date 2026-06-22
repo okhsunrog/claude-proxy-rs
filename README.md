@@ -89,7 +89,7 @@ Capture files may contain prompts, tool results, code, and model outputs. API ke
 
 All data (OAuth credentials, API keys, usage) is stored in PostgreSQL. Configure the connection with `CLAUDE_PROXY_DATABASE_URL` or `DATABASE_URL`.
 
-SQL queries use `sqlx::query!`/`query_as!` compile-time checks. The generated `.sqlx/` metadata is committed so normal builds and CI do not need database access. After changing SQL, run this with `DATABASE_URL` pointing at a PostgreSQL schema matching `src/db.rs`:
+SQL queries use `sqlx::query!`/`query_as!` compile-time checks. The generated `.sqlx/` metadata is committed so normal builds and CI do not need database access. After changing SQL, run this with `DATABASE_URL` pointing at a PostgreSQL schema matching `migrations/`:
 
 ```bash
 just sqlx-prepare

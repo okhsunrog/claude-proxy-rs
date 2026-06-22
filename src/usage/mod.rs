@@ -14,6 +14,7 @@ mod cache;
 mod error;
 mod fetchers;
 mod headers;
+pub mod history;
 mod types;
 
 pub use cache::UsageCache;

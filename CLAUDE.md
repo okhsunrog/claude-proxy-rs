@@ -33,15 +33,15 @@ Unified API proxy that lets AI coding assistants (Cline, Roo Code, etc.) use a C
 
 **Database**: PostgreSQL. Configure with `CLAUDE_PROXY_DATABASE_URL` or `DATABASE_URL`. A global `sqlx::PgPool` is initialized via `OnceCell` in `src/db.rs`.
 
-SQL must use `sqlx::query!`, `query_as!`, or `query_scalar!` macros so queries are checked at compile time. Keep `.sqlx/` committed; run `just sqlx-prepare` with `DATABASE_URL` pointed at a PostgreSQL schema matching `src/db.rs` whenever SQL changes.
+SQL must use `sqlx::query!`, `query_as!`, or `query_scalar!` macros so queries are checked at compile time. Keep `.sqlx/` committed; run `just sqlx-prepare` with `DATABASE_URL` pointed at a PostgreSQL schema matching `migrations/` whenever SQL changes.
 
 ### Database Schema
 
-Schema setup is managed in `src/db.rs`. Key points:
+Schema setup is managed by sqlx migrations in `migrations/`. Key points:
 
-- On startup, `create_current_schema()` ensures all current PostgreSQL tables and indexes exist
+- On startup, `sqlx::migrate!("./migrations")` applies pending PostgreSQL migrations
 - `seed_models_if_empty()` inserts default model pricing when the `models` table is empty
-- Schema changes should be applied explicitly when needed
+- Schema changes should be added as explicit migrations
 
 ## Module Structure
 
@@ -66,7 +66,7 @@ Schema setup is managed in `src/db.rs`. Key points:
   - `usage.rs` — Token usage tracking, cost calculation in microdollars (1 USD = 1,000,000 microdollars)
 - **`src/config.rs`** — Environment variable config (`CLAUDE_PROXY_HOST`, `CLAUDE_PROXY_PORT`, `CLAUDE_PROXY_DATABASE_URL`/`DATABASE_URL`, `CLAUDE_PROXY_ADMIN_USERNAME`, `CLAUDE_PROXY_ADMIN_PASSWORD`, `CLAUDE_PROXY_CORS_ORIGINS`)
 - **`src/constants.rs`** — API URLs, seed model list with pricing, beta headers, output token limits
-- **`src/db.rs`** — PostgreSQL initialization and current schema setup
+- **`src/db.rs`** — PostgreSQL pool initialization, migration runner, and seed data setup
 - **`src/error.rs`** — `ProxyError` enum with OpenAI and Anthropic error response formats
 
 ## Frontend (`admin-ui/`)
