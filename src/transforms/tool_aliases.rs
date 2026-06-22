@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
+#[cfg(test)]
+use serde_json::json;
 
 const CLAUDE_CODE_TOOLS: &[&str] = &[
     "mcp_Agent",
@@ -316,7 +318,6 @@ fn restore_unaliased(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     #[test]
     fn normalizes_common_tool_aliases() {

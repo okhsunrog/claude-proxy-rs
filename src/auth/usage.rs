@@ -5,6 +5,8 @@
 
 use llm_relay::Usage;
 use serde_json::Value;
+#[cfg(test)]
+use serde_json::json;
 
 /// Add another usage report to this one (useful for accumulating in streams).
 pub fn add_usage(a: &mut Usage, b: &Usage) {
@@ -40,7 +42,6 @@ pub fn usage_from_json(value: &Value) -> Usage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     #[test]
     fn test_add_usage() {

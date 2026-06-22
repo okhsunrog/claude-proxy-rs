@@ -11,9 +11,13 @@ use llm_relay::convert::thinking::{
     supports_adaptive_thinking,
 };
 use llm_relay::convert::to_anthropic::inbound_request_to_anthropic;
+#[cfg(test)]
+use llm_relay::convert::to_anthropic::openai_tool_to_anthropic;
 use llm_relay::convert::to_openai::anthropic_response_to_openai;
 use llm_relay::convert::tool_names::strip_mcp_prefix;
 use llm_relay::types::openai::{ChatResponse, InboundChatRequest};
+#[cfg(test)]
+use llm_relay::{EffortLevel, ThinkingConfig};
 use serde_json::{Value, json};
 
 use crate::constants::{DEFAULT_MAX_OUTPUT, OPUS_4_6_MAX_OUTPUT};
@@ -180,8 +184,6 @@ mod tests {
 
     #[test]
     fn test_build_thinking_for_model_opus_4_6() {
-        use llm_relay::{EffortLevel, ThinkingConfig};
-
         // Opus 4.6 should use adaptive thinking
         let config = build_thinking_for_model("claude-opus-4-6", "high").unwrap();
         assert!(matches!(
@@ -219,8 +221,6 @@ mod tests {
 
     #[test]
     fn test_build_thinking_for_model_older_models() {
-        use llm_relay::ThinkingConfig;
-
         // Older models should use manual thinking with budget_tokens
         let config = build_thinking_for_model("claude-sonnet-4-5", "high").unwrap();
         assert!(matches!(
@@ -250,8 +250,6 @@ mod tests {
 
     #[test]
     fn test_convert_openai_tool() {
-        use llm_relay::convert::to_anthropic::openai_tool_to_anthropic;
-
         let openai_tool = json!({
             "type": "function",
             "function": {

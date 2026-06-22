@@ -9,7 +9,7 @@
 
 use async_stream::stream;
 use bytes::Bytes;
-use futures_util::Stream;
+use futures_util::{Stream, StreamExt};
 use serde::Deserialize;
 use serde_json::{Value, from_str, json, to_string};
 use std::io::Error as IoError;
@@ -108,8 +108,6 @@ pub fn stream_anthropic_to_openai_with_usage(
     key_id: String,
 ) -> impl Stream<Item = Result<Bytes, IoError>> + Send {
     stream! {
-        use futures_util::StreamExt;
-
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -351,8 +349,6 @@ fn stream_transform_native_tool_names_with_usage(
     model: String,
     tool_name_map: ToolNameMap,
 ) -> impl Stream<Item = Result<Bytes, IoError>> + Send {
-    use futures_util::StreamExt;
-
     stream! {
         let mut body = pin!(body);
         let mut buffer = String::new();
@@ -460,10 +456,6 @@ fn stream_transform_native_tool_names_with_usage(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::usage::add_usage;
-    use llm_relay::Usage;
-    use llm_relay::convert::tool_names::strip_mcp_prefix;
-    use serde_json::from_str;
 
     #[test]
     fn test_map_stop_reason() {
