@@ -1,37 +1,14 @@
 import { ref, computed } from 'vue'
+import type { TimeseriesPoint, ModelBreakdown, KeyBreakdown } from '../client'
+import {
+  getUsageHistoryTimeseries,
+  getUsageHistoryByModel,
+  getUsageHistoryByKey,
+  deleteUsageHistory,
+} from '../client'
 
 export type Period = '24h' | '7d' | '30d'
-
-export interface TimeseriesPoint {
-  timestamp: number
-  requestCount: number
-  costMicrodollars: number
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens: number
-  cacheWriteTokens: number
-}
-
-export interface ModelBreakdown {
-  model: string
-  requestCount: number
-  costMicrodollars: number
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens: number
-  cacheWriteTokens: number
-}
-
-export interface KeyBreakdown {
-  keyId: string
-  keyName: string | null
-  requestCount: number
-  costMicrodollars: number
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens: number
-  cacheWriteTokens: number
-}
+export type { TimeseriesPoint, ModelBreakdown, KeyBreakdown }
 
 const period = ref<Period>('24h')
 const timeseries = ref<TimeseriesPoint[]>([])
@@ -75,14 +52,9 @@ export function useUsageHistory() {
 
   async function fetchTimeseries() {
     try {
-      const res = await fetch(`/admin/usage-history/timeseries?period=${period.value}`, {
-        credentials: 'same-origin',
-      })
-      if (res.ok) {
-        const data = await res.json()
-        timeseries.value = data.points ?? []
-        granularity.value = data.granularity ?? 'hour'
-      }
+      const { data } = await getUsageHistoryTimeseries({ query: { period: period.value } })
+      timeseries.value = data?.points ?? []
+      granularity.value = data?.granularity ?? 'hour'
     } catch (e) {
       console.error('Failed to fetch timeseries:', e)
     }
@@ -90,13 +62,8 @@ export function useUsageHistory() {
 
   async function fetchByModel() {
     try {
-      const res = await fetch(`/admin/usage-history/by-model?period=${period.value}`, {
-        credentials: 'same-origin',
-      })
-      if (res.ok) {
-        const data = await res.json()
-        byModel.value = data.models ?? []
-      }
+      const { data } = await getUsageHistoryByModel({ query: { period: period.value } })
+      byModel.value = data?.models ?? []
     } catch (e) {
       console.error('Failed to fetch by-model:', e)
     }
@@ -104,13 +71,8 @@ export function useUsageHistory() {
 
   async function fetchByKey() {
     try {
-      const res = await fetch(`/admin/usage-history/by-key?period=${period.value}`, {
-        credentials: 'same-origin',
-      })
-      if (res.ok) {
-        const data = await res.json()
-        byKey.value = data.keys ?? []
-      }
+      const { data } = await getUsageHistoryByKey({ query: { period: period.value } })
+      byKey.value = data?.keys ?? []
     } catch (e) {
       console.error('Failed to fetch by-key:', e)
     }
@@ -127,13 +89,8 @@ export function useUsageHistory() {
 
   async function clearHistory() {
     try {
-      const res = await fetch('/admin/usage-history', {
-        method: 'DELETE',
-        credentials: 'same-origin',
-      })
-      if (res.ok) {
-        await fetchAll()
-      }
+      await deleteUsageHistory()
+      await fetchAll()
     } catch (e) {
       console.error('Failed to clear history:', e)
     }

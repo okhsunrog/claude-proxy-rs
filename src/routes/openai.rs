@@ -5,9 +5,10 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use serde_json::{Value, from_str, from_value, json};
+use serde::Deserialize;
+use serde_json::{Value, from_str, json};
 use std::sync::Arc;
-use tracing::warn;
+use tracing::{info, warn};
 
 use llm_relay::MessagesResponse;
 use llm_relay::types::openai::InboundChatRequest;
@@ -53,7 +54,9 @@ pub async fn chat_completions(
     headers: HeaderMap,
     Json(raw_body): Json<Value>,
 ) -> Response {
-    let body: InboundChatRequest = match from_value(raw_body.clone()) {
+    // Deserialize from a borrow so `raw_body` stays owned for request capture,
+    // avoiding a full clone of the JSON body on every request.
+    let body: InboundChatRequest = match InboundChatRequest::deserialize(&raw_body) {
         Ok(body) => body,
         Err(e) => {
             return (
@@ -121,6 +124,40 @@ pub async fn chat_completions(
             return ProxyError::AnthropicApiError(format!("Failed to contact Anthropic: {}", e))
                 .to_openai_response();
         }
+    };
+
+    // On 401, force-refresh the OAuth token and retry once. This handles server-side
+    // token revocation (e.g. password change) without waiting for local expiry.
+    let response = if response.status() == StatusCode::UNAUTHORIZED {
+        info!("Anthropic returned 401, force-refreshing OAuth token and retrying");
+        let new_token = match state.oauth.force_refresh().await {
+            Ok(Some(t)) => t,
+            Ok(None) => {
+                return ProxyError::NoAuthConfigured.to_openai_response();
+            }
+            Err(e) => {
+                return ProxyError::OAuthError(e).to_openai_response();
+            }
+        };
+        let retry_builder = build_anthropic_request(
+            &state.http_client,
+            ANTHROPIC_API_URL,
+            &new_token,
+            Some(&prepared.betas),
+            &state.session_id,
+        );
+        match retry_builder.json(&prepared.body).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                return ProxyError::AnthropicApiError(format!(
+                    "Failed to contact Anthropic on retry: {}",
+                    e
+                ))
+                .to_openai_response();
+            }
+        }
+    } else {
+        response
     };
 
     if !response.status().is_success() {

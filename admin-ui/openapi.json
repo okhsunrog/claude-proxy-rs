@@ -3,7 +3,7 @@
   "info": {
     "title": "Claude Proxy Admin API",
     "description": "Admin API for Claude Proxy",
-    "version": "1.0.0"
+    "version": "2.0.0"
   },
   "paths": {
     "/keys": {
