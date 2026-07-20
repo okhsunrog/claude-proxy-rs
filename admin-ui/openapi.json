@@ -3,7 +3,7 @@
   "info": {
     "title": "Claude Proxy Admin API",
     "description": "Admin API for Claude Proxy",
-    "version": "2.0.0"
+    "version": "2.0.1"
   },
   "paths": {
     "/keys": {
@@ -1663,6 +1663,71 @@
           }
         }
       },
+      "LimitEntry": {
+        "type": "object",
+        "description": "One entry of the `limits` array in the usage response. This is where\nAnthropic now reports per-model weekly limits (e.g. a `weekly_scoped`\nentry with `scope.model.display_name = \"Fable\"`), replacing the legacy\n`seven_day_opus` / `seven_day_sonnet` fields which now come back null.",
+        "properties": {
+          "group": {
+            "type": ["string", "null"],
+            "description": "e.g. \"session\", \"weekly\""
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": ["string", "null"],
+            "description": "e.g. \"session\", \"weekly_all\", \"weekly_scoped\""
+          },
+          "percent": {
+            "type": ["number", "null"],
+            "format": "double"
+          },
+          "resets_at": {
+            "type": ["string", "null"]
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LimitScope"
+              }
+            ]
+          },
+          "severity": {
+            "type": ["string", "null"],
+            "description": "e.g. \"normal\", \"warning\", \"critical\""
+          }
+        }
+      },
+      "LimitScope": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LimitScopeModel"
+              }
+            ]
+          }
+        }
+      },
+      "LimitScopeModel": {
+        "type": "object",
+        "description": "The model (and optionally surface) a scoped [`LimitEntry`] applies to.",
+        "properties": {
+          "display_name": {
+            "type": ["string", "null"]
+          },
+          "id": {
+            "type": ["string", "null"]
+          }
+        }
+      },
       "ListKeysResponse": {
         "type": "object",
         "required": ["keys"],
@@ -1930,12 +1995,19 @@
           "full_fetched_at": {
             "type": ["integer", "null"],
             "format": "int64",
-            "description": "Epoch-ms timestamp of the last successful full HTTP fetch. Tracks the\nfreshness of extras (`extra_usage`, `seven_day_sonnet`, etc.) that\ncannot be derived from `/v1/messages` headers.",
+            "description": "Epoch-ms timestamp of the last successful full HTTP fetch. Tracks the\nfreshness of extras (`extra_usage`, `limits`, etc.) that\ncannot be derived from `/v1/messages` headers.",
             "minimum": 0
           },
           "is_stale": {
             "type": "boolean",
             "description": "True when this response was served from cache after a failed refresh\nattempt, or assembled from `/v1/messages` response headers because no\nfull fetch has succeeded yet."
+          },
+          "limits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LimitEntry"
+            },
+            "description": "Structured limit list; per-model weekly limits live here as\n`weekly_scoped` entries (the legacy per-model fields above are null\non current accounts)."
           },
           "seven_day": {
             "oneOf": [

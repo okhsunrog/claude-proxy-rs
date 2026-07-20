@@ -14,8 +14,8 @@
 //!   `/v1/messages` response. Under active inference this is nearly
 //!   always within seconds.
 //! - **`full_fetched_at`** — when the last *full* HTTP fetch succeeded.
-//!   Tracks the freshness of extras (`extra_usage`, `seven_day_sonnet`,
-//!   etc.) that cannot be derived from headers.
+//!   Tracks the freshness of extras (`extra_usage`, `limits`, etc.)
+//!   that cannot be derived from headers.
 //!
 //! [`get_or_refresh`] triggers an HTTP fetch if *either* timestamp is
 //! older than its respective threshold:
@@ -49,8 +49,8 @@ use crate::AppState;
 const UTIL_MAX_AGE_MS: u64 = 60 * 1000;
 
 /// Maximum age of `full_fetched_at` before [`get_or_refresh`] will trigger
-/// a fetch. Bounds the staleness of extras (`extra_usage`,
-/// `seven_day_sonnet`, etc.) that aren't derivable from headers.
+/// a fetch. Bounds the staleness of extras (`extra_usage`, `limits`,
+/// etc.) that aren't derivable from headers.
 const FULL_MAX_AGE_MS: u64 = 5 * 60 * 1000;
 
 pub struct UsageCache {

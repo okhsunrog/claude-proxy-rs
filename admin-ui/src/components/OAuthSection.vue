@@ -203,19 +203,36 @@ function getUsageItems(): UsageDisplayItem[] {
       resetsAt: u.seven_day.resets_at,
     })
   }
-  if (u.seven_day_opus?.utilization != null) {
+  // Per-model weekly limits now arrive as `weekly_scoped` entries in the
+  // `limits` array (e.g. scope.model.display_name = "Fable"); the legacy
+  // seven_day_opus/seven_day_sonnet fields are null on current accounts
+  // but kept as a fallback for older cached snapshots.
+  let hasScoped = false
+  for (const l of u.limits ?? []) {
+    if (l.kind !== 'weekly_scoped' || l.percent == null) continue
+    hasScoped = true
+    const model = l.scope?.model?.display_name ?? l.scope?.model?.id ?? 'model'
     items.push({
-      label: 'Weekly (Opus)',
-      utilization: u.seven_day_opus.utilization,
-      resetsAt: u.seven_day_opus.resets_at,
+      label: `Weekly (${model})`,
+      utilization: l.percent,
+      resetsAt: l.resets_at,
     })
   }
-  if (u.seven_day_sonnet?.utilization != null) {
-    items.push({
-      label: 'Weekly (Sonnet)',
-      utilization: u.seven_day_sonnet.utilization,
-      resetsAt: u.seven_day_sonnet.resets_at,
-    })
+  if (!hasScoped) {
+    if (u.seven_day_opus?.utilization != null) {
+      items.push({
+        label: 'Weekly (Opus)',
+        utilization: u.seven_day_opus.utilization,
+        resetsAt: u.seven_day_opus.resets_at,
+      })
+    }
+    if (u.seven_day_sonnet?.utilization != null) {
+      items.push({
+        label: 'Weekly (Sonnet)',
+        utilization: u.seven_day_sonnet.utilization,
+        resetsAt: u.seven_day_sonnet.resets_at,
+      })
+    }
   }
   if (u.extra_usage) {
     const e = u.extra_usage

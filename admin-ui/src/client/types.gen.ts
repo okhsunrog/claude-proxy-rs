@@ -82,6 +82,43 @@ export type KeyUsageResponse = {
     usage: TokenUsage;
 };
 
+/**
+ * One entry of the `limits` array in the usage response. This is where
+ * Anthropic now reports per-model weekly limits (e.g. a `weekly_scoped`
+ * entry with `scope.model.display_name = "Fable"`), replacing the legacy
+ * `seven_day_opus` / `seven_day_sonnet` fields which now come back null.
+ */
+export type LimitEntry = {
+    /**
+     * e.g. "session", "weekly"
+     */
+    group?: string | null;
+    is_active?: boolean;
+    /**
+     * e.g. "session", "weekly_all", "weekly_scoped"
+     */
+    kind?: string | null;
+    percent?: number | null;
+    resets_at?: string | null;
+    scope?: null | LimitScope;
+    /**
+     * e.g. "normal", "warning", "critical"
+     */
+    severity?: string | null;
+};
+
+export type LimitScope = {
+    model?: null | LimitScopeModel;
+};
+
+/**
+ * The model (and optionally surface) a scoped [`LimitEntry`] applies to.
+ */
+export type LimitScopeModel = {
+    display_name?: string | null;
+    id?: string | null;
+};
+
 export type ListKeysResponse = {
     keys: Array<ClientKey>;
 };
@@ -178,7 +215,7 @@ export type SubscriptionUsageResponse = {
     five_hour?: null | UsageLimit;
     /**
      * Epoch-ms timestamp of the last successful full HTTP fetch. Tracks the
-     * freshness of extras (`extra_usage`, `seven_day_sonnet`, etc.) that
+     * freshness of extras (`extra_usage`, `limits`, etc.) that
      * cannot be derived from `/v1/messages` headers.
      */
     full_fetched_at?: number | null;
@@ -188,6 +225,12 @@ export type SubscriptionUsageResponse = {
      * full fetch has succeeded yet.
      */
     is_stale?: boolean;
+    /**
+     * Structured limit list; per-model weekly limits live here as
+     * `weekly_scoped` entries (the legacy per-model fields above are null
+     * on current accounts).
+     */
+    limits?: Array<LimitEntry>;
     seven_day?: null | UsageLimit;
     seven_day_oauth_apps?: null | UsageLimit;
     seven_day_opus?: null | UsageLimit;

@@ -12,6 +12,40 @@ pub struct UsageLimit {
     pub resets_at: Option<String>,
 }
 
+/// The model (and optionally surface) a scoped [`LimitEntry`] applies to.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct LimitScopeModel {
+    pub id: Option<String>,
+    pub display_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct LimitScope {
+    pub model: Option<LimitScopeModel>,
+}
+
+/// One entry of the `limits` array in the usage response. This is where
+/// Anthropic now reports per-model weekly limits (e.g. a `weekly_scoped`
+/// entry with `scope.model.display_name = "Fable"`), replacing the legacy
+/// `seven_day_opus` / `seven_day_sonnet` fields which now come back null.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct LimitEntry {
+    /// e.g. "session", "weekly_all", "weekly_scoped"
+    pub kind: Option<String>,
+    /// e.g. "session", "weekly"
+    pub group: Option<String>,
+    pub percent: Option<f64>,
+    /// e.g. "normal", "warning", "critical"
+    pub severity: Option<String>,
+    pub resets_at: Option<String>,
+    pub scope: Option<LimitScope>,
+    #[serde(default)]
+    pub is_active: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ExtraUsage {
@@ -37,6 +71,11 @@ pub struct SubscriptionUsageResponse {
     pub seven_day_oauth_apps: Option<UsageLimit>,
     pub seven_day_opus: Option<UsageLimit>,
     pub seven_day_sonnet: Option<UsageLimit>,
+    /// Structured limit list; per-model weekly limits live here as
+    /// `weekly_scoped` entries (the legacy per-model fields above are null
+    /// on current accounts).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub limits: Vec<LimitEntry>,
     pub extra_usage: Option<ExtraUsage>,
     /// True when this response was served from cache after a failed refresh
     /// attempt, or assembled from `/v1/messages` response headers because no
@@ -52,7 +91,7 @@ pub struct SubscriptionUsageResponse {
     #[serde(default)]
     pub source: UsageSource,
     /// Epoch-ms timestamp of the last successful full HTTP fetch. Tracks the
-    /// freshness of extras (`extra_usage`, `seven_day_sonnet`, etc.) that
+    /// freshness of extras (`extra_usage`, `limits`, etc.) that
     /// cannot be derived from `/v1/messages` headers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub full_fetched_at: Option<u64>,
