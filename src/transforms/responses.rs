@@ -56,7 +56,22 @@ pub fn prepare_request(
     policy: llm_relay::protocol::Policy,
 ) -> Result<llm_relay::protocol::Translation, String> {
     use llm_relay::protocol::{Diagnostic, Protocol, translate_request};
-    let mut translated = translate_request(source, Protocol::Responses, body)?;
+    // Messages context editing is a server-side provider capability. The
+    // subscription backend cannot perform it; retain the full supplied history.
+    let mut body = body.clone();
+    let context_management = if source == Protocol::Messages {
+        body.as_object_mut()
+            .and_then(|object| object.remove("context_management"))
+    } else {
+        None
+    };
+    let mut translated = translate_request(source, Protocol::Responses, &body)?;
+    if context_management.is_some_and(|value| !value.is_null()) {
+        translated.diagnostics.push(Diagnostic {
+            field: "context_management".into(),
+            reason: "Server-side context editing unavailable; full history retained".into(),
+        });
+    }
     let object = translated.body.as_object_mut().ok_or("Expected object")?;
     for field in ["max_output_tokens", "temperature", "top_p", "top_k", "stop"] {
         if object.get(field).is_some_and(|v| !v.is_null()) {
@@ -86,6 +101,33 @@ mod tests {
         assert_eq!(result.body["stream"], true);
         assert_eq!(result.body["store"], false);
         prepare_request(Protocol::Messages, &body, Policy::Strict).unwrap_err();
+    }
+
+    #[test]
+    fn messages_context_management_preserves_history_and_reports_loss() {
+        let body = json!({
+            "model": "gpt-test",
+            "messages": [{"role":"user","content":"Keep this conversation"}],
+            "thinking": {"type":"adaptive", "display":"omitted"},
+            "output_config": {"effort":"high"},
+            "context_management": {"edits":[{"type":"clear_thinking_20251015","keep":"all"}]}
+        });
+        let converted = prepare_request(Protocol::Messages, &body, Policy::Compatible).unwrap();
+        assert!(converted.body.get("context_management").is_none());
+        assert_eq!(
+            converted.body["input"][0]["content"][0]["text"],
+            "Keep this conversation"
+        );
+        assert_eq!(converted.body["reasoning"]["effort"], "high");
+        assert!(
+            converted
+                .diagnostics
+                .iter()
+                .any(|d| d.field == "context_management")
+        );
+        let error = prepare_request(Protocol::Messages, &body, Policy::Strict).unwrap_err();
+        assert!(error.contains("context_management"));
+        assert!(body.get("context_management").is_some());
     }
 
     #[test]

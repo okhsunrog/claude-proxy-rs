@@ -9,7 +9,8 @@ args = parser.parse_args()
 client = Anthropic(base_url=os.environ['PROXY_BASE_URL'].rstrip('/'), api_key=os.environ['PROXY_API_KEY'], timeout=180, max_retries=0)
 base = dict(model=args.model, max_tokens=256)
 messages = [{'role': 'user', 'content': 'Reply exactly OK.'}]
-raw = client.messages.with_raw_response.create(**base, messages=messages)
+raw = client.messages.with_raw_response.create(**base, messages=messages, extra_body={'context_management': {'edits': [{'type': 'clear_thinking_20251015', 'keep': 'all'}]}})
+assert 'context_management' in raw.headers['x-proxy-compatibility-warnings']
 assert 'max_output_tokens' in raw.headers['x-proxy-compatibility-warnings']
 reply = raw.parse()
 assert any(b.type == 'text' and b.text for b in reply.content)
