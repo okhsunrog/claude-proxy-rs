@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
+use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
+use subtle::ConstantTimeEq;
 use tokio::sync::{Mutex, RwLock};
 use tracing::warn;
 use urlencoding::encode;
@@ -34,9 +36,15 @@ struct TokenResponse {
     token_type: String,
 }
 
+struct PendingFlow {
+    verifier: String,
+    state: String,
+    started: Instant,
+}
+
 pub struct OAuthManager {
     client: Client,
-    verifier: RwLock<Option<String>>,
+    pending: RwLock<Option<PendingFlow>>,
     auth_store: Arc<AuthStore>,
     /// Prevents concurrent token refreshes (Anthropic rotates refresh tokens,
     /// so two simultaneous refreshes would invalidate each other).
@@ -47,7 +55,7 @@ impl OAuthManager {
     pub fn new(client: Client, auth_store: Arc<AuthStore>) -> Self {
         Self {
             client,
-            verifier: RwLock::new(None),
+            pending: RwLock::new(None),
             auth_store,
             refresh_lock: Mutex::new(()),
         }
@@ -71,7 +79,12 @@ impl OAuthManager {
         let verifier = Self::generate_verifier();
         let challenge = Self::generate_challenge(&verifier);
 
-        *self.verifier.write().await = Some(verifier.clone());
+        let state = Self::generate_verifier();
+        *self.pending.write().await = Some(PendingFlow {
+            verifier,
+            state: state.clone(),
+            started: Instant::now(),
+        });
 
         format!(
             "{}?code=true&client_id={}&response_type=code&redirect_uri={}&scope={}&code_challenge={}&code_challenge_method=S256&state={}",
@@ -80,20 +93,13 @@ impl OAuthManager {
             encode(REDIRECT_URI),
             encode(AUTHORIZE_SCOPES),
             challenge,
-            verifier
+            state
         )
     }
 
     pub async fn exchange_code(&self, code: &str) -> Result<(), String> {
-        let verifier = self
-            .verifier
-            .read()
-            .await
-            .clone()
-            .ok_or("No OAuth flow in progress")?;
-
-        // Code format is "actual_code#state"
-        let (actual_code, state) = code.split_once('#').unwrap_or((code, ""));
+        let (actual_code, state) = code.trim().split_once('#').ok_or("Expected code#state")?;
+        let verifier = self.take_verifier(actual_code, state).await?;
 
         let body = json!({
             "code": actual_code,
@@ -140,9 +146,27 @@ impl OAuthManager {
             .await
             .map_err(|e| format!("Failed to save auth: {}", e))?;
 
-        *self.verifier.write().await = None;
-
         Ok(())
+    }
+
+    async fn take_verifier(&self, code: &str, state: &str) -> Result<String, String> {
+        let mut pending = self.pending.write().await;
+        let flow = pending.as_ref().ok_or("No OAuth flow in progress")?;
+        if flow.started.elapsed() >= std::time::Duration::from_secs(600) {
+            *pending = None;
+            return Err("OAuth flow expired; start again".into());
+        }
+        if code.is_empty()
+            || state.is_empty()
+            || !bool::from(flow.state.as_bytes().ct_eq(state.as_bytes()))
+        {
+            return Err("Invalid OAuth callback state or empty code".into());
+        }
+        // Consume before network I/O: concurrent callbacks cannot exchange twice.
+        pending
+            .take()
+            .map(|flow| flow.verifier)
+            .ok_or_else(|| "No OAuth flow in progress".into())
     }
 
     async fn do_refresh(&self, refresh: String) -> Result<Option<String>, String> {
@@ -268,7 +292,7 @@ impl OAuthManager {
     }
 
     pub async fn logout(&self) -> Result<(), ProxyError> {
-        *self.verifier.write().await = None;
+        *self.pending.write().await = None;
         self.auth_store.remove("anthropic").await
     }
 
@@ -283,4 +307,47 @@ fn now_millis() -> u64 {
         .unwrap_or_default()
         .as_millis();
     u64::try_from(millis).unwrap_or(u64::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn callback_is_bound_to_latest_flow_and_consumed_once() {
+        let manager = OAuthManager::new(Client::new(), Arc::new(AuthStore::new()));
+        let first = manager.start_flow().await;
+        let first_state = url::Url::parse(&first)
+            .unwrap()
+            .query_pairs()
+            .find(|(k, _)| k == "state")
+            .unwrap()
+            .1
+            .into_owned();
+        let second = manager.start_flow().await;
+        let state = url::Url::parse(&second)
+            .unwrap()
+            .query_pairs()
+            .find(|(k, _)| k == "state")
+            .unwrap()
+            .1
+            .into_owned();
+        assert!(manager.take_verifier("code", &first_state).await.is_err());
+        assert!(manager.take_verifier("", &state).await.is_err());
+        let verifier = manager.take_verifier("code", &state).await.unwrap();
+        assert_ne!(verifier, state);
+        assert!(manager.take_verifier("code", &state).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn expired_callback_is_rejected() {
+        let manager = OAuthManager::new(Client::new(), Arc::new(AuthStore::new()));
+        *manager.pending.write().await = Some(PendingFlow {
+            verifier: "v".into(),
+            state: "s".into(),
+            started: Instant::now() - std::time::Duration::from_secs(601),
+        });
+        assert!(manager.take_verifier("code", "s").await.is_err());
+        assert!(manager.pending.read().await.is_none());
+    }
 }
