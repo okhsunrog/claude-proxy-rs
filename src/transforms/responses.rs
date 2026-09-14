@@ -65,7 +65,18 @@ pub fn prepare_request(
     } else {
         None
     };
+    let inline_system = if source == Protocol::Messages {
+        normalize_inline_system(&mut body)?
+    } else {
+        false
+    };
     let mut translated = translate_request(source, Protocol::Responses, &body)?;
+    if inline_system {
+        translated.diagnostics.push(Diagnostic {
+            field: "messages.system".into(),
+            reason: "Inline system messages moved to the system instruction field".into(),
+        });
+    }
     if context_management.is_some_and(|value| !value.is_null()) {
         translated.diagnostics.push(Diagnostic {
             field: "context_management".into(),
@@ -85,6 +96,45 @@ pub fn prepare_request(
     translated = translated.enforce(policy)?;
     translated.body = prepare(translated.body)?;
     Ok(translated)
+}
+
+// Recent clients send environment instructions as inline system messages,
+// although the Messages wire format places system instructions at the top level.
+fn normalize_inline_system(body: &mut Value) -> Result<bool, String> {
+    let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) else {
+        return Ok(false);
+    };
+    let mut instructions = Vec::new();
+    for message in messages
+        .iter()
+        .filter(|message| message["role"] == "system")
+    {
+        match &message["content"] {
+            Value::String(text) => instructions.push(json!({"type":"text", "text":text})),
+            Value::Array(parts)
+                if parts
+                    .iter()
+                    .all(|part| part["type"] == "text" && part["text"].is_string()) =>
+            {
+                instructions.extend(parts.iter().cloned())
+            }
+            _ => return Err("Inline system messages must contain text".into()),
+        }
+    }
+    let changed = messages.iter().any(|message| message["role"] == "system");
+    if !changed {
+        return Ok(false);
+    }
+    messages.retain(|message| message["role"] != "system");
+    let mut system = match body.get("system") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::String(text)) => vec![json!({"type":"text", "text":text})],
+        Some(Value::Array(parts)) => parts.clone(),
+        _ => return Err("system must be text or an array".into()),
+    };
+    system.extend(instructions);
+    body["system"] = json!(system);
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -128,6 +178,39 @@ mod tests {
         let error = prepare_request(Protocol::Messages, &body, Policy::Strict).unwrap_err();
         assert!(error.contains("context_management"));
         assert!(body.get("context_management").is_some());
+    }
+
+    #[test]
+    fn inline_system_instructions_are_retained_and_reported() {
+        let body = json!({"model":"gpt-test", "system":"Original instruction", "messages":[
+            {"role":"user", "content":"Hi"},
+            {"role":"system", "content":[{"type":"text", "text":"Environment", "cache_control":{"type":"ephemeral"}}]},
+            {"role":"system", "content":"Additional instruction"}
+        ]});
+        let converted = prepare_request(Protocol::Messages, &body, Policy::Compatible).unwrap();
+        assert_eq!(converted.body["input"][0]["role"], "developer");
+        assert_eq!(
+            converted.body["input"][0]["content"][0]["text"],
+            "Original instruction"
+        );
+        assert_eq!(
+            converted.body["input"][0]["content"][1]["text"],
+            "Environment"
+        );
+        assert_eq!(
+            converted.body["input"][0]["content"][2]["text"],
+            "Additional instruction"
+        );
+        assert_eq!(converted.body["input"][1]["role"], "user");
+        assert!(
+            converted
+                .diagnostics
+                .iter()
+                .any(|d| d.field == "messages.system")
+        );
+        prepare_request(Protocol::Messages, &body, Policy::Strict).unwrap_err();
+        let bad = json!({"model":"gpt-test","messages":[{"role":"system","content":[{"type":"tool_use"}]}]});
+        prepare_request(Protocol::Messages, &bad, Policy::Compatible).unwrap_err();
     }
 
     #[test]

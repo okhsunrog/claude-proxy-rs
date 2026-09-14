@@ -420,7 +420,8 @@ GPT Chat Completions and Messages default to compatible mode. Unsupported
 **not** cap GPT generation. Thinking token budgets approximate reasoning effort;
 Claude cache hints do not transfer. Messages `context_management` is ignored
 with a warning: server-side context editing is unavailable and the full supplied
-history is retained. Send `x-proxy-compatibility: strict` to reject
+history is retained. Inline `role: system` messages from newer clients are moved
+to system instructions with a `messages.system` warning. Send `x-proxy-compatibility: strict` to reject
 these approximations with HTTP 400. Native Responses defaults to strict mode;
 `x-proxy-compatibility: compatible` opts into the same control handling. Unsupported
 content and stateful requests always fail. Model-specific upstream restrictions
@@ -451,4 +452,5 @@ Run the live compatibility checks against your configured proxy:
 ```bash
 uv run --env-file .env --with openai scripts/test_chatgpt.py --model YOUR_MODEL_ID
 uv run --env-file .env --with anthropic scripts/test_chatgpt_messages.py --model YOUR_MODEL_ID
+uv run --env-file .env scripts/test_chatgpt_claude_code.py --model YOUR_MODEL_ID
 ```
