@@ -15,8 +15,7 @@ use crate::capture::{Capture, capture_byte_stream};
 use crate::constants::{ANTHROPIC_API_URL, ANTHROPIC_COUNT_TOKENS_URL};
 use crate::error::ProxyError;
 use crate::transforms::{
-    ToolNameMap, normalize_claude_code_tool_names, prepare_anthropic_request,
-    prepare_count_tokens_request, restore_response_tool_names,
+    prepare_anthropic_request, prepare_count_tokens_request, restore_response_tool_names,
     stream_restore_native_tool_names_with_usage,
 };
 
@@ -65,11 +64,7 @@ pub async fn messages(
             prepared.betas.push(beta);
         }
     }
-    let tool_name_map = if cloak {
-        normalize_claude_code_tool_names(&mut prepared.body)
-    } else {
-        ToolNameMap::default()
-    };
+    let tool_name_map = prepared.tool_name_map.clone();
     if let Some(capture) = &capture {
         capture
             .write_prepared(&prepared.body, &prepared.betas, cloak)

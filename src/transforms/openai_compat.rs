@@ -5,6 +5,7 @@
 //! llm-relay; this module adds proxy-specific concerns (model suffix parsing,
 //! thinking config, max_tokens caps, mcp_ prefix stripping).
 
+use super::tool_aliases::ToolNameMap;
 use llm_relay::MessagesResponse;
 use llm_relay::convert::thinking::{
     build_thinking_for_model, build_thinking_params_json, parse_model_suffix,
@@ -14,7 +15,6 @@ use llm_relay::convert::to_anthropic::inbound_request_to_anthropic;
 #[cfg(test)]
 use llm_relay::convert::to_anthropic::openai_tool_to_anthropic;
 use llm_relay::convert::to_openai::anthropic_response_to_openai;
-use llm_relay::convert::tool_names::strip_mcp_prefix;
 use llm_relay::types::openai::{ChatResponse, InboundChatRequest};
 #[cfg(test)]
 use llm_relay::{EffortLevel, ThinkingConfig};
@@ -135,19 +135,19 @@ fn set_field(request: &mut Value, key: &str, value: Value) {
 
 /// Transform an Anthropic response to OpenAI format.
 ///
-/// Uses llm-relay's core conversion and adds mcp_ prefix stripping for tool names.
-pub fn transform_openai_response(resp: MessagesResponse) -> ChatResponse {
+/// Uses llm-relay's core conversion and restores client-visible tool names.
+pub fn transform_openai_response(resp: MessagesResponse, tool_names: &ToolNameMap) -> ChatResponse {
     let mut response = anthropic_response_to_openai(resp);
 
     // Override id to use OpenAI chatcmpl-* format instead of Anthropic's msg_* id
     let now = response.created.unwrap_or(0);
     response.id = Some(format!("chatcmpl-{now}"));
 
-    // Strip mcp_ prefix from tool call names (proxy-specific)
+    // Restore aliases from the shared request preparation.
     for choice in &mut response.choices {
         if let Some(tool_calls) = &mut choice.message.tool_calls {
             for tc in tool_calls {
-                tc.function.name = strip_mcp_prefix(&tc.function.name);
+                tc.function.name = tool_names.restore(&tc.function.name);
             }
         }
     }

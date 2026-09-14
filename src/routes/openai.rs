@@ -195,8 +195,13 @@ pub async fn chat_completions(
             capture.as_ref().map(|c| c.upstream_stream_path()),
         );
         let key_id = auth.client_key.id.clone();
-        let sse_stream =
-            stream_anthropic_to_openai_with_usage(body_stream, model, state.clone(), key_id);
+        let sse_stream = stream_anthropic_to_openai_with_usage(
+            body_stream,
+            model,
+            state.clone(),
+            key_id,
+            prepared.tool_name_map.clone(),
+        );
 
         match Response::builder()
             .status(StatusCode::OK)
@@ -244,7 +249,8 @@ pub async fn chat_completions(
             );
         }
 
-        let openai_response = transform_openai_response(anthropic_response);
+        let openai_response =
+            transform_openai_response(anthropic_response, &prepared.tool_name_map);
         Json(openai_response).into_response()
     }
 }

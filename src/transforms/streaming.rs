@@ -9,22 +9,22 @@
 
 use async_stream::stream;
 use bytes::Bytes;
+use eventsource_stream::Eventsource;
 use futures_util::{Stream, StreamExt};
 use serde::Deserialize;
-use serde_json::{Value, from_str, json, to_string};
+use serde_json::{Value, from_str, json};
 use std::io::Error as IoError;
 use std::pin::pin;
-use std::str::from_utf8;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::{select, time::interval};
 use tracing::warn;
 
 use llm_relay::Usage;
+#[cfg(test)]
 use llm_relay::convert::tool_names::strip_mcp_prefix;
 
 use crate::AppState;
-use crate::auth::usage::{add_usage, usage_from_json};
 use crate::transforms::tool_aliases::ToolNameMap;
 
 /// Keep-alive interval for SSE streams (prevents proxy/load balancer timeouts).
@@ -62,7 +62,9 @@ struct StreamEvent {
     content_block: Option<ContentBlock>,
     #[allow(dead_code)]
     index: Option<u32>,
+    #[allow(dead_code)]
     message: Option<MessageInfo>,
+    #[allow(dead_code)]
     usage: Option<StreamUsage>,
 }
 
@@ -91,6 +93,7 @@ struct ContentBlock {
 struct MessageInfo {
     #[allow(dead_code)]
     model: Option<String>,
+    #[allow(dead_code)]
     usage: Option<StreamUsage>,
 }
 
@@ -105,7 +108,7 @@ type StreamUsage = Usage;
 ///
 /// This converts Anthropic's streaming events to OpenAI's chat.completion.chunk format,
 /// including stripping the mcp_ prefix from tool names.
-/// Records token usage to the client keys store after the stream ends.
+/// Records the last reported usage on completion, error, or response cancellation.
 ///
 /// Includes keep-alive pings every 15 seconds to prevent connection timeouts.
 pub fn stream_anthropic_to_openai_with_usage(
@@ -113,83 +116,45 @@ pub fn stream_anthropic_to_openai_with_usage(
     model: String,
     state: Arc<AppState>,
     key_id: String,
+    tool_name_map: ToolNameMap,
+) -> impl Stream<Item = Result<Bytes, IoError>> + Send {
+    let events = tracked_events(body, recorder(state, key_id, model.clone()));
+    openai_events(events, model, tool_name_map)
+}
+
+fn openai_events(
+    events: impl Stream<Item = Result<Value, IoError>> + Send,
+    model: String,
+    tool_name_map: ToolNameMap,
 ) -> impl Stream<Item = Result<Bytes, IoError>> + Send {
     stream! {
         let now = now_secs();
-
-        let mut buffer = String::new();
         let mut current_tool_call_id: Option<String> = None;
         let mut tool_call_index: u32 = 0;
-        let mut usage_report = Usage::default();
-
-        let mut body = pin!(body);
+        let mut events = pin!(events);
         let mut keep_alive = interval(KEEP_ALIVE_INTERVAL);
-        keep_alive.reset(); // Don't fire immediately
-
+        keep_alive.reset();
         loop {
             select! {
-                biased; // Prefer data over keep-alive when both ready
-
-                // Data chunk received
-                chunk_opt = body.next() => {
-                    let Some(chunk_result) = chunk_opt else {
-                        break; // Stream ended
+                biased;
+                next = events.next() => {
+                    let Some(next) = next else { break; };
+                    let value = match next { Ok(value) => value, Err(e) => { yield Err(e); return; } };
+                    if value.get("type").and_then(Value::as_str) == Some("error") {
+                        yield Ok(Bytes::from(format!("data: {}\n\n", json!({"error": value.get("error")}))));
+                        return;
+                    }
+                    let event: StreamEvent = match serde_json::from_value(value) {
+                        Ok(event) => event,
+                        Err(e) => { yield Err(IoError::other(e)); return; }
                     };
-
-                    let chunk = match chunk_result {
-                        Ok(c) => c,
-                        Err(e) => {
-                            yield Err(IoError::other(e));
-                            return;
-                        }
-                    };
-
-                    let text = match from_utf8(&chunk) {
-                        Ok(t) => t,
-                        Err(_) => continue,
-                    };
-
-                    buffer.push_str(text);
-
-                    while let Some((line, rest)) = buffer.split_once('\n') {
-                        let line = line.trim().to_string();
-                        buffer = rest.to_string();
-
-                        let Some(data) = line.strip_prefix("data: ") else {
-                            continue;
-                        };
-
-                        if data == "[DONE]" {
-                            continue;
-                        }
-
-                        let event: StreamEvent = match from_str(data) {
-                            Ok(e) => e,
-                            Err(_) => continue,
-                        };
-
-                        // Capture usage from message_start event (input + cache tokens)
-                        if event.event_type == "message_start"
-                            && let Some(msg) = &event.message
-                            && let Some(usage) = &msg.usage
-                        {
-                            add_usage(&mut usage_report, usage);
-                        }
-
-                        // Capture usage from message_delta event (output tokens)
-                        if event.event_type == "message_delta"
-                            && let Some(usage) = &event.usage
-                        {
-                            add_usage(&mut usage_report, usage);
-                        }
-
                         match event.event_type.as_str() {
                             "content_block_start" => {
                                 if let Some(block) = &event.content_block
                                     && block.block_type == "tool_use"
                                 {
                                     current_tool_call_id = block.id.clone();
-                                    let name = block.name.as_ref().map(|n| strip_mcp_prefix(n));
+                                    let name = block.name.as_ref().map(|n| tool_name_map.restore(n));
 
                                     let chunk = json!({
                                         "id": format!("chatcmpl-{}", now),
@@ -313,23 +278,14 @@ pub fn stream_anthropic_to_openai_with_usage(
                             }
                             "message_stop" => {
                                 yield Ok(Bytes::from("data: [DONE]\n\n"));
+                                return;
                             }
                             _ => {}
                         }
-                    }
-                }
 
-                // Keep-alive timer fired
-                _ = keep_alive.tick() => {
-                    yield Ok(Bytes::from(KEEP_ALIVE_COMMENT));
                 }
+                _ = keep_alive.tick() => { yield Ok(Bytes::from(KEEP_ALIVE_COMMENT)); }
             }
-        }
-
-        // Record usage after stream ends (per-model; global is derived via aggregation)
-        let window_resets = state.usage_cache.snapshot().await.window_state();
-        if let Err(e) = state.client_keys.record_model_usage(&key_id, &model, &usage_report, &window_resets).await {
-            warn!("Failed to record streaming model usage for key {key_id}/{model}: {e}");
         }
     }
 }
@@ -341,118 +297,134 @@ pub fn stream_restore_native_tool_names_with_usage(
     model: String,
     tool_name_map: ToolNameMap,
 ) -> impl Stream<Item = Result<Bytes, IoError>> + Send {
-    stream_transform_native_tool_names_with_usage(body, state, key_id, model, tool_name_map)
+    native_events(
+        tracked_events(body, recorder(state, key_id, model)),
+        tool_name_map,
+    )
 }
 
-fn stream_transform_native_tool_names_with_usage(
-    body: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
-    state: Arc<AppState>,
-    key_id: String,
-    model: String,
+fn native_events(
+    events: impl Stream<Item = Result<Value, IoError>> + Send,
     tool_name_map: ToolNameMap,
 ) -> impl Stream<Item = Result<Bytes, IoError>> + Send {
     stream! {
-        let mut body = pin!(body);
-        let mut buffer = String::new();
+        let mut events = pin!(events);
         let mut keep_alive = interval(KEEP_ALIVE_INTERVAL);
         keep_alive.reset();
-        let mut usage_report = Usage::default();
-
         loop {
             select! {
                 biased;
-
-                chunk_opt = body.next() => {
-                    let Some(chunk_result) = chunk_opt else {
-                        break;
-                    };
-
-                    let chunk = match chunk_result {
-                        Ok(c) => c,
-                        Err(e) => {
-                            yield Err(IoError::other(e));
-                            return;
-                        }
-                    };
-
-                    let text = match from_utf8(&chunk) {
-                        Ok(t) => t,
-                        Err(_) => {
-                            yield Ok(chunk);
-                            continue;
-                        }
-                    };
-
-                    buffer.push_str(text);
-
-                    let mut output = String::new();
-                    while let Some((line, rest)) = buffer.split_once('\n') {
-                        let line_with_newline = format!("{line}\n");
-
-                        if let Some(data) = line.strip_prefix("data: ") {
-                            let data = data.trim();
-                            if let Ok(event) = from_str::<Value>(data) {
-                                if event.get("type").and_then(|t| t.as_str()) == Some("message_start")
-                                    && let Some(usage) = event
-                                        .get("message")
-                                        .and_then(|m| m.get("usage"))
-                                {
-                                    add_usage(&mut usage_report, &usage_from_json(usage));
-                                }
-
-                                if event.get("type").and_then(|t| t.as_str()) == Some("message_delta")
-                                    && let Some(usage) = event.get("usage")
-                                {
-                                    add_usage(&mut usage_report, &usage_from_json(usage));
-                                }
-                            }
-                        }
-
-                        if line.contains("content_block_start")
-                            && let Some(data) = line.strip_prefix("data: ").map(str::trim)
-                        {
-                            if let Ok(mut event) = from_str::<Value>(data) {
-                                if let Some(content_block) = event.get_mut("content_block")
-                                    && content_block.get("type").and_then(|t| t.as_str()) == Some("tool_use")
-                                    && let Some(name) = content_block.get("name").and_then(|n| n.as_str()).map(|s| s.to_string())
-                                    && let Some(obj) = content_block.as_object_mut()
-                                {
-                                    let client_name = tool_name_map.restore(&name);
-                                    tracing::info!(tool = %client_name, "tool_use");
-                                    obj.insert("name".to_string(), Value::String(client_name));
-                                }
-                                output.push_str("data: ");
-                                output.push_str(&to_string(&event).unwrap_or_else(|_| data.to_string()));
-                                output.push('\n');
-                            } else {
-                                output.push_str(&line_with_newline);
-                            }
-                        } else {
-                            output.push_str(&line_with_newline);
-                        }
-
-                        buffer = rest.to_string();
+                next = events.next() => {
+                    let Some(next) = next else { break; };
+                    let mut event = match next { Ok(event) => event, Err(e) => { yield Err(e); return; } };
+                    if event.get("type").and_then(Value::as_str) == Some("content_block_start")
+                        && let Some(block) = event.get_mut("content_block")
+                        && block.get("type").and_then(Value::as_str) == Some("tool_use")
+                        && let Some(name) = block.get("name").and_then(Value::as_str).map(|name| tool_name_map.restore(name))
+                        && let Some(block) = block.as_object_mut()
+                    {
+                        block.insert("name".into(), json!(name));
                     }
-
-                    if !output.is_empty() {
-                        yield Ok(Bytes::from(output));
-                    }
+                    let kind = event.get("type").and_then(Value::as_str).unwrap_or("message");
+                    let terminal = matches!(kind, "message_stop" | "error");
+                    yield Ok(Bytes::from(format!("event: {kind}\ndata: {event}\n\n")));
+                    if terminal { return; }
                 }
-
-                _ = keep_alive.tick() => {
-                    yield Ok(Bytes::from(KEEP_ALIVE_COMMENT));
-                }
+                _ = keep_alive.tick() => { yield Ok(Bytes::from(KEEP_ALIVE_COMMENT)); }
             }
         }
+    }
+}
 
-        if !buffer.is_empty() {
-            yield Ok(Bytes::from(buffer));
-        }
+// Owns the last reported cumulative usage even when the response body is dropped.
+// The callback is taken before invocation, so all exit paths record at most once.
+struct UsageFinalizer<F: FnOnce(Usage)> {
+    usage: Usage,
+    finish: Option<F>,
+}
 
-        let window_resets = state.usage_cache.snapshot().await.window_state();
-        if let Err(e) = state.client_keys.record_model_usage(&key_id, &model, &usage_report, &window_resets).await {
-            warn!("Failed to record streaming model usage for key {key_id}/{model}: {e}");
+impl<F: FnOnce(Usage)> UsageFinalizer<F> {
+    fn finish(&mut self) {
+        if let Some(finish) = self.finish.take() {
+            finish(self.usage.clone());
         }
+    }
+
+    fn observe(&mut self, event: &Value) {
+        let usage = match event.get("type").and_then(Value::as_str) {
+            Some("message_start") => event.pointer("/message/usage").unwrap_or(&Value::Null),
+            Some("message_delta") => event.get("usage").unwrap_or(&Value::Null),
+            _ => return,
+        };
+        // Delta usage fields are cumulative; missing fields retain their last value.
+        if let Some(n) = usage.get("input_tokens").and_then(Value::as_u64) {
+            self.usage.input_tokens = n;
+        }
+        if let Some(n) = usage.get("output_tokens").and_then(Value::as_u64) {
+            self.usage.output_tokens = n;
+        }
+        if let Some(n) = usage.get("cache_read_input_tokens").and_then(Value::as_u64) {
+            self.usage.cache_read_input_tokens = Some(n);
+        }
+        if let Some(n) = usage
+            .get("cache_creation_input_tokens")
+            .and_then(Value::as_u64)
+        {
+            self.usage.cache_creation_input_tokens = Some(n);
+        }
+    }
+}
+
+impl<F: FnOnce(Usage)> Drop for UsageFinalizer<F> {
+    fn drop(&mut self) {
+        self.finish();
+    }
+}
+
+fn recorder(state: Arc<AppState>, key_id: String, model: String) -> impl FnOnce(Usage) + Send {
+    move |usage| {
+        // Detached from response cancellation, but bounded by the application's runtime.
+        tokio::spawn(async move {
+            let resets = state.usage_cache.snapshot().await.window_state();
+            if let Err(e) = state
+                .client_keys
+                .record_model_usage(&key_id, &model, &usage, &resets)
+                .await
+            {
+                warn!("Failed to record streaming usage for {key_id}/{model}: {e}");
+            }
+        });
+    }
+}
+
+fn tracked_events<E: std::fmt::Display + Send + 'static>(
+    body: impl Stream<Item = Result<Bytes, E>> + Send,
+    finish: impl FnOnce(Usage) + Send,
+) -> impl Stream<Item = Result<Value, IoError>> + Send {
+    let finalizer = UsageFinalizer {
+        usage: Usage::default(),
+        finish: Some(finish),
+    };
+    stream! {
+        let mut usage = finalizer;
+        let mut events = pin!(body.eventsource());
+        while let Some(event) = events.next().await {
+            let event = match event {
+                Ok(event) => event,
+                Err(e) => { usage.finish(); yield Err(IoError::other(e.to_string())); return; }
+            };
+            let value: Value = match from_str(&event.data) {
+                Ok(value) => value,
+                Err(e) => { usage.finish(); yield Err(IoError::other(e)); return; }
+            };
+            let terminal = matches!(value.get("type").and_then(Value::as_str), Some("message_stop" | "error"));
+            usage.observe(&value);
+            if terminal { usage.finish(); }
+            yield Ok(value);
+            if terminal { return; }
+        }
+        usage.finish();
+        yield Err(IoError::new(std::io::ErrorKind::UnexpectedEof, "Upstream stream ended before message_stop"));
     }
 }
 
@@ -547,32 +519,6 @@ mod tests {
     }
 
     #[test]
-    fn test_usage_accumulation_from_stream() {
-        let mut usage_report = Usage::default();
-
-        // message_start with input tokens
-        let start_data = r#"{"type":"message_start","message":{"model":"claude-sonnet-4-5-20250514","usage":{"input_tokens":150,"output_tokens":0,"cache_read_input_tokens":80,"cache_creation_input_tokens":20}}}"#;
-        let start_event: StreamEvent = from_str(start_data).unwrap();
-        if let Some(msg) = &start_event.message
-            && let Some(usage) = &msg.usage
-        {
-            add_usage(&mut usage_report, usage);
-        }
-
-        // message_delta with output tokens
-        let delta_data = r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":0,"output_tokens":75}}"#;
-        let delta_event: StreamEvent = from_str(delta_data).unwrap();
-        if let Some(usage) = &delta_event.usage {
-            add_usage(&mut usage_report, usage);
-        }
-
-        assert_eq!(usage_report.input_tokens, 150);
-        assert_eq!(usage_report.output_tokens, 75);
-        assert_eq!(usage_report.cache_read_input_tokens, Some(80));
-        assert_eq!(usage_report.cache_creation_input_tokens, Some(20));
-    }
-
-    #[test]
     fn test_mcp_prefix_stripping_in_tool_name() {
         let data = r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_abc","name":"mcp_read_file"}}"#;
         let event: StreamEvent = from_str(data).unwrap();
@@ -612,5 +558,215 @@ mod tests {
         let line = "data: [DONE]";
         let data = line.strip_prefix("data: ").unwrap();
         assert_eq!(data, "[DONE]");
+    }
+}
+
+#[cfg(test)]
+mod regression_tests {
+    use super::*;
+    use futures_util::stream;
+    use std::sync::Mutex;
+
+    fn input(chunks: Vec<Bytes>) -> impl Stream<Item = Result<Bytes, IoError>> {
+        stream::iter(chunks.into_iter().map(Ok))
+    }
+
+    fn observed() -> (Arc<Mutex<Vec<Usage>>>, impl FnOnce(Usage) + Send) {
+        let reports = Arc::new(Mutex::new(Vec::new()));
+        let copy = reports.clone();
+        (reports, move |usage| copy.lock().unwrap().push(usage))
+    }
+
+    const FIXTURE: &str = concat!(
+        ": heartbeat\r\n\r\n",
+        "event: message_start\r\ndata:{\"type\":\"message_start\",\r\ndata: \"message\":{\"usage\":{\"input_tokens\":12,\"output_tokens\":1}}}\r\n\r\n",
+        "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"Привет 🌍\"}}\n\n",
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":7}}\n\n",
+        "data: {\"type\":\"message_stop\"}\n\n"
+    );
+
+    #[tokio::test]
+    async fn both_formats_preserve_every_network_split() {
+        for native in [false, true] {
+            let mut expected = None;
+            for split in 0..=FIXTURE.len() {
+                let (a, b) = FIXTURE.as_bytes().split_at(split);
+                let (reports, finish) = observed();
+                let events = tracked_events(
+                    input(vec![Bytes::copy_from_slice(a), Bytes::copy_from_slice(b)]),
+                    finish,
+                );
+                let output: Vec<_> = if native {
+                    native_events(events, ToolNameMap::default())
+                        .collect()
+                        .await
+                } else {
+                    openai_events(events, "model".into(), ToolNameMap::default())
+                        .collect()
+                        .await
+                };
+                let mut text = String::new();
+                for chunk in output {
+                    text.push_str(std::str::from_utf8(&chunk.unwrap()).unwrap());
+                }
+                // Generated timestamps are irrelevant to the framing regression.
+                let content = text.contains("Привет 🌍");
+                assert!(content, "split {split}, native={native}: {text}");
+                let reports = reports.lock().unwrap();
+                assert_eq!(reports.len(), 1);
+                assert_eq!(reports[0].input_tokens, 12);
+                assert_eq!(reports[0].output_tokens, 7);
+                let count = text.matches("Привет 🌍").count();
+                if let Some(expected) = expected {
+                    assert_eq!(count, expected);
+                }
+                expected = Some(count);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn cancellation_records_observed_usage_once() {
+        let (reports, finish) = observed();
+        let body = input(vec![Bytes::from_static(
+            b"data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":12}}}\n\n",
+        )])
+        .chain(stream::pending());
+        let mut events = Box::pin(tracked_events(body, finish));
+        assert!(events.next().await.unwrap().is_ok());
+        drop(events);
+        let reports = reports.lock().unwrap();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].input_tokens, 12);
+    }
+
+    #[tokio::test]
+    async fn truncated_and_failed_streams_are_errors_and_record_once() {
+        for transport_error in [false, true] {
+            let (reports, finish) = observed();
+            let mut chunks = vec![Ok(Bytes::from_static(b"data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":12}}}\n\n"))];
+            if transport_error {
+                chunks.push(Err(IoError::other("broken connection")));
+            }
+            let output: Vec<_> = tracked_events(stream::iter(chunks), finish).collect().await;
+            assert!(output.last().unwrap().is_err());
+            assert_eq!(reports.lock().unwrap().len(), 1);
+            assert_eq!(reports.lock().unwrap()[0].input_tokens, 12);
+        }
+    }
+
+    #[tokio::test]
+    async fn upstream_error_is_forwarded_without_success_marker() {
+        for native in [false, true] {
+            let (reports, finish) = observed();
+            let events = tracked_events(input(vec![Bytes::from_static(b"event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"busy\"}}\n\n")]), finish);
+            let chunks: Vec<_> = if native {
+                native_events(events, ToolNameMap::default())
+                    .collect()
+                    .await
+            } else {
+                openai_events(events, "model".into(), ToolNameMap::default())
+                    .collect()
+                    .await
+            };
+            let text = chunks
+                .into_iter()
+                .map(|c| String::from_utf8(c.unwrap().to_vec()).unwrap())
+                .collect::<String>();
+            assert!(text.contains("overloaded_error"));
+            assert!(!text.contains("[DONE]"));
+            assert!(!text.contains("message_stop"));
+            assert_eq!(reports.lock().unwrap().len(), 1);
+        }
+    }
+    #[tokio::test]
+    async fn tool_alias_round_trip_matches_both_response_formats() {
+        let prepared = crate::transforms::prepare_anthropic_request(
+            json!({
+                "model": "claude-sonnet-4-6",
+                "tools": [{"name": "read_file", "input_schema": {"type": "object"}}],
+                "tool_choice": {"type": "tool", "name": "read_file"},
+                "messages": [{"role": "assistant", "content": [{"type": "tool_use", "id": "call", "name": "read_file", "input": {}}]}]
+            }),
+            true,
+        );
+        let upstream_name = prepared.body["tools"][0]["name"].as_str().unwrap();
+        assert_eq!(prepared.body["tool_choice"]["name"], upstream_name);
+        assert_eq!(
+            prepared.body["messages"][0]["content"][0]["name"],
+            upstream_name
+        );
+        let event = json!({"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "call", "name": upstream_name}});
+        for native in [false, true] {
+            let events = stream::iter(vec![Ok(event.clone()), Ok(json!({"type":"message_stop"}))]);
+            let chunks: Vec<_> = if native {
+                native_events(events, prepared.tool_name_map.clone())
+                    .collect()
+                    .await
+            } else {
+                openai_events(events, "model".into(), prepared.tool_name_map.clone())
+                    .collect()
+                    .await
+            };
+            let text = chunks
+                .into_iter()
+                .map(|c| String::from_utf8(c.unwrap().to_vec()).unwrap())
+                .collect::<String>();
+            assert!(text.contains("\"name\":\"read_file\""), "{text}");
+        }
+        let response: llm_relay::MessagesResponse = serde_json::from_value(json!({
+            "id": "msg", "type": "message", "role": "assistant", "model": "model",
+            "content": [{"type":"tool_use", "id":"call", "name":upstream_name, "input":{}}], "stop_reason":"tool_use"
+        })).unwrap();
+        let response =
+            crate::transforms::transform_openai_response(response, &prepared.tool_name_map);
+        let value = serde_json::to_value(response).unwrap();
+        assert_eq!(
+            value["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+            "read_file"
+        );
+    }
+    #[tokio::test]
+    async fn dropping_either_response_format_finalizes_usage() {
+        for native in [false, true] {
+            let (reports, finish) = observed();
+            let prefix = concat!(
+                "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":12}}}\n\n",
+                "data: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"hello\"}}\n\n"
+            );
+            let events = tracked_events(
+                input(vec![Bytes::from_static(prefix.as_bytes())]).chain(stream::pending()),
+                finish,
+            );
+            if native {
+                let mut response = Box::pin(native_events(events, ToolNameMap::default()));
+                assert!(response.next().await.unwrap().is_ok());
+                drop(response);
+            } else {
+                let mut response = Box::pin(openai_events(
+                    events,
+                    "model".into(),
+                    ToolNameMap::default(),
+                ));
+                assert!(response.next().await.unwrap().is_ok());
+                drop(response);
+            }
+            assert_eq!(reports.lock().unwrap().len(), 1);
+            assert_eq!(reports.lock().unwrap()[0].input_tokens, 12);
+        }
+    }
+
+    #[tokio::test]
+    async fn malformed_event_fails_instead_of_silently_disappearing() {
+        let (reports, finish) = observed();
+        let output: Vec<_> = tracked_events(
+            input(vec![Bytes::from_static(b"data: {broken}\n\n")]),
+            finish,
+        )
+        .collect()
+        .await;
+        assert_eq!(output.len(), 1);
+        assert!(output[0].is_err());
+        assert_eq!(reports.lock().unwrap().len(), 1);
     }
 }

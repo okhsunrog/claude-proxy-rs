@@ -15,6 +15,4 @@ pub use prepare::{prepare_anthropic_request, prepare_count_tokens_request};
 pub use streaming::{
     stream_anthropic_to_openai_with_usage, stream_restore_native_tool_names_with_usage,
 };
-pub use tool_aliases::{
-    ToolNameMap, normalize_claude_code_tool_names, restore_response_tool_names,
-};
+pub use tool_aliases::restore_response_tool_names;

@@ -16,6 +16,7 @@ use uuid::Uuid;
 use llm_relay::convert::cache_control::ensure_cache_control;
 use llm_relay::convert::tool_names::transform_request_tool_names;
 
+use super::tool_aliases::{ToolNameMap, normalize_claude_code_tool_names};
 use crate::constants::SYSTEM_PREFIX;
 
 /// Result of preparing a request for Anthropic API.
@@ -24,6 +25,8 @@ pub struct PreparedRequest {
     pub body: Value,
     /// Betas extracted from the body (to be added to headers)
     pub betas: Vec<String>,
+    /// Reverse mapping for both native and OpenAI response paths.
+    pub tool_name_map: ToolNameMap,
 }
 
 /// Prepare a request body for the Anthropic API.
@@ -56,7 +59,17 @@ pub fn prepare_anthropic_request(body: Value, cloak: bool) -> PreparedRequest {
     let body = ensure_cache_control(body);
     let body = strip_unsupported_fields(body);
 
-    PreparedRequest { body, betas }
+    let mut body = body;
+    let tool_name_map = if cloak {
+        normalize_claude_code_tool_names(&mut body)
+    } else {
+        ToolNameMap::default()
+    };
+    PreparedRequest {
+        body,
+        betas,
+        tool_name_map,
+    }
 }
 
 /// Strip fields not supported by the Anthropic OAuth API endpoint.
@@ -85,7 +98,11 @@ pub fn prepare_count_tokens_request(body: Value, cloak: bool) -> PreparedRequest
     };
     let body = ensure_cache_control(body);
 
-    PreparedRequest { body, betas }
+    PreparedRequest {
+        body,
+        betas,
+        tool_name_map: ToolNameMap::default(),
+    }
 }
 
 /// Extract betas array from request body and remove it.
