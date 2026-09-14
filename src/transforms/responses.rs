@@ -198,11 +198,16 @@ pub fn usage(response: &Value) -> Option<Usage> {
         .and_then(Value::as_u64)
         .unwrap_or(0)
         .min(input);
+    let written = u
+        .pointer("/input_tokens_details/cache_write_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+        .min(input.saturating_sub(cached));
     Some(Usage {
-        input_tokens: input.saturating_sub(cached),
+        input_tokens: input.saturating_sub(cached).saturating_sub(written),
         output_tokens: u.get("output_tokens").and_then(Value::as_u64).unwrap_or(0),
         cache_read_input_tokens: Some(cached),
-        cache_creation_input_tokens: None,
+        cache_creation_input_tokens: Some(written),
     })
 }
 fn chat_usage(response: &Value) -> Value {
@@ -408,8 +413,9 @@ mod tests {
     }
     #[test]
     fn cached_tokens_are_not_double_counted() {
-        let usage=usage(&json!({"usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":80},"output_tokens":12}})).unwrap();
-        assert_eq!(usage.input_tokens, 20);
+        let usage=usage(&json!({"usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":80,"cache_write_tokens":10},"output_tokens":12}})).unwrap();
+        assert_eq!(usage.input_tokens, 10);
+        assert_eq!(usage.cache_creation_input_tokens, Some(10));
         assert_eq!(usage.cache_read_input_tokens, Some(80));
         assert_eq!(usage.output_tokens, 12);
     }

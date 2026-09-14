@@ -411,8 +411,9 @@ are rejected rather than silently ignored. Model-specific upstream restrictions
 still apply. Use Responses for native tools and opaque reasoning replay.
 
 GPT usage is recorded in the existing request history and uses model prices for
-estimated API-equivalent costs. Cached input is counted separately, without double
-charging it as uncached input. Global and per-model key budgets remain shared
+estimated API-equivalent costs. Cache reads and writes are counted separately, without double
+charging them as uncached input. Prices are static per model: long-context and
+service-tier price multipliers are not applied automatically. Global and per-model key budgets remain shared
 proxy budgets, with the existing common reset windows; they are not a report of
 ChatGPT subscription allowance. Claude subscription exhaustion does not block GPT.
 ChatGPT rate-limit errors are returned as HTTP 429. Usage is recorded only when the
