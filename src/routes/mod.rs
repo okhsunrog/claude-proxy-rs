@@ -5,3 +5,5 @@ pub mod health;
 pub mod openai;
 pub mod transcription;
 pub mod user_usage;
+
+pub mod chatgpt;

@@ -51,12 +51,13 @@ async fn get_oauth_token(state: &AppState) -> Result<String, ProxyError> {
     }
 }
 
-/// Shared authentication logic: validate key, check limits, get OAuth token
-async fn authenticate_key(
+/// Shared key permissions and monetary budgets; subscription gates are provider-specific.
+pub async fn validate_inference_key(
     key: &str,
     state: &Arc<AppState>,
     model: &str,
-) -> Result<AuthResult, ProxyError> {
+    chatgpt: bool,
+) -> Result<ClientKey, ProxyError> {
     let client_key = match state.client_keys.validate(key).await? {
         Some(ck) => ck,
         None => {
@@ -133,7 +134,10 @@ async fn authenticate_key(
     // Block keys without extra-usage permission when subscription limits are
     // exhausted. Reads from the usage cache (populated from /v1/messages
     // response headers in near real time); no per-request HTTP call.
-    if !client_key.allow_extra_usage && state.usage_cache.is_over_subscription_limit().await {
+    if !chatgpt
+        && !client_key.allow_extra_usage
+        && state.usage_cache.is_over_subscription_limit().await
+    {
         warn!(
             key = %client_key.name,
             "auth rejected: subscription limits exhausted (extra usage not allowed for this key)"
@@ -147,8 +151,19 @@ async fn authenticate_key(
         warn!("Failed to update last_used for key {}: {e}", client_key.id);
     }
 
-    let token = get_oauth_token(state).await?;
+    Ok(client_key)
+}
 
+async fn authenticate_key(
+    key: &str,
+    state: &Arc<AppState>,
+    model: &str,
+) -> Result<AuthResult, ProxyError> {
+    if crate::routes::chatgpt::is_model(model) {
+        return Err(ProxyError::InvalidModel(model.into()));
+    }
+    let client_key = validate_inference_key(key, state, model, false).await?;
+    let token = get_oauth_token(state).await?;
     Ok(AuthResult { client_key, token })
 }
 

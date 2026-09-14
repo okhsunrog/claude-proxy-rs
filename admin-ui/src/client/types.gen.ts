@@ -12,6 +12,11 @@ export type AddModelRequest = {
     outputPrice?: number;
 };
 
+export type AvailableModel = {
+    id: string;
+    name: string;
+};
+
 export type ClientKey = {
     allowExtraUsage: boolean;
     createdAt: number;
@@ -416,6 +421,25 @@ export type ChatgptLoginResponses = {
 };
 
 export type ChatgptLoginResponse = ChatgptLoginResponses[keyof ChatgptLoginResponses];
+
+export type ChatgptModelsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/chatgpt/models';
+};
+
+export type ChatgptModelsErrors = {
+    400: ErrorResponse;
+};
+
+export type ChatgptModelsError = ChatgptModelsErrors[keyof ChatgptModelsErrors];
+
+export type ChatgptModelsResponses = {
+    200: Array<AvailableModel>;
+};
+
+export type ChatgptModelsResponse = ChatgptModelsResponses[keyof ChatgptModelsResponses];
 
 export type ChatgptPollData = {
     body?: never;

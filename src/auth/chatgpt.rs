@@ -27,6 +27,11 @@ pub struct DeviceLogin {
 pub struct ConnectionStatus {
     pub authenticated: bool,
 }
+#[derive(Serialize, ToSchema)]
+pub struct AvailableModel {
+    pub id: String,
+    pub name: String,
+}
 #[derive(Deserialize)]
 struct DeviceCode {
     device_auth_id: String,
@@ -62,6 +67,48 @@ pub struct ChatGptAuth {
 }
 
 impl ChatGptAuth {
+    pub async fn available_models(&self) -> Result<Vec<AvailableModel>, String> {
+        let (mut token, mut account) = self.credentials(None).await?;
+        for attempt in 0..2 {
+            let mut request = self
+                .client
+                .get("https://chatgpt.com/backend-api/codex/models?client_version=0.154.0")
+                .header("originator", "codex_cli_rs")
+                .bearer_auth(&token)
+                .timeout(Duration::from_secs(20));
+            if let Some(account) = &account {
+                request = request.header("ChatGPT-Account-Id", account);
+            }
+            let response = request
+                .send()
+                .await
+                .map_err(|_error| "Cannot load ChatGPT models")?;
+            if response.status() == reqwest::StatusCode::UNAUTHORIZED && attempt == 0 {
+                (token, account) = self.credentials(Some(&token)).await?;
+                continue;
+            }
+            let data: Value = read_response(response).await?;
+            let models = data
+                .get("models")
+                .and_then(Value::as_array)
+                .ok_or("Invalid model catalog")?;
+            return Ok(models
+                .iter()
+                .filter_map(|model| {
+                    let id = model.get("slug")?.as_str()?;
+                    Some(AvailableModel {
+                        id: id.into(),
+                        name: model
+                            .get("display_name")
+                            .and_then(Value::as_str)
+                            .unwrap_or(id)
+                            .into(),
+                    })
+                })
+                .collect());
+        }
+        Err("Cannot authenticate model catalog request".into())
+    }
     pub fn new(client: Client, store: Arc<AuthStore>) -> Self {
         Self {
             client,

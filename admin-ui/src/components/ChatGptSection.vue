@@ -1,13 +1,25 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { chatgptLogin, chatgptLogout, chatgptPoll, chatgptStatus } from '../client'
-import type { DeviceLogin } from '../client'
+import { chatgptLogin, chatgptLogout, chatgptPoll, chatgptStatus, chatgptModels } from '../client'
+import type { DeviceLogin, AvailableModel } from '../client'
 
 const connected = ref(false)
 const busy = ref(false)
 const login = ref<DeviceLogin | null>(null)
 const error = ref('')
 const message = ref('')
+const models = ref<AvailableModel[]>([])
+async function loadModels() {
+  busy.value = true
+  error.value = ''
+  try {
+    models.value = (await chatgptModels({ throwOnError: true })).data
+  } catch {
+    error.value = 'Unable to load models available to this account.'
+  } finally {
+    busy.value = false
+  }
+}
 
 async function refresh() {
   try {
@@ -59,6 +71,7 @@ async function disconnect() {
   try {
     await chatgptLogout({ throwOnError: true })
     connected.value = false
+    models.value = []
     login.value = null
     message.value = ''
   } catch {
@@ -75,8 +88,8 @@ onMounted(refresh)
   <UCard>
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h2 class="text-lg font-semibold">ChatGPT transcription</h2>
-        <p class="text-sm text-muted">Connect one account to turn audio recordings into text.</p>
+        <h2 class="text-lg font-semibold">ChatGPT subscription</h2>
+        <p class="text-sm text-muted">One account for GPT requests and audio transcription.</p>
       </div>
       <UBadge :color="connected ? 'success' : 'neutral'">
         {{ connected ? 'Connected' : 'Not connected' }}
@@ -102,9 +115,23 @@ onMounted(refresh)
         Disconnect
       </UButton>
     </div>
+    <div v-if="connected" class="mt-4 space-y-2">
+      <UButton :loading="busy" color="neutral" variant="outline" @click="loadModels"
+        >Load available models</UButton
+      >
+      <p v-if="models.length" class="text-sm text-muted">
+        Add the model IDs you need in Models and configure their prices and key access.
+      </p>
+      <ul v-if="models.length" class="text-sm space-y-1">
+        <li v-for="model in models" :key="model.id">
+          <code>{{ model.id }}</code> — {{ model.name }}
+        </li>
+      </ul>
+    </div>
     <p class="mt-4 text-sm text-muted">
-      File transcription only. Up to 25 MiB per recording and 10 requests per minute per key.
-      Transcription is separate from Claude quotas and token-cost reports.
+      GPT supports Responses and Chat Completions. Transcription: Up to 25 MiB per recording and 10
+      requests per minute per key. Transcription is separate from Claude quotas and token-cost
+      reports.
     </p>
   </UCard>
 </template>

@@ -62,6 +62,37 @@
         }
       }
     },
+    "/chatgpt/models": {
+      "get": {
+        "tags": ["chatgpt"],
+        "operationId": "chatgpt_models",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AvailableModel"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chatgpt/poll": {
       "post": {
         "tags": ["chatgpt"],
@@ -1562,6 +1593,18 @@
           "outputPrice": {
             "type": "number",
             "format": "double"
+          }
+        }
+      },
+      "AvailableModel": {
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
           }
         }
       },

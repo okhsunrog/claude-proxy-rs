@@ -37,7 +37,7 @@ pub async fn list_models(State(state): State<Arc<AppState>>) -> Response {
             json!({
                 "id": id,
                 "object": "model",
-                "owned_by": "anthropic"
+                "owned_by": if super::chatgpt::is_model(id) { "openai" } else { "anthropic" }
             })
         })
         .collect();
@@ -54,6 +54,14 @@ pub async fn chat_completions(
     headers: HeaderMap,
     Json(raw_body): Json<Value>,
 ) -> Response {
+    if raw_body
+        .get("model")
+        .and_then(Value::as_str)
+        .is_some_and(super::chatgpt::is_model)
+    {
+        return super::chatgpt::chat_completions(state, headers, raw_body).await;
+    }
+
     // Deserialize from a borrow so `raw_body` stays owned for request capture,
     // avoiding a full clone of the JSON body on every request.
     let body: InboundChatRequest = match InboundChatRequest::deserialize(&raw_body) {

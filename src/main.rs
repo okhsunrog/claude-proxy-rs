@@ -120,6 +120,7 @@ fn admin_openapi_router() -> OpenApiRouter<Arc<AppState>> {
             .build(),
     )
     .routes(routes!(admin::chatgpt_status))
+    .routes(routes!(admin::chatgpt_models))
     .routes(routes!(admin::chatgpt_login))
     .routes(routes!(admin::chatgpt_poll))
     .routes(routes!(admin::chatgpt_logout))
@@ -327,6 +328,7 @@ async fn main() -> Result<()> {
                 routes::transcription::UPLOAD_LIMIT + 64 * 1024,
             )),
         )
+        .route("/responses", post(routes::chatgpt::responses))
         .route("/chat/completions", post(openai::chat_completions))
         .route("/models", get(openai::list_models))
         .route("/messages", post(anthropic::messages))
