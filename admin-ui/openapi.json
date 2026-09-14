@@ -6,6 +6,118 @@
     "version": "2.0.1"
   },
   "paths": {
+    "/chatgpt": {
+      "delete": {
+        "tags": ["chatgpt"],
+        "operationId": "chatgpt_logout",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chatgpt/login": {
+      "post": {
+        "tags": ["chatgpt"],
+        "operationId": "chatgpt_login",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceLogin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chatgpt/poll": {
+      "post": {
+        "tags": ["chatgpt"],
+        "operationId": "chatgpt_poll",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chatgpt/status": {
+      "get": {
+        "tags": ["chatgpt"],
+        "operationId": "chatgpt_status",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/keys": {
       "post": {
         "tags": ["keys"],
@@ -1490,6 +1602,15 @@
           }
         }
       },
+      "ConnectionStatus": {
+        "type": "object",
+        "required": ["authenticated"],
+        "properties": {
+          "authenticated": {
+            "type": "boolean"
+          }
+        }
+      },
       "CreateKeyRequest": {
         "type": "object",
         "required": ["name"],
@@ -1507,6 +1628,23 @@
             "type": "string"
           },
           "key": {
+            "type": "string"
+          }
+        }
+      },
+      "DeviceLogin": {
+        "type": "object",
+        "required": ["verification_url", "user_code", "interval"],
+        "properties": {
+          "interval": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "user_code": {
+            "type": "string"
+          },
+          "verification_url": {
             "type": "string"
           }
         }

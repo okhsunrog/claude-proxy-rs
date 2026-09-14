@@ -1,3 +1,5 @@
+mod chatgpt;
+pub use chatgpt::*;
 mod keys;
 mod models;
 mod oauth;

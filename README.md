@@ -336,3 +336,50 @@ just status   # server systemd status
 just restart  # restart server service
 just test-api # integration tests against running proxy
 ```
+
+### ChatGPT file transcription
+
+The admin panel can connect one ChatGPT account using device-code login. Enable
+**Device code login** in your ChatGPT security settings, select **Connect ChatGPT**,
+open the verification link, enter the displayed code, then select **Check sign-in**.
+Credentials are stored separately from Claude in PostgreSQL and refreshed when
+needed. Disconnect removes the proxy's stored credentials; it does not revoke
+other sessions in ChatGPT.
+
+`POST /v1/audio/transcriptions` accepts a proxy bearer key and multipart fields:
+
+- `file`: one non-empty recording, at most 25 MiB. Recognized filename extensions:
+  `ogg`, `webm`, `wav`, `mp3`, `m4a`, `mp4`, `flac`. OGG/Opus was verified live.
+- `language`: optional language code, for example `ru`.
+- `model`: optional; only `chatgpt-transcribe` is accepted.
+- `response_format`: optional; only `json` is accepted.
+
+The response is `{"text":"..."}`. Audio is forwarded to the desktop backend's
+`/transcribe` endpoint. No cleanup/rewrite model is applied, and the upstream
+speech-recognition model is not disclosed. This is an internal subscription
+endpoint, so account availability and compatibility may change.
+
+Transcription uses enabled proxy keys. Keys with a model whitelist must explicitly
+allow `chatgpt-transcribe` (add that identifier in Models before assigning it).
+It has separate in-memory limits: 10 attempts per minute per key, two simultaneous
+uploads/requests per process, and a 60-second upstream timeout. These counters reset
+on process restart. Claude subscription checks and monetary token budgets do not
+apply: the transcription backend returns no token, cost, or quota usage. It is
+therefore not included in token-cost history. Audio and transcripts are not saved
+or captured by the proxy.
+
+For a local verification using the existing subscription login:
+
+```bash
+uv run scripts/transcribe_probe.py /path/to/recording.ogg --direct
+```
+
+To test a running proxy instead, set `PROXY_API_KEY` in your environment and run:
+
+```bash
+uv run scripts/transcribe_probe.py /path/to/recording.ogg --base-url http://127.0.0.1:4096
+```
+
+The probe never prints credentials. `--output /path/to/transcript.txt` optionally
+saves the returned text. Microphone recording belongs in the consuming client;
+the admin panel manages the connection only. GPT inference is not implemented yet.

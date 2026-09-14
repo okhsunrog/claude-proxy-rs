@@ -1,3 +1,4 @@
+pub mod chatgpt;
 pub mod client_keys;
 pub mod models;
 pub mod oauth;

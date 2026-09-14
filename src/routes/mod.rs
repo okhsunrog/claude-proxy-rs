@@ -3,4 +3,5 @@ pub mod anthropic;
 pub mod auth;
 pub mod health;
 pub mod openai;
+pub mod transcription;
 pub mod user_usage;

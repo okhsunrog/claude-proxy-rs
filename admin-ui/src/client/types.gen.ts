@@ -24,6 +24,10 @@ export type ClientKey = {
     usage?: TokenUsage;
 };
 
+export type ConnectionStatus = {
+    authenticated: boolean;
+};
+
 export type CreateKeyRequest = {
     name: string;
 };
@@ -31,6 +35,12 @@ export type CreateKeyRequest = {
 export type CreateKeyResponse = {
     id: string;
     key: string;
+};
+
+export type DeviceLogin = {
+    interval: number;
+    user_code: string;
+    verification_url: string;
 };
 
 export type ErrorBody = {
@@ -368,6 +378,82 @@ export type WebSessionRequest = {
 export type WebSessionStatusResponse = {
     configured: boolean;
 };
+
+export type ChatgptLogoutData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/chatgpt';
+};
+
+export type ChatgptLogoutErrors = {
+    400: ErrorResponse;
+};
+
+export type ChatgptLogoutError = ChatgptLogoutErrors[keyof ChatgptLogoutErrors];
+
+export type ChatgptLogoutResponses = {
+    200: SuccessResponse;
+};
+
+export type ChatgptLogoutResponse = ChatgptLogoutResponses[keyof ChatgptLogoutResponses];
+
+export type ChatgptLoginData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/chatgpt/login';
+};
+
+export type ChatgptLoginErrors = {
+    400: ErrorResponse;
+};
+
+export type ChatgptLoginError = ChatgptLoginErrors[keyof ChatgptLoginErrors];
+
+export type ChatgptLoginResponses = {
+    200: DeviceLogin;
+};
+
+export type ChatgptLoginResponse = ChatgptLoginResponses[keyof ChatgptLoginResponses];
+
+export type ChatgptPollData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/chatgpt/poll';
+};
+
+export type ChatgptPollErrors = {
+    400: ErrorResponse;
+};
+
+export type ChatgptPollError = ChatgptPollErrors[keyof ChatgptPollErrors];
+
+export type ChatgptPollResponses = {
+    200: ConnectionStatus;
+};
+
+export type ChatgptPollResponse = ChatgptPollResponses[keyof ChatgptPollResponses];
+
+export type ChatgptStatusData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/chatgpt/status';
+};
+
+export type ChatgptStatusErrors = {
+    400: ErrorResponse;
+};
+
+export type ChatgptStatusError = ChatgptStatusErrors[keyof ChatgptStatusErrors];
+
+export type ChatgptStatusResponses = {
+    200: ConnectionStatus;
+};
+
+export type ChatgptStatusResponse = ChatgptStatusResponses[keyof ChatgptStatusResponses];
 
 export type CreateKeyData = {
     body: CreateKeyRequest;

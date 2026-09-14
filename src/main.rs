@@ -51,6 +51,8 @@ pub struct AppState {
     pub client_keys: Arc<ClientKeysStore>,
     pub models: Arc<ModelsStore>,
     pub oauth: OAuthManager,
+    pub chatgpt: auth::chatgpt::ChatGptAuth,
+    pub transcription_limits: routes::transcription::TranscriptionLimits,
     pub http_client: Client,
     pub admin_credentials: AdminCredentials,
     /// Whether to set Secure flag on cookies (true when not binding to localhost)
@@ -117,6 +119,10 @@ fn admin_openapi_router() -> OpenApiRouter<Arc<AppState>> {
             )
             .build(),
     )
+    .routes(routes!(admin::chatgpt_status))
+    .routes(routes!(admin::chatgpt_login))
+    .routes(routes!(admin::chatgpt_poll))
+    .routes(routes!(admin::chatgpt_logout))
     // OAuth
     .routes(routes!(admin::get_oauth_status))
     .routes(routes!(admin::start_oauth_flow))
@@ -226,7 +232,10 @@ async fn main() -> Result<()> {
         info!("Request capture is enabled");
     }
 
+    let chatgpt = auth::chatgpt::ChatGptAuth::new(http_client.clone(), auth_store.clone());
     let state = Arc::new(AppState {
+        chatgpt,
+        transcription_limits: routes::transcription::TranscriptionLimits::new(),
         auth_store,
         client_keys,
         models,
@@ -312,6 +321,12 @@ async fn main() -> Result<()> {
 
     // API routes
     let api_routes = Router::new()
+        .route(
+            "/audio/transcriptions",
+            post(routes::transcription::transcribe).layer(DefaultBodyLimit::max(
+                routes::transcription::UPLOAD_LIMIT + 64 * 1024,
+            )),
+        )
         .route("/chat/completions", post(openai::chat_completions))
         .route("/models", get(openai::list_models))
         .route("/messages", post(anthropic::messages))

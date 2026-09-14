@@ -88,6 +88,10 @@ async fn authenticate_key(
         return Err(ProxyError::RateLimitExceeded(msg));
     }
 
+    if model == crate::routes::transcription::TRANSCRIPTION_MODEL {
+        return Err(ProxyError::InvalidModel(model.to_string()));
+    }
+
     // Check model exists and is enabled
     if !state.models.is_valid(model).await? {
         warn!(

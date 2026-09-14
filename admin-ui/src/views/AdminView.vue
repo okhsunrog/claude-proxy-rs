@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import OAuthSection from '../components/OAuthSection.vue'
+import ChatGptSection from '../components/ChatGptSection.vue'
 import KeysList from '../components/KeysList.vue'
 import ModelManagement from '../components/ModelManagement.vue'
 import UsageHistory from '../components/UsageHistory.vue'
@@ -43,6 +44,7 @@ async function handleLogout() {
 
     <div class="space-y-6">
       <OAuthSection />
+      <ChatGptSection />
 
       <UCard>
         <UTabs v-model="activeTab" :items="tabs" :content="false" />
