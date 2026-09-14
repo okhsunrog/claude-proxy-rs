@@ -1,11 +1,7 @@
 //! Single-account GPT inference over the subscription Responses endpoint.
 // JSON reads return Null for missing fields; writes below target validated or constructed objects.
 #![allow(clippy::indexing_slicing)]
-use crate::{
-    AppState,
-    error::ProxyError,
-    transforms::responses::{self as compat, Accumulator, ChatStream},
-};
+use crate::{AppState, error::ProxyError, transforms::responses as compat};
 use axum::{
     Json,
     body::Body,
@@ -16,6 +12,8 @@ use axum::{
 use bytes::Bytes;
 use eventsource_stream::Eventsource;
 use futures_util::{Stream, StreamExt};
+use llm_relay::protocol::events::Decoded;
+use llm_relay::protocol::{Decoder, Encoder, Event, Policy, Protocol};
 use serde_json::{Value, json};
 use std::{io, pin::pin, sync::Arc, time::Duration};
 
@@ -27,10 +25,14 @@ pub fn is_model(model: &str) -> bool {
             .iter()
             .any(|p| model == *p || model.starts_with(&format!("{p}-")))
 }
-fn error(status: StatusCode, message: impl Into<String>) -> Response {
+fn error(protocol: Protocol, status: StatusCode, message: impl Into<String>) -> Response {
     (
         status,
-        Json(json!({"error":{"type":"upstream_error","message":message.into()}})),
+        Json(if protocol == Protocol::Messages {
+            json!({"type":"error","error":{"type":"api_error","message":message.into()}})
+        } else {
+            json!({"error":{"type":"upstream_error","message":message.into()}})
+        }),
     )
         .into_response()
 }
@@ -40,30 +42,59 @@ pub async fn responses(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    execute(state, headers, body, false).await
+    execute(state, headers, body, Protocol::Responses).await
 }
 pub async fn chat_completions(state: Arc<AppState>, headers: HeaderMap, body: Value) -> Response {
-    execute(state, headers, body, true).await
+    execute(state, headers, body, Protocol::ChatCompletions).await
 }
-async fn execute(state: Arc<AppState>, headers: HeaderMap, body: Value, chat: bool) -> Response {
+pub async fn messages(state: Arc<AppState>, headers: HeaderMap, body: Value) -> Response {
+    execute(state, headers, body, Protocol::Messages).await
+}
+async fn execute(
+    state: Arc<AppState>,
+    headers: HeaderMap,
+    body: Value,
+    protocol: Protocol,
+) -> Response {
     let Some(model) = body
         .get("model")
         .and_then(Value::as_str)
         .filter(|m| is_model(m))
     else {
-        return error(StatusCode::BAD_REQUEST, "Specify a registered GPT model");
+        return error(
+            protocol,
+            StatusCode::BAD_REQUEST,
+            "Specify a registered GPT model",
+        );
     };
     let model = model.to_owned();
-    let Some(key) = headers
+    let bearer = headers
         .get(header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "))
-    else {
-        return ProxyError::InvalidApiKey.to_openai_response();
+        .and_then(|s| s.strip_prefix("Bearer "));
+    let Some(key) = (if protocol == Protocol::Messages {
+        headers
+            .get("x-api-key")
+            .and_then(|h| h.to_str().ok())
+            .or(bearer)
+    } else {
+        bearer
+    }) else {
+        return if protocol == Protocol::Messages {
+            ProxyError::InvalidApiKey.to_anthropic_response()
+        } else {
+            ProxyError::InvalidApiKey.to_openai_response()
+        };
     };
     let client_key = match super::auth::validate_inference_key(key, &state, &model, true).await {
         Ok(k) => k,
-        Err(e) => return e.to_openai_response(),
+        Err(e) => {
+            return if protocol == Protocol::Messages {
+                e.to_anthropic_response()
+            } else {
+                e.to_openai_response()
+            };
+        }
     };
     let streaming = body.get("stream").and_then(Value::as_bool).unwrap_or(false);
     let include_usage = body
@@ -72,11 +103,15 @@ async fn execute(state: Arc<AppState>, headers: HeaderMap, body: Value, chat: bo
         .unwrap_or(false);
     let capture = crate::capture::Capture::begin(
         &state.capture,
-        if chat { "openai" } else { "responses" },
-        if chat {
-            "/v1/chat/completions"
-        } else {
-            "/v1/responses"
+        match protocol {
+            Protocol::Messages => "anthropic",
+            Protocol::ChatCompletions => "openai",
+            Protocol::Responses => "responses",
+        },
+        match protocol {
+            Protocol::Messages => "/v1/messages",
+            Protocol::ChatCompletions => "/v1/chat/completions",
+            Protocol::Responses => "/v1/responses",
         },
         &model,
         streaming,
@@ -84,14 +119,39 @@ async fn execute(state: Arc<AppState>, headers: HeaderMap, body: Value, chat: bo
         &body,
     )
     .await;
-    let mut prepared = match if chat {
-        compat::from_chat(&body)
-    } else {
-        compat::prepare(body)
-    } {
-        Ok(b) => b,
-        Err(e) => return error(StatusCode::BAD_REQUEST, e),
+    let policy = match headers
+        .get("x-proxy-compatibility")
+        .and_then(|h| h.to_str().ok())
+    {
+        Some("strict") => Policy::Strict,
+        Some("compatible") => Policy::Compatible,
+        None if protocol == Protocol::Responses => Policy::Strict,
+        None => Policy::Compatible,
+        Some(_) => {
+            return error(
+                protocol,
+                StatusCode::BAD_REQUEST,
+                "x-proxy-compatibility must be strict or compatible",
+            );
+        }
     };
+    let translated = match compat::prepare_request(protocol, &body, policy) {
+        Ok(t) => t,
+        Err(e) => return error(protocol, StatusCode::BAD_REQUEST, e),
+    };
+    let warning = translated
+        .diagnostics
+        .iter()
+        .map(|d| d.field.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !warning.is_empty() {
+        tracing::info!(fields=%warning,"Applied explicit compatibility policy");
+    }
+    let mut prepared = translated.body;
+    if protocol == Protocol::Messages {
+        prepared["include"] = json!(["reasoning.encrypted_content"]);
+    }
     // Keep cache routing separate for independently authorized client keys.
     let cache_key = prepared
         .get("prompt_cache_key")
@@ -103,7 +163,7 @@ async fn execute(state: Arc<AppState>, headers: HeaderMap, body: Value, chat: bo
     }
     let (mut token, mut account) = match state.chatgpt.credentials(None).await {
         Ok(c) => c,
-        Err(e) => return error(StatusCode::SERVICE_UNAVAILABLE, e),
+        Err(e) => return error(protocol, StatusCode::SERVICE_UNAVAILABLE, e),
     };
     let mut response = None;
     for attempt in 0..2 {
@@ -124,6 +184,7 @@ async fn execute(state: Arc<AppState>, headers: HeaderMap, body: Value, chat: bo
             Ok(r) => r,
             Err(_error) => {
                 return error(
+                    protocol,
                     StatusCode::BAD_GATEWAY,
                     "Cannot reach ChatGPT inference service",
                 );
@@ -132,7 +193,7 @@ async fn execute(state: Arc<AppState>, headers: HeaderMap, body: Value, chat: bo
         if upstream.status() == StatusCode::UNAUTHORIZED && attempt == 0 {
             (token, account) = match state.chatgpt.credentials(Some(&token)).await {
                 Ok(c) => c,
-                Err(e) => return error(StatusCode::SERVICE_UNAVAILABLE, e),
+                Err(e) => return error(protocol, StatusCode::SERVICE_UNAVAILABLE, e),
             };
             continue;
         }
@@ -145,6 +206,7 @@ async fn execute(state: Arc<AppState>, headers: HeaderMap, body: Value, chat: bo
                 _ => "ChatGPT inference request failed",
             };
             return error(
+                protocol,
                 if status.is_server_error() || status == StatusCode::UNAUTHORIZED {
                     StatusCode::BAD_GATEWAY
                 } else {
@@ -157,7 +219,11 @@ async fn execute(state: Arc<AppState>, headers: HeaderMap, body: Value, chat: bo
         break;
     }
     let Some(response) = response else {
-        return error(StatusCode::BAD_GATEWAY, "ChatGPT authentication failed");
+        return error(
+            protocol,
+            StatusCode::BAD_GATEWAY,
+            "ChatGPT authentication failed",
+        );
     };
     if let Some(capture) = &capture {
         capture
@@ -183,8 +249,8 @@ async fn execute(state: Arc<AppState>, headers: HeaderMap, body: Value, chat: bo
         });
     });
     if streaming {
-        let stream = wire_stream(events, chat.then(|| ChatStream::new(model, include_usage)));
-        return (
+        let stream = wire_stream(events, Encoder::new(protocol, model, include_usage));
+        let mut response = (
             [
                 (header::CONTENT_TYPE, "text/event-stream"),
                 (header::CACHE_CONTROL, "no-cache"),
@@ -193,28 +259,29 @@ async fn execute(state: Arc<AppState>, headers: HeaderMap, body: Value, chat: bo
             Body::from_stream(stream),
         )
             .into_response();
+        attach_warning(&mut response, &warning);
+        return response;
     }
     let mut events = pin!(events);
     while let Some(event) = events.next().await {
         match event {
-            Ok(event)
-                if matches!(
-                    event["type"].as_str(),
-                    Some("response.completed" | "response.incomplete")
-                ) =>
-            {
-                return Json(if chat {
-                    compat::to_chat(&event["response"])
-                } else {
-                    event["response"].clone()
-                })
-                .into_response();
+            Ok(Decoded {
+                event: Event::Finish(completion),
+                ..
+            }) => {
+                let mut response = match completion.render(protocol) {
+                    Ok(body) => Json(body).into_response(),
+                    Err(e) => error(protocol, StatusCode::BAD_GATEWAY, e),
+                };
+                attach_warning(&mut response, &warning);
+                return response;
             }
             Ok(_) => {}
-            Err(e) => return error(StatusCode::BAD_GATEWAY, e.to_string()),
+            Err(e) => return error(protocol, StatusCode::BAD_GATEWAY, e.to_string()),
         }
     }
     error(
+        protocol,
         StatusCode::BAD_GATEWAY,
         "ChatGPT stream ended without a response",
     )
@@ -231,17 +298,26 @@ impl<F: FnOnce(llm_relay::Usage)> Drop for UsageGuard<F> {
         }
     }
 }
+fn attach_warning(response: &mut Response, warning: &str) {
+    if !warning.is_empty()
+        && let Ok(value) = warning.parse()
+    {
+        response
+            .headers_mut()
+            .insert("x-proxy-compatibility-warnings", value);
+    }
+}
 fn tracked_events<E: std::fmt::Display + Send + 'static>(
     body: impl Stream<Item = Result<Bytes, E>> + Send,
     finish: impl FnOnce(llm_relay::Usage) + Send,
-) -> impl Stream<Item = Result<Value, io::Error>> + Send {
+) -> impl Stream<Item = Result<Decoded, io::Error>> + Send {
     let guard = UsageGuard {
         usage: None,
         finish: Some(finish),
     };
     async_stream::stream! {
         let mut guard=guard;
-        let mut accumulator=Accumulator::default();
+        let mut decoder=Decoder::default();
         let mut events=pin!(body.eventsource());
         loop {
             let next=tokio::time::timeout(Duration::from_secs(90),events.next()).await;
@@ -251,21 +327,20 @@ fn tracked_events<E: std::fmt::Display + Send + 'static>(
                 Ok(Some(Err(_error)))=>{yield Err(io::Error::other("Invalid or interrupted ChatGPT event stream"));return;},
                 Err(_error)=>{yield Err(io::Error::other("ChatGPT stream timed out"));return;},
             };
-            let mut event:Value=match serde_json::from_str(&event.data) { Ok(v)=>v,Err(_error)=>{yield Err(io::Error::other("Invalid ChatGPT event JSON"));return;} };
-            accumulator.observe(&mut event);
-            if let Some(usage)=compat::usage(&event["response"]) {guard.usage=Some(usage);}
-            let kind=event["type"].as_str().unwrap_or("");
-            if matches!(kind,"error"|"response.failed") {yield Err(io::Error::other("ChatGPT generation failed"));return;}
-            let terminal=matches!(kind,"response.completed"|"response.incomplete");
-            if terminal && !event.get("response").is_some_and(Value::is_object) {yield Err(io::Error::other("Missing ChatGPT response object"));return;}
-            yield Ok(event);
-            if terminal {return;}
+            let raw:Value=match serde_json::from_str(&event.data) { Ok(v)=>v,Err(_error)=>{yield Err(io::Error::other("Invalid ChatGPT event JSON"));return;} };
+            let decoded=decoder.decode(raw);
+            guard.usage=decoder.usage().cloned();
+            match decoded {
+                Ok(decoded)=> {let terminal=matches!(decoded.event,Event::Finish(_));yield Ok(decoded);if terminal{return;}},
+                Err(e)=>{yield Err(io::Error::other(e));return;},
+            }
         }
     }
 }
+
 fn wire_stream(
-    events: impl Stream<Item = Result<Value, io::Error>> + Send,
-    mut chat: Option<ChatStream>,
+    events: impl Stream<Item = Result<Decoded, io::Error>> + Send,
+    mut encoder: Encoder,
 ) -> impl Stream<Item = Result<Bytes, io::Error>> + Send {
     async_stream::stream! {
         let mut events=pin!(events);
@@ -273,15 +348,15 @@ fn wire_stream(
         loop {
             tokio::select! { biased;
                 next=events.next()=>match next {
-                    Some(Ok(event))=> {
-                        let terminal=matches!(event["type"].as_str(),Some("response.completed"|"response.incomplete"));
-                        if let Some(chat)=&mut chat {
-                            for chunk in chat.event(&event) {yield Ok(Bytes::from(format!("data: {chunk}\n\n")));}
-                            if terminal {yield Ok(Bytes::from_static(b"data: [DONE]\n\n"));}
-                        } else {yield Ok(Bytes::from(format!("event: {}\ndata: {event}\n\n",event["type"].as_str().unwrap_or("message"))));}
-                        if terminal {return;}
+                    Some(Ok(decoded))=> {
+                        let terminal=matches!(decoded.event,Event::Finish(_));
+                        match encoder.encode(&decoded) {
+                            Ok(frames)=>for frame in frames {yield Ok(Bytes::from(frame.sse()));},
+                            Err(e)=>{yield Ok(Bytes::from(encoder.error(&e).sse()));return;},
+                        }
+                        if terminal {if encoder.needs_done_sentinel(){yield Ok(Bytes::from_static(b"data: [DONE]\n\n"));}return;}
                     },
-                    Some(Err(e))=> {let payload=json!({"type":"error","error":{"type":"upstream_error","message":e.to_string()}});yield Ok(Bytes::from(format!("event: error\ndata: {payload}\n\n")));return;},
+                    Some(Err(e))=>{yield Ok(Bytes::from(encoder.error(&e.to_string()).sse()));return;},
                     None=>return,
                 },
                 _=keepalive.tick()=>yield Ok(Bytes::from_static(b": keep-alive\n\n")),
@@ -298,7 +373,7 @@ mod tests {
     async fn fragmented_utf8_and_terminal_usage_survive_cancellation() {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let callback = seen.clone();
-        let data = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Привет\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"output\":[],\"usage\":{\"input_tokens\":100,\"input_tokens_details\":{\"cached_tokens\":80},\"output_tokens\":2}}}\n\n";
+        let data = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Привет\",\"output_index\":0,\"content_index\":0}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"output\":[],\"usage\":{\"input_tokens\":100,\"input_tokens_details\":{\"cached_tokens\":80},\"output_tokens\":2}}}\n\n";
         let chunks: Vec<Result<Bytes, io::Error>> = data
             .as_bytes()
             .iter()
@@ -308,9 +383,12 @@ mod tests {
             futures_util::stream::iter(chunks),
             move |u| callback.lock().unwrap().push(u),
         ));
-        assert_eq!(stream.next().await.unwrap().unwrap()["delta"], "Привет");
         assert_eq!(
-            stream.next().await.unwrap().unwrap()["type"],
+            stream.next().await.unwrap().unwrap().native["delta"],
+            "Привет"
+        );
+        assert_eq!(
+            stream.next().await.unwrap().unwrap().native["type"],
             "response.completed"
         );
         drop(stream);
@@ -323,7 +401,7 @@ mod tests {
         let body=futures_util::stream::iter([Ok::<_,io::Error>(Bytes::from_static(b"data: {\"type\":\"response.created\",\"response\":{\"id\":\"r\",\"created_at\":1}}\n\n"))]);
         let chunks: Vec<_> = wire_stream(
             tracked_events(body, |_| {}),
-            Some(ChatStream::new("gpt-test".into(), false)),
+            Encoder::new(Protocol::ChatCompletions, "gpt-test".into(), false),
         )
         .collect()
         .await;

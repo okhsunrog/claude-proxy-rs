@@ -285,7 +285,9 @@ async fn main() -> Result<()> {
             header::AUTHORIZATION,
             HeaderName::from_static("x-api-key"),
             HeaderName::from_static("anthropic-version"),
+            HeaderName::from_static("x-proxy-compatibility"),
         ])
+        .expose_headers([HeaderName::from_static("x-proxy-compatibility-warnings")])
         .allow_credentials(true);
 
     match &config.cors_mode {

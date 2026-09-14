@@ -14,7 +14,7 @@ chrono = "0.4.43"
 clap = { version = "4.5.57", features = ["derive", "env"] }
 dotenvy = "0.15.7"
 futures-util = "0.3.31"
-llm-relay = { version = "0.2.2", default-features = false }
+llm-relay = { version = "1.0.0", default-features = false, git = "https://github.com/okhsunrog/llm-relay", rev = "fbf7c49" }
 memory-serve = "2.0.0-beta.0"
 rand = "0.10"
 reqwest = { version = "0.13.1", features = ["form", "json", "multipart", "stream"] }

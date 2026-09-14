@@ -26,6 +26,13 @@ pub async fn messages(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
+    if body
+        .get("model")
+        .and_then(Value::as_str)
+        .is_some_and(super::chatgpt::is_model)
+    {
+        return super::chatgpt::messages(state, headers, body).await;
+    }
     let model = body
         .get("model")
         .and_then(|m| m.as_str())

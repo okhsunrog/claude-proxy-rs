@@ -25,6 +25,7 @@ pub fn usage_from_json(value: &Value) -> Usage {
         cache_read_input_tokens: value
             .get("cache_read_input_tokens")
             .and_then(|v| v.as_u64()),
+        ..Usage::default()
     }
 }
 

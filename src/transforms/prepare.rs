@@ -13,8 +13,8 @@ use rand::RngExt;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use llm_relay::convert::cache_control::ensure_cache_control;
-use llm_relay::convert::tool_names::transform_request_tool_names;
+use llm_relay::anthropic::cache_control::ensure_cache_control;
+use llm_relay::anthropic::tool_names::transform_request_tool_names;
 
 use super::tool_aliases::{ToolNameMap, normalize_claude_code_tool_names};
 use crate::constants::SYSTEM_PREFIX;

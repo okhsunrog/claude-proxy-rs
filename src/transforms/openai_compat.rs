@@ -6,16 +6,12 @@
 //! thinking config, max_tokens caps, mcp_ prefix stripping).
 
 use super::tool_aliases::ToolNameMap;
-use llm_relay::MessagesResponse;
-use llm_relay::convert::thinking::{
+use llm_relay::anthropic::thinking::{
     build_thinking_for_model, build_thinking_params_json, parse_model_suffix,
     supports_adaptive_thinking,
 };
-use llm_relay::convert::to_anthropic::inbound_request_to_anthropic;
-#[cfg(test)]
-use llm_relay::convert::to_anthropic::openai_tool_to_anthropic;
-use llm_relay::convert::to_openai::anthropic_response_to_openai;
-use llm_relay::types::openai::{ChatResponse, InboundChatRequest};
+use llm_relay::protocol::{Protocol, translate_request, translate_response};
+use llm_relay::wire::anthropic::MessagesResponse;
 #[cfg(test)]
 use llm_relay::{EffortLevel, ThinkingConfig};
 use serde_json::{Value, json};
@@ -41,26 +37,35 @@ const DEFAULT_MAX_TOKENS: u32 = 16000;
 ///
 /// Note: This does NOT add mcp_ prefix, system injection, or user ID.
 /// Those are handled by `prepare_anthropic_request()`.
-pub fn transform_openai_request(req: InboundChatRequest) -> Value {
+pub fn transform_openai_request(mut req: Value) -> Result<Value, String> {
     // Save proxy-specific fields before consuming
-    let stream = req.stream;
-    let top_p = req.top_p;
-    let reasoning_effort = req.reasoning_effort.clone();
+    let stream = req.get("stream").and_then(Value::as_bool);
+    let top_p = req.get("top_p").cloned();
+    let reasoning_effort = req
+        .get("reasoning_effort")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     let raw_model = req
-        .model
-        .clone()
-        .unwrap_or_else(|| DEFAULT_MODEL.to_string());
-
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or(DEFAULT_MODEL)
+        .to_owned();
+    set_field(&mut req, "model", json!(raw_model));
     // Parse model suffix for thinking config (e.g., "claude-sonnet-4-5(medium)")
     let (base_model, suffix_effort) = parse_model_suffix(&raw_model);
 
     // Core conversion: messages, system, tools, model, temperature, max_tokens
-    let mut request = inbound_request_to_anthropic(req);
+    let translated = translate_request(Protocol::ChatCompletions, Protocol::Messages, &req)?
+        .enforce(llm_relay::Policy::Compatible)?;
+    for diagnostic in &translated.diagnostics {
+        tracing::debug!(field=%diagnostic.field, reason=%diagnostic.reason, "Applied protocol approximation");
+    }
+    let mut request = translated.body;
 
     // Override model with the base model (without suffix)
     set_field(&mut request, "model", Value::String(base_model.clone()));
 
-    // Add fields not handled by inbound_request_to_anthropic
+    // Preserve transport controls.
     if let Some(s) = stream {
         set_field(&mut request, "stream", json!(s));
     }
@@ -84,8 +89,14 @@ pub fn transform_openai_request(req: InboundChatRequest) -> Value {
         if let Some(v) = thinking_json {
             set_field(&mut request, "thinking", v);
         }
-        if let Some(v) = output_config_json {
-            set_field(&mut request, "output_config", v);
+        if let Some(v) = output_config_json
+            && let Some(fields) = v.as_object()
+        {
+            let mut output = request.get("output_config").cloned().unwrap_or(json!({}));
+            if let Some(existing) = output.as_object_mut() {
+                existing.extend(fields.clone());
+            }
+            set_field(&mut request, "output_config", output);
         }
     }
 
@@ -124,7 +135,7 @@ pub fn transform_openai_request(req: InboundChatRequest) -> Value {
     max_tokens = max_tokens.min(model_max_output);
     set_field(&mut request, "max_tokens", json!(max_tokens));
 
-    request
+    Ok(request)
 }
 
 fn set_field(request: &mut Value, key: &str, value: Value) {
@@ -136,23 +147,29 @@ fn set_field(request: &mut Value, key: &str, value: Value) {
 /// Transform an Anthropic response to OpenAI format.
 ///
 /// Uses llm-relay's core conversion and restores client-visible tool names.
-pub fn transform_openai_response(resp: MessagesResponse, tool_names: &ToolNameMap) -> ChatResponse {
-    let mut response = anthropic_response_to_openai(resp);
-
-    // Override id to use OpenAI chatcmpl-* format instead of Anthropic's msg_* id
-    let now = response.created.unwrap_or(0);
-    response.id = Some(format!("chatcmpl-{now}"));
-
-    // Restore aliases from the shared request preparation.
-    for choice in &mut response.choices {
-        if let Some(tool_calls) = &mut choice.message.tool_calls {
-            for tc in tool_calls {
-                tc.function.name = tool_names.restore(&tc.function.name);
+pub fn transform_openai_response(
+    resp: MessagesResponse,
+    tool_names: &ToolNameMap,
+) -> Result<Value, String> {
+    let raw = serde_json::to_value(resp).map_err(|e| e.to_string())?;
+    let mut response = translate_response(Protocol::Messages, Protocol::ChatCompletions, &raw)?;
+    if let Some(choices) = response.get_mut("choices").and_then(Value::as_array_mut) {
+        for choice in choices {
+            if let Some(calls) = choice
+                .pointer_mut("/message/tool_calls")
+                .and_then(Value::as_array_mut)
+            {
+                for call in calls {
+                    if let Some(name) = call.pointer_mut("/function/name")
+                        && let Some(original) = name.as_str()
+                    {
+                        *name = Value::String(tool_names.restore(original));
+                    }
+                }
             }
         }
     }
-
-    response
+    Ok(response)
 }
 
 #[cfg(test)]
@@ -264,7 +281,8 @@ mod tests {
                 "parameters": {"type": "object"}
             }
         });
-        let result = openai_tool_to_anthropic(openai_tool);
+        let converted=translate_request(Protocol::ChatCompletions,Protocol::Messages,&json!({"model":"test","messages":[{"role":"user","content":"hi"}],"tools":[openai_tool]})).unwrap();
+        let result = &converted.body["tools"][0];
         assert_eq!(result["name"], "get_weather");
         assert_eq!(result["description"], "Get weather");
     }

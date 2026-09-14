@@ -1,0 +1,49 @@
+"""Live Messages compatibility tests against a registered GPT model."""
+import argparse
+import os
+from anthropic import Anthropic, BadRequestError
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--model', required=True)
+args = parser.parse_args()
+client = Anthropic(base_url=os.environ['PROXY_BASE_URL'].rstrip('/'), api_key=os.environ['PROXY_API_KEY'], timeout=180, max_retries=0)
+base = dict(model=args.model, max_tokens=256)
+messages = [{'role': 'user', 'content': 'Reply exactly OK.'}]
+raw = client.messages.with_raw_response.create(**base, messages=messages)
+assert 'max_output_tokens' in raw.headers['x-proxy-compatibility-warnings']
+reply = raw.parse()
+assert any(b.type == 'text' and b.text for b in reply.content)
+assert reply.stop_reason == 'end_turn' and reply.usage.output_tokens > 0
+print('Messages JSON and compatibility warning: OK')
+with client.messages.stream(**base, messages=messages) as stream:
+    text = ''.join(stream.text_stream)
+    reply = stream.get_final_message()
+assert text and reply.stop_reason == 'end_turn' and reply.usage.output_tokens > 0
+print('Messages SSE collected by SDK: OK')
+try:
+    client.messages.create(**base, messages=messages, extra_headers={'x-proxy-compatibility': 'strict'})
+except BadRequestError as e:
+    assert 'max_output_tokens' in str(e)
+else:
+    raise AssertionError('strict mode must reject unsupported max_tokens')
+print('Strict control rejection: OK')
+
+tools = [{'name': 'get_value', 'description': 'Get the test value', 'input_schema': {'type': 'object', 'properties': {'label': {'type': 'string'}}, 'required': ['label'], 'additionalProperties': False}}]
+history = [{'role': 'user', 'content': 'Use get_value with label test, then report its returned value.'}]
+for streaming in [False, True]:
+    options = dict(**base, messages=history, tools=tools, tool_choice={'type': 'tool', 'name': 'get_value'}, thinking={'type': 'adaptive'})
+    if streaming:
+        with client.messages.stream(**options) as stream:
+            reply = stream.get_final_message()
+    else:
+        reply = client.messages.create(**options)
+    calls = [b for b in reply.content if b.type == 'tool_use']
+    assert calls and reply.stop_reason == 'tool_use'
+    assert all(isinstance(c.input, dict) and c.name == 'get_value' for c in calls)
+    signatures = [b.signature for b in reply.content if b.type == 'thinking']
+    assert signatures and all(s.startswith('llm-relay:responses:v1:') for s in signatures)
+    continuation = history + [{'role': 'assistant', 'content': [b.model_dump(exclude_none=True) for b in reply.content]}, {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': c.id, 'content': '42'} for c in calls]}]
+    result = client.messages.create(**base, messages=continuation, tools=tools, tool_choice={'type': 'none'})
+    assert any(b.type == 'text' and '42' in b.text for b in result.content)
+    print(f'Messages {"SSE" if streaming else "JSON"} tools + signed reasoning replay: OK')
+print('All Messages GPT smoke tests passed')

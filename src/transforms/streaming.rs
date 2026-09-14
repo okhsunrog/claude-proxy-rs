@@ -22,7 +22,7 @@ use tracing::warn;
 
 use llm_relay::Usage;
 #[cfg(test)]
-use llm_relay::convert::tool_names::strip_mcp_prefix;
+use llm_relay::anthropic::tool_names::strip_mcp_prefix;
 
 use crate::AppState;
 use crate::transforms::tool_aliases::ToolNameMap;
@@ -714,12 +714,13 @@ mod regression_tests {
                 .collect::<String>();
             assert!(text.contains("\"name\":\"read_file\""), "{text}");
         }
-        let response: llm_relay::MessagesResponse = serde_json::from_value(json!({
+        let response: llm_relay::wire::anthropic::MessagesResponse = serde_json::from_value(json!({
             "id": "msg", "type": "message", "role": "assistant", "model": "model",
             "content": [{"type":"tool_use", "id":"call", "name":upstream_name, "input":{}}], "stop_reason":"tool_use"
         })).unwrap();
         let response =
-            crate::transforms::transform_openai_response(response, &prepared.tool_name_map);
+            crate::transforms::transform_openai_response(response, &prepared.tool_name_map)
+                .unwrap();
         let value = serde_json::to_value(response).unwrap();
         assert_eq!(
             value["choices"][0]["message"]["tool_calls"][0]["function"]["name"],

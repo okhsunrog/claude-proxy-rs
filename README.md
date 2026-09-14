@@ -388,13 +388,13 @@ the admin panel manages the connection only.
 ### GPT inference through the ChatGPT subscription
 
 The same connected account serves `POST /v1/responses` and GPT requests to
-`POST /v1/chat/completions`, both with ordinary JSON and SSE streaming responses.
+`POST /v1/chat/completions` and `POST /v1/messages`, with ordinary JSON and SSE streaming responses.
 In the ChatGPT subscription card, select **Load available models** to query the
 account's catalog. Register the desired IDs and prices in **Models**, then grant
 access to restricted keys. Adding a model does not grant upstream entitlement.
 IDs beginning with `gpt-`, `codex-`, or the `o1`/`o3`/`o4` families route to ChatGPT;
-Claude models continue through the existing provider. `/v1/messages` remains a
-Claude endpoint.
+Claude models continue through the existing provider. GPT token counting through
+`/v1/messages/count_tokens` is not supported.
 
 Responses is the native interface and preserves output items, including opaque
 reasoning items needed for conversation replay. Send the full conversation on
@@ -405,10 +405,24 @@ and ordinary JSON responses are assembled from completed output items.
 Chat Completions supports text, user images, function tools and tool results,
 `tool_choice`, `parallel_tool_calls`, `reasoning_effort`, and structured output via
 `response_format`. Streaming supports `stream_options.include_usage`. Only one
-choice is supported. Unsupported controls such as `max_tokens`,
-`max_completion_tokens`, `max_output_tokens`, `temperature`, `top_p` and `stop`
-are rejected rather than silently ignored. Model-specific upstream restrictions
-still apply. Use Responses for native tools and opaque reasoning replay.
+choice is supported.
+
+Messages supports text, images, inline documents, function tools/results, tool
+choice, structured output and thinking. Signed GPT reasoning is carried in a
+versioned `thinking.signature` envelope so returned assistant blocks can be
+replayed unchanged. Foreign Claude signatures and native server tools cannot be
+translated to GPT. Native Claude requests retain their existing preparation path.
+
+GPT Chat Completions and Messages default to compatible mode. Unsupported
+`max_tokens` / `max_completion_tokens` / `max_output_tokens`, `temperature`,
+`top_p`, `top_k` and stop controls are ignored with an
+`x-proxy-compatibility-warnings` response header. Consequently `max_tokens` does
+**not** cap GPT generation. Thinking token budgets approximate reasoning effort;
+Claude cache hints do not transfer. Send `x-proxy-compatibility: strict` to reject
+these approximations with HTTP 400. Native Responses defaults to strict mode;
+`x-proxy-compatibility: compatible` opts into the same control handling. Unsupported
+content and stateful requests always fail. Model-specific upstream restrictions
+still apply. Use Responses for native tools and native reasoning replay.
 
 GPT usage is recorded in the existing request history and uses model prices for
 estimated API-equivalent costs. Cache reads and writes are counted separately, without double
@@ -434,4 +448,5 @@ Run the live compatibility checks against your configured proxy:
 
 ```bash
 uv run --env-file .env --with openai scripts/test_chatgpt.py --model YOUR_MODEL_ID
+uv run --env-file .env --with anthropic scripts/test_chatgpt_messages.py --model YOUR_MODEL_ID
 ```

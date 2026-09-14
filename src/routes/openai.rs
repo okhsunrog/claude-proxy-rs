@@ -5,13 +5,11 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use serde::Deserialize;
 use serde_json::{Value, from_str, json};
 use std::sync::Arc;
 use tracing::{info, warn};
 
-use llm_relay::MessagesResponse;
-use llm_relay::types::openai::InboundChatRequest;
+use llm_relay::wire::anthropic::MessagesResponse;
 
 use crate::AppState;
 use crate::capture::{Capture, capture_byte_stream};
@@ -62,26 +60,11 @@ pub async fn chat_completions(
         return super::chatgpt::chat_completions(state, headers, raw_body).await;
     }
 
-    // Deserialize from a borrow so `raw_body` stays owned for request capture,
-    // avoiding a full clone of the JSON body on every request.
-    let body: InboundChatRequest = match InboundChatRequest::deserialize(&raw_body) {
-        Ok(body) => body,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": format!("Invalid request body: {e}") })),
-            )
-                .into_response();
-        }
-    };
-
-    // Extract model before auth so we can validate it
-    let model_name = body
-        .model
-        .as_deref()
+    let model_name = raw_body
+        .get("model")
+        .and_then(Value::as_str)
         .unwrap_or("claude-sonnet-4-5")
-        .to_string();
-
+        .to_owned();
     // Parse model suffix (e.g., "claude-sonnet-4-5(high)" -> base model)
     let base_model = model_name
         .split_once('(')
@@ -94,7 +77,10 @@ pub async fn chat_completions(
 
     let cloak = state.should_cloak(headers.get("user-agent").and_then(|v| v.to_str().ok()));
 
-    let stream = body.stream.unwrap_or(false);
+    let stream = raw_body
+        .get("stream")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let capture = Capture::begin(
         &state.capture,
         "openai",
@@ -105,7 +91,10 @@ pub async fn chat_completions(
         &raw_body,
     )
     .await;
-    let anthropic_value = transform_openai_request(body);
+    let anthropic_value = match transform_openai_request(raw_body) {
+        Ok(v) => v,
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({"error":e}))).into_response(),
+    };
     let model = anthropic_value
         .get("model")
         .and_then(|m| m.as_str())
@@ -259,6 +248,9 @@ pub async fn chat_completions(
 
         let openai_response =
             transform_openai_response(anthropic_response, &prepared.tool_name_map);
-        Json(openai_response).into_response()
+        match openai_response {
+            Ok(value) => Json(value).into_response(),
+            Err(e) => ProxyError::ParseError(e).to_openai_response(),
+        }
     }
 }
