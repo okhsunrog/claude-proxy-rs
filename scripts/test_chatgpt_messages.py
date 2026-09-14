@@ -41,9 +41,22 @@ for streaming in [False, True]:
     assert calls and reply.stop_reason == 'tool_use'
     assert all(isinstance(c.input, dict) and c.name == 'get_value' for c in calls)
     signatures = [b.signature for b in reply.content if b.type == 'thinking']
-    assert signatures and all(s.startswith('llm-relay:responses:v1:') for s in signatures)
+    assert all(s.startswith('llm-relay:responses:v1:') for s in signatures)
     continuation = history + [{'role': 'assistant', 'content': [b.model_dump(exclude_none=True) for b in reply.content]}, {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': c.id, 'content': '42'} for c in calls]}]
     result = client.messages.create(**base, messages=continuation, tools=tools, tool_choice={'type': 'none'})
     assert any(b.type == 'text' and '42' in b.text for b in result.content)
-    print(f'Messages {"SSE" if streaming else "JSON"} tools + signed reasoning replay: OK')
+    print(f'Messages {"SSE" if streaming else "JSON"} tool round trip: OK')
+reasoning_history = [{'role': 'user', 'content': 'Reason through a tricky arithmetic check before answering: is 127*83 greater than 10500, and by how much?'}]
+for streaming in [False, True]:
+    options = dict(**base, messages=reasoning_history, thinking={'type': 'adaptive'})
+    if streaming:
+        with client.messages.stream(**options) as stream:
+            reply = stream.get_final_message()
+    else:
+        reply = client.messages.create(**options)
+    signatures = [b.signature for b in reply.content if b.type == 'thinking']
+    assert signatures and all(s.startswith('llm-relay:responses:v1:') for s in signatures)
+    result = client.messages.create(**base, messages=reasoning_history + [{'role': 'assistant', 'content': [b.model_dump(exclude_none=True) for b in reply.content]}, {'role': 'user', 'content': 'What was the difference? Reply with just the number.'}])
+    assert any(b.type == 'text' and '41' in b.text for b in result.content)
+    print(f'Messages {"SSE" if streaming else "JSON"} signed reasoning replay: OK')
 print('All Messages GPT smoke tests passed')

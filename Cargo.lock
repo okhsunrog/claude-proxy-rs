@@ -1342,7 +1342,7 @@ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 [[package]]
 name = "llm-relay"
 version = "1.0.0"
-source = "git+https://github.com/okhsunrog/llm-relay?rev=fbf7c49#fbf7c49fde2f3356fb974b04e920b38dc063565d"
+source = "git+https://github.com/okhsunrog/llm-relay?rev=f0153ff#f0153ff0f8af578bc7f4f4bc1078e6a6f3272746"
 dependencies = [
  "base64 0.23.1",
  "schemars",
