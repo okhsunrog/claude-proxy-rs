@@ -83,6 +83,26 @@ export type KeyBreakdownResponse = {
     period: string;
 };
 
+/**
+ * One cell of the key x model cross-tab: what a single key spent on a single model.
+ */
+export type KeyModelBreakdown = {
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+    costMicrodollars: number;
+    inputTokens: number;
+    keyId: string;
+    keyName?: string | null;
+    model: string;
+    outputTokens: number;
+    requestCount: number;
+};
+
+export type KeyModelBreakdownResponse = {
+    entries: Array<KeyModelBreakdown>;
+    period: string;
+};
+
 export type KeyModelUsageResponse = {
     entries: Array<ModelUsageEntry>;
 };
@@ -1071,9 +1091,13 @@ export type GetUsageHistoryByKeyData = {
     path?: never;
     query?: {
         /**
-         * Period: 24h, 7d, or 30d
+         * Time period: "24h", "7d", or "30d"
          */
         period?: string;
+        /**
+         * Restrict the result to a single client key. Absent = all keys.
+         */
+        keyId?: string;
     };
     url: '/usage-history/by-key';
 };
@@ -1084,14 +1108,40 @@ export type GetUsageHistoryByKeyResponses = {
 
 export type GetUsageHistoryByKeyResponse = GetUsageHistoryByKeyResponses[keyof GetUsageHistoryByKeyResponses];
 
+export type GetUsageHistoryByKeyModelData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Time period: "24h", "7d", or "30d"
+         */
+        period?: string;
+        /**
+         * Restrict the result to a single client key. Absent = all keys.
+         */
+        keyId?: string;
+    };
+    url: '/usage-history/by-key-model';
+};
+
+export type GetUsageHistoryByKeyModelResponses = {
+    200: KeyModelBreakdownResponse;
+};
+
+export type GetUsageHistoryByKeyModelResponse = GetUsageHistoryByKeyModelResponses[keyof GetUsageHistoryByKeyModelResponses];
+
 export type GetUsageHistoryByModelData = {
     body?: never;
     path?: never;
     query?: {
         /**
-         * Period: 24h, 7d, or 30d
+         * Time period: "24h", "7d", or "30d"
          */
         period?: string;
+        /**
+         * Restrict the result to a single client key. Absent = all keys.
+         */
+        keyId?: string;
     };
     url: '/usage-history/by-model';
 };
@@ -1107,9 +1157,13 @@ export type GetUsageHistoryTimeseriesData = {
     path?: never;
     query?: {
         /**
-         * Period: 24h, 7d, or 30d
+         * Time period: "24h", "7d", or "30d"
          */
         period?: string;
+        /**
+         * Restrict the result to a single client key. Absent = all keys.
+         */
+        keyId?: string;
     };
     url: '/usage-history/timeseries';
 };

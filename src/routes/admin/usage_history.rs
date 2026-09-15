@@ -5,16 +5,20 @@ use utoipa::ToSchema;
 use super::{ErrorResponse, SuccessResponse};
 use crate::db;
 use crate::usage::history::{
-    HistoryPeriod, KeyBreakdownResponse, ModelBreakdownResponse, TimeseriesResponse, by_key,
-    by_model, timeseries,
+    HistoryPeriod, KeyBreakdownResponse, KeyModelBreakdownResponse, ModelBreakdownResponse,
+    TimeseriesResponse, by_key, by_key_model, by_model, timeseries,
 };
 
 // --- Types ---
 
-#[derive(Deserialize, ToSchema)]
+#[derive(Deserialize, ToSchema, utoipa::IntoParams)]
+#[serde(rename_all = "camelCase")]
+#[into_params(parameter_in = Query)]
 pub struct UsageHistoryQuery {
     /// Time period: "24h", "7d", or "30d"
     pub period: Option<String>,
+    /// Restrict the result to a single client key. Absent = all keys.
+    pub key_id: Option<String>,
 }
 
 // --- Handlers ---
@@ -22,7 +26,7 @@ pub struct UsageHistoryQuery {
 #[utoipa::path(
     get,
     path = "/usage-history/timeseries",
-    params(("period" = Option<String>, Query, description = "Period: 24h, 7d, or 30d")),
+    params(UsageHistoryQuery),
     responses(
         (status = 200, body = TimeseriesResponse),
     )
@@ -37,7 +41,7 @@ pub async fn get_usage_history_timeseries(
     };
 
     Json(
-        timeseries(&conn, &period, None)
+        timeseries(&conn, &period, query.key_id.as_deref())
             .await
             .unwrap_or_else(|_| period.empty_timeseries()),
     )
@@ -46,7 +50,7 @@ pub async fn get_usage_history_timeseries(
 #[utoipa::path(
     get,
     path = "/usage-history/by-model",
-    params(("period" = Option<String>, Query, description = "Period: 24h, 7d, or 30d")),
+    params(UsageHistoryQuery),
     responses(
         (status = 200, body = ModelBreakdownResponse),
     )
@@ -61,7 +65,7 @@ pub async fn get_usage_history_by_model(
     };
 
     Json(
-        by_model(&conn, &period, None)
+        by_model(&conn, &period, query.key_id.as_deref())
             .await
             .unwrap_or_else(|_| period.empty_models()),
     )
@@ -70,7 +74,7 @@ pub async fn get_usage_history_by_model(
 #[utoipa::path(
     get,
     path = "/usage-history/by-key",
-    params(("period" = Option<String>, Query, description = "Period: 24h, 7d, or 30d")),
+    params(UsageHistoryQuery),
     responses(
         (status = 200, body = KeyBreakdownResponse),
     )
@@ -85,9 +89,33 @@ pub async fn get_usage_history_by_key(
     };
 
     Json(
-        by_key(&conn, &period)
+        by_key(&conn, &period, query.key_id.as_deref())
             .await
             .unwrap_or_else(|_| period.empty_keys()),
+    )
+}
+
+#[utoipa::path(
+    get,
+    path = "/usage-history/by-key-model",
+    params(UsageHistoryQuery),
+    responses(
+        (status = 200, body = KeyModelBreakdownResponse),
+    )
+)]
+pub async fn get_usage_history_by_key_model(
+    Query(query): Query<UsageHistoryQuery>,
+) -> Json<KeyModelBreakdownResponse> {
+    let period = HistoryPeriod::parse(query.period.as_deref());
+
+    let Ok(conn) = db::get_conn().await else {
+        return Json(period.empty_key_models());
+    };
+
+    Json(
+        by_key_model(&conn, &period, query.key_id.as_deref())
+            .await
+            .unwrap_or_else(|_| period.empty_key_models()),
     )
 }
 

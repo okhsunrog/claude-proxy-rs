@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT r.key_id, k.name AS \"key_name?\", COUNT(*) AS \"request_count!\", COALESCE(SUM(r.cost_microdollars), 0)::BIGINT AS \"cost_microdollars!\", COALESCE(SUM(r.input_tokens), 0)::BIGINT AS \"input_tokens!\", COALESCE(SUM(r.output_tokens), 0)::BIGINT AS \"output_tokens!\", COALESCE(SUM(r.cache_read_tokens), 0)::BIGINT AS \"cache_read_tokens!\", COALESCE(SUM(r.cache_write_tokens), 0)::BIGINT AS \"cache_write_tokens!\" FROM request_log r LEFT JOIN client_keys k ON r.key_id = k.id WHERE r.created_at >= $1 GROUP BY r.key_id, k.name ORDER BY SUM(r.cost_microdollars) DESC",
+  "query": "SELECT r.key_id, k.name AS \"key_name?\", r.model, COUNT(*) AS \"request_count!\", COALESCE(SUM(r.cost_microdollars), 0)::BIGINT AS \"cost_microdollars!\", COALESCE(SUM(r.input_tokens), 0)::BIGINT AS \"input_tokens!\", COALESCE(SUM(r.output_tokens), 0)::BIGINT AS \"output_tokens!\", COALESCE(SUM(r.cache_read_tokens), 0)::BIGINT AS \"cache_read_tokens!\", COALESCE(SUM(r.cache_write_tokens), 0)::BIGINT AS \"cache_write_tokens!\" FROM request_log r LEFT JOIN client_keys k ON r.key_id = k.id WHERE r.created_at >= $1 AND ($2::TEXT IS NULL OR r.key_id = $2) GROUP BY r.key_id, k.name, r.model ORDER BY SUM(r.cost_microdollars) DESC",
   "describe": {
     "columns": [
       {
@@ -27,36 +27,47 @@
       },
       {
         "ordinal": 2,
+        "name": "model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_log",
+            "name": "model"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
         "name": "request_count!",
         "type_info": "Int8",
         "origin": "Expression"
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "cost_microdollars!",
         "type_info": "Int8",
         "origin": "Expression"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "input_tokens!",
         "type_info": "Int8",
         "origin": "Expression"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "output_tokens!",
         "type_info": "Int8",
         "origin": "Expression"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "cache_read_tokens!",
         "type_info": "Int8",
         "origin": "Expression"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "cache_write_tokens!",
         "type_info": "Int8",
         "origin": "Expression"
@@ -64,10 +75,12 @@
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Int8",
+        "Text"
       ]
     },
     "nullable": [
+      false,
       false,
       false,
       null,
@@ -78,5 +91,5 @@
       null
     ]
   },
-  "hash": "3b9788d01b67a2c2cb6df59234c0951c88a45cfeac6044674f38caff5310ca5e"
+  "hash": "9a1e9967148bad2ca1029bb756a30a1d532c96da283dfaa8e90f51b938ec7263"
 }

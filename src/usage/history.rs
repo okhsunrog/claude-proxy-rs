@@ -66,6 +66,28 @@ pub struct KeyBreakdownResponse {
     pub keys: Vec<KeyBreakdown>,
 }
 
+/// One cell of the key x model cross-tab: what a single key spent on a single model.
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyModelBreakdown {
+    pub key_id: String,
+    pub key_name: Option<String>,
+    pub model: String,
+    pub request_count: u64,
+    pub cost_microdollars: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+}
+
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyModelBreakdownResponse {
+    pub period: String,
+    pub entries: Vec<KeyModelBreakdown>,
+}
+
 pub struct HistoryPeriod {
     label: String,
     cutoff_ms: u64,
@@ -109,6 +131,13 @@ impl HistoryPeriod {
         KeyBreakdownResponse {
             period: self.label.clone(),
             keys: Vec::new(),
+        }
+    }
+
+    pub fn empty_key_models(&self) -> KeyModelBreakdownResponse {
+        KeyModelBreakdownResponse {
+            period: self.label.clone(),
+            entries: Vec::new(),
         }
     }
 }
@@ -223,6 +252,7 @@ pub async fn by_model(
 pub async fn by_key(
     conn: &Connection,
     period: &HistoryPeriod,
+    key_id: Option<&str>,
 ) -> Result<KeyBreakdownResponse, sqlx::Error> {
     let cutoff = timestamp_millis().saturating_sub(period.cutoff_ms);
 
@@ -234,9 +264,10 @@ pub async fn by_key(
          COALESCE(SUM(r.cache_read_tokens), 0)::BIGINT AS \"cache_read_tokens!\", \
          COALESCE(SUM(r.cache_write_tokens), 0)::BIGINT AS \"cache_write_tokens!\" \
          FROM request_log r LEFT JOIN client_keys k ON r.key_id = k.id \
-         WHERE r.created_at >= $1 \
+         WHERE r.created_at >= $1 AND ($2::TEXT IS NULL OR r.key_id = $2) \
          GROUP BY r.key_id, k.name ORDER BY SUM(r.cost_microdollars) DESC",
         cutoff as i64,
+        key_id,
     )
     .fetch_all(conn)
     .await?;
@@ -258,5 +289,52 @@ pub async fn by_key(
     Ok(KeyBreakdownResponse {
         period: period.label.clone(),
         keys,
+    })
+}
+
+/// Full key x model cross-tab for the period: one row per (key, model) pair that
+/// saw traffic. Callers pivot this into a table; keys/models with no requests in
+/// the period are simply absent.
+pub async fn by_key_model(
+    conn: &Connection,
+    period: &HistoryPeriod,
+    key_id: Option<&str>,
+) -> Result<KeyModelBreakdownResponse, sqlx::Error> {
+    let cutoff = timestamp_millis().saturating_sub(period.cutoff_ms);
+
+    let rows = sqlx::query!(
+        "SELECT r.key_id, k.name AS \"key_name?\", r.model, COUNT(*) AS \"request_count!\", \
+         COALESCE(SUM(r.cost_microdollars), 0)::BIGINT AS \"cost_microdollars!\", \
+         COALESCE(SUM(r.input_tokens), 0)::BIGINT AS \"input_tokens!\", \
+         COALESCE(SUM(r.output_tokens), 0)::BIGINT AS \"output_tokens!\", \
+         COALESCE(SUM(r.cache_read_tokens), 0)::BIGINT AS \"cache_read_tokens!\", \
+         COALESCE(SUM(r.cache_write_tokens), 0)::BIGINT AS \"cache_write_tokens!\" \
+         FROM request_log r LEFT JOIN client_keys k ON r.key_id = k.id \
+         WHERE r.created_at >= $1 AND ($2::TEXT IS NULL OR r.key_id = $2) \
+         GROUP BY r.key_id, k.name, r.model ORDER BY SUM(r.cost_microdollars) DESC",
+        cutoff as i64,
+        key_id,
+    )
+    .fetch_all(conn)
+    .await?;
+
+    let entries = rows
+        .into_iter()
+        .map(|row| KeyModelBreakdown {
+            key_id: row.key_id,
+            key_name: row.key_name,
+            model: row.model,
+            request_count: i64_to_u64(row.request_count),
+            cost_microdollars: i64_to_u64(row.cost_microdollars),
+            input_tokens: i64_to_u64(row.input_tokens),
+            output_tokens: i64_to_u64(row.output_tokens),
+            cache_read_tokens: i64_to_u64(row.cache_read_tokens),
+            cache_write_tokens: i64_to_u64(row.cache_write_tokens),
+        })
+        .collect();
+
+    Ok(KeyModelBreakdownResponse {
+        period: period.label.clone(),
+        entries,
     })
 }

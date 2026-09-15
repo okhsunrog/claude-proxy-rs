@@ -13,6 +13,7 @@ import {
   type TooltipItem,
 } from 'chart.js'
 import CategoryDistribution from './CategoryDistribution.vue'
+import KeyModelTable from './KeyModelTable.vue'
 import { useUsageHistory, type Period } from '../composables/useUsageHistory'
 import { formatCost } from '../utils/format'
 
@@ -20,9 +21,13 @@ ChartJS.register(LineElement, PointElement, LinearScale, CategoryScale, Filler, 
 
 const {
   period,
+  selectedKeyId,
+  selectedKeyName,
+  allKeys,
   timeseries,
   byModel,
   byKey,
+  byKeyModel,
   isLoading,
   totalCost,
   totalRequests,
@@ -35,6 +40,7 @@ const {
   fetchAll,
   clearHistory,
   setPeriod,
+  setSelectedKey,
 } = useUsageHistory()
 
 const periods: { label: string; value: Period }[] = [
@@ -42,6 +48,18 @@ const periods: { label: string; value: Period }[] = [
   { label: '7d', value: '7d' },
   { label: '30d', value: '30d' },
 ]
+
+const ALL_KEYS = '__all__'
+
+const keyOptions = computed(() => [
+  { label: 'All keys', value: ALL_KEYS },
+  ...allKeys.value.map((k) => ({ label: k.name, value: k.id })),
+])
+
+const keySelection = computed({
+  get: () => selectedKeyId.value ?? ALL_KEYS,
+  set: (v: string) => void setSelectedKey(v === ALL_KEYS ? null : v),
+})
 
 function formatTimeLabel(timestamp: number): string {
   const d = new Date(timestamp)
@@ -252,7 +270,11 @@ const keyTokenCategories = computed(() =>
 )
 
 const hasData = computed(
-  () => timeseries.value.length > 0 || byModel.value.length > 0 || byKey.value.length > 0,
+  () =>
+    timeseries.value.length > 0 ||
+    byModel.value.length > 0 ||
+    byKey.value.length > 0 ||
+    byKeyModel.value.length > 0,
 )
 
 onMounted(() => fetchAll())
@@ -260,20 +282,30 @@ onMounted(() => fetchAll())
 
 <template>
   <div class="space-y-4">
-    <!-- Header: period selector + clear button -->
-    <div class="flex items-center justify-between">
-      <div class="flex items-center gap-1">
-        <UButton
-          v-for="p in periods"
-          :key="p.value"
-          :color="period === p.value ? 'primary' : 'neutral'"
-          :variant="period === p.value ? 'solid' : 'ghost'"
+    <!-- Header: period + key selector + clear button -->
+    <div class="flex items-center justify-between gap-3 flex-wrap">
+      <div class="flex items-center gap-3 flex-wrap">
+        <div class="flex items-center gap-1">
+          <UButton
+            v-for="p in periods"
+            :key="p.value"
+            :color="period === p.value ? 'primary' : 'neutral'"
+            :variant="period === p.value ? 'solid' : 'ghost'"
+            size="sm"
+            :loading="isLoading && period === p.value"
+            @click="setPeriod(p.value)"
+          >
+            {{ p.label }}
+          </UButton>
+        </div>
+        <USelect
+          v-model="keySelection"
+          :items="keyOptions"
+          value-key="value"
           size="sm"
-          :loading="isLoading && period === p.value"
-          @click="setPeriod(p.value)"
-        >
-          {{ p.label }}
-        </UButton>
+          icon="i-lucide-key-round"
+          class="w-56"
+        />
       </div>
       <UButton
         v-if="hasData"
@@ -281,11 +313,30 @@ onMounted(() => fetchAll())
         variant="soft"
         size="sm"
         icon="i-lucide-trash-2"
+        title="Deletes the full request log, regardless of the selected key"
         @click="clearHistory"
       >
-        Clear History
+        Clear All History
       </UButton>
     </div>
+
+    <!-- Active key filter -->
+    <UAlert
+      v-if="selectedKeyId"
+      color="primary"
+      variant="soft"
+      icon="i-lucide-filter"
+      :title="`Filtered to key: ${selectedKeyName ?? selectedKeyId}`"
+      description="Every chart and breakdown below covers only this key."
+      :actions="[
+        {
+          label: 'Clear filter',
+          color: 'neutral',
+          variant: 'subtle',
+          onClick: () => setSelectedKey(null),
+        },
+      ]"
+    />
 
     <!-- Summary cards -->
     <div class="grid grid-cols-3 gap-3">
@@ -365,7 +416,7 @@ onMounted(() => fetchAll())
         />
       </UCard>
 
-      <UCard v-if="keyCostCategories.length > 0">
+      <UCard v-if="!selectedKeyId && keyCostCategories.length > 0">
         <template #header>
           <span class="text-sm font-medium">Cost by key</span>
         </template>
@@ -392,7 +443,7 @@ onMounted(() => fetchAll())
         />
       </UCard>
 
-      <UCard v-if="keyTokenCategories.length > 0">
+      <UCard v-if="!selectedKeyId && keyTokenCategories.length > 0">
         <template #header>
           <span class="text-sm font-medium">Tokens by key</span>
         </template>
@@ -405,5 +456,13 @@ onMounted(() => fetchAll())
         />
       </UCard>
     </div>
+
+    <!-- Cross-tab: which key used which model, and how much -->
+    <UCard v-if="byKeyModel.length > 0">
+      <template #header>
+        <span class="text-sm font-medium">Usage by key and model</span>
+      </template>
+      <KeyModelTable :entries="byKeyModel" :format-tokens="formatTokens" />
+    </UCard>
   </div>
 </template>

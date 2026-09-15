@@ -162,6 +162,7 @@ fn admin_openapi_router() -> OpenApiRouter<Arc<AppState>> {
     .routes(routes!(admin::get_usage_history_timeseries))
     .routes(routes!(admin::get_usage_history_by_model))
     .routes(routes!(admin::get_usage_history_by_key))
+    .routes(routes!(admin::get_usage_history_by_key_model))
     .routes(routes!(admin::delete_usage_history))
 }
 

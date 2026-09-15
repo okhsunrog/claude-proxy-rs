@@ -1327,7 +1327,16 @@
           {
             "name": "period",
             "in": "query",
-            "description": "Period: 24h, 7d, or 30d",
+            "description": "Time period: \"24h\", \"7d\", or \"30d\"",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "keyId",
+            "in": "query",
+            "description": "Restrict the result to a single client key. Absent = all keys.",
             "required": false,
             "schema": {
               "type": "string"
@@ -1348,6 +1357,43 @@
         }
       }
     },
+    "/usage-history/by-key-model": {
+      "get": {
+        "operationId": "get_usage_history_by_key_model",
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "description": "Time period: \"24h\", \"7d\", or \"30d\"",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "keyId",
+            "in": "query",
+            "description": "Restrict the result to a single client key. Absent = all keys.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyModelBreakdownResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/usage-history/by-model": {
       "get": {
         "operationId": "get_usage_history_by_model",
@@ -1355,7 +1401,16 @@
           {
             "name": "period",
             "in": "query",
-            "description": "Period: 24h, 7d, or 30d",
+            "description": "Time period: \"24h\", \"7d\", or \"30d\"",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "keyId",
+            "in": "query",
+            "description": "Restrict the result to a single client key. Absent = all keys.",
             "required": false,
             "schema": {
               "type": "string"
@@ -1383,7 +1438,16 @@
           {
             "name": "period",
             "in": "query",
-            "description": "Period: 24h, 7d, or 30d",
+            "description": "Time period: \"24h\", \"7d\", or \"30d\"",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "keyId",
+            "in": "query",
+            "description": "Restrict the result to a single client key. Absent = all keys.",
             "required": false,
             "schema": {
               "type": "string"
@@ -1798,6 +1862,76 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/KeyBreakdown"
+            }
+          },
+          "period": {
+            "type": "string"
+          }
+        }
+      },
+      "KeyModelBreakdown": {
+        "type": "object",
+        "description": "One cell of the key x model cross-tab: what a single key spent on a single model.",
+        "required": [
+          "keyId",
+          "model",
+          "requestCount",
+          "costMicrodollars",
+          "inputTokens",
+          "outputTokens",
+          "cacheReadTokens",
+          "cacheWriteTokens"
+        ],
+        "properties": {
+          "cacheReadTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "cacheWriteTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "costMicrodollars": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "inputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "keyId": {
+            "type": "string"
+          },
+          "keyName": {
+            "type": ["string", "null"]
+          },
+          "model": {
+            "type": "string"
+          },
+          "outputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "requestCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "KeyModelBreakdownResponse": {
+        "type": "object",
+        "required": ["period", "entries"],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KeyModelBreakdown"
             }
           },
           "period": {
