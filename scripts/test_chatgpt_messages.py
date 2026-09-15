@@ -60,4 +60,30 @@ for streaming in [False, True]:
     result = client.messages.create(**base, messages=reasoning_history + [{'role': 'assistant', 'content': [b.model_dump(exclude_none=True) for b in reply.content]}, {'role': 'user', 'content': 'What was the difference? Reply with just the number.'}])
     assert any(b.type == 'text' and '41' in b.text for b in result.content)
     print(f'Messages {"SSE" if streaming else "JSON"} signed reasoning replay: OK')
+
+# Optional fields must stay optional when Messages tools become Responses tools.
+read_tool = {
+    'name': 'Read',
+    'description': 'Read a file. Only provide pages when reading a PDF.',
+    'input_schema': {
+        'type': 'object',
+        'properties': {
+            'file_path': {'type': 'string'},
+            'pages': {'type': 'string', 'description': 'PDF page range, for PDF files only.'},
+        },
+        'required': ['file_path'],
+        'additionalProperties': False,
+    },
+}
+for streaming in [False, True]:
+    options = dict(**base, messages=[{'role': 'user', 'content': 'Read /tmp/README.md, a short plain Markdown file.'}], tools=[read_tool], tool_choice={'type': 'tool', 'name': 'Read'})
+    if streaming:
+        with client.messages.stream(**options) as stream:
+            reply = stream.get_final_message()
+    else:
+        reply = client.messages.create(**options)
+    calls = [b for b in reply.content if b.type == 'tool_use']
+    assert calls and calls[0].input == {'file_path': '/tmp/README.md'}, calls
+    print(f'Messages {"SSE" if streaming else "JSON"} optional tool argument omitted: OK')
+
 print('All Messages GPT smoke tests passed')

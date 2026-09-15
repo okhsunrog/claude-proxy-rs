@@ -405,7 +405,8 @@ and ordinary JSON responses are assembled from completed output items.
 Chat Completions supports text, user images, function tools and tool results,
 `tool_choice`, `parallel_tool_calls`, `reasoning_effort`, and structured output via
 `response_format`. Streaming supports `stream_options.include_usage`. Only one
-choice is supported.
+choice is supported. Translated function tools default to `strict: false` so
+optional arguments remain optional; an explicit `strict: true` is preserved.
 
 Messages supports text, images, inline documents, function tools/results, tool
 choice, structured output and thinking. Signed GPT reasoning is carried in a
@@ -453,4 +454,5 @@ Run the live compatibility checks against your configured proxy:
 uv run --env-file .env --with openai scripts/test_chatgpt.py --model YOUR_MODEL_ID
 uv run --env-file .env --with anthropic scripts/test_chatgpt_messages.py --model YOUR_MODEL_ID
 uv run --env-file .env scripts/test_chatgpt_claude_code.py --model YOUR_MODEL_ID
+uv run --env-file .env scripts/test_chatgpt_claude_code.py --model YOUR_MODEL_ID --read-file
 ```

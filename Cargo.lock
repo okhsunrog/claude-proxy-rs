@@ -1341,8 +1341,9 @@ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
 name = "llm-relay"
-version = "1.0.0"
-source = "git+https://github.com/okhsunrog/llm-relay?rev=f0153ff#f0153ff0f8af578bc7f4f4bc1078e6a6f3272746"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d328fe368efd7c4e3ff644dd2f308ea1fc812c6bfee1625518748bbd5c3543b3"
 dependencies = [
  "base64 0.23.1",
  "schemars",
