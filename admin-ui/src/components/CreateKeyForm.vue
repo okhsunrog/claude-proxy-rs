@@ -42,6 +42,7 @@ async function handleCreate() {
       <UInput
         v-model="keyName"
         placeholder="Key name (e.g., 'My App')"
+        aria-label="Key name"
         class="flex-1"
         @keyup.enter="handleCreate"
       />

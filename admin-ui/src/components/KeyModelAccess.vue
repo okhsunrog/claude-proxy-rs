@@ -97,6 +97,7 @@ async function toggleModel(modelId: string) {
         <span class="text-xs text-muted">Allow all models</span>
         <USwitch
           :model-value="allowAll"
+          aria-label="Allow all models"
           @update:model-value="handleToggleAllowAll"
           :loading="isSaving"
           size="sm"

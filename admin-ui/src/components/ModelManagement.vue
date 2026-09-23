@@ -147,6 +147,7 @@ async function handleDelete() {
       >
         <USwitch
           :model-value="model.enabled"
+          :aria-label="`Enable ${model.id}`"
           @update:model-value="handleToggleEnabled(model)"
           size="sm"
         />
@@ -160,12 +161,19 @@ async function handleDelete() {
           </div>
         </div>
         <div class="flex gap-1.5">
-          <UButton size="xs" variant="ghost" icon="i-lucide-pencil" @click="openEdit(model)" />
+          <UButton
+            size="xs"
+            variant="ghost"
+            icon="i-lucide-pencil"
+            :aria-label="`Edit ${model.id}`"
+            @click="openEdit(model)"
+          />
           <UButton
             size="xs"
             variant="ghost"
             color="error"
             icon="i-lucide-trash-2"
+            :aria-label="`Delete ${model.id}`"
             @click="confirmDelete(model)"
           />
         </div>

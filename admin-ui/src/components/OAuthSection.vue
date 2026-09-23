@@ -261,6 +261,7 @@ function getUsageItems(): UsageDisplayItem[] {
               size="xs"
               variant="ghost"
               icon="i-lucide-refresh-cw"
+              aria-label="Refresh usage"
               :loading="isLoadingUsage && !forceLoading"
               @click="loadUsage()"
             />
@@ -271,6 +272,7 @@ function getUsageItems(): UsageDisplayItem[] {
               variant="ghost"
               color="warning"
               icon="i-lucide-zap"
+              aria-label="Force refresh usage"
               :loading="forceLoading"
               @click="handleForceRefresh"
             />
@@ -400,21 +402,25 @@ function getUsageItems(): UsageDisplayItem[] {
           <UInput
             v-model="webSessionForm.session_key"
             placeholder="sessionKey (sk-ant-sid02-...)"
+            aria-label="Session key"
             size="sm"
           />
           <UInput
             v-model="webSessionForm.org_uuid"
             placeholder="Org UUID (from /api/organizations/{uuid}/usage)"
+            aria-label="Organization UUID"
             size="sm"
           />
           <UInput
             v-model="webSessionForm.device_id"
             placeholder="anthropic-device-id header"
+            aria-label="Device ID"
             size="sm"
           />
           <UInput
             v-model="webSessionForm.anonymous_id"
             placeholder="anthropic-anonymous-id header"
+            aria-label="Anonymous ID"
             size="sm"
           />
           <div class="flex gap-2 justify-end">
@@ -439,6 +445,7 @@ function getUsageItems(): UsageDisplayItem[] {
           <UInput
             v-model="oauthCode"
             placeholder="Authorization code"
+            aria-label="Authorization code"
             class="flex-1"
             @keyup.enter="handleExchangeCode"
           />

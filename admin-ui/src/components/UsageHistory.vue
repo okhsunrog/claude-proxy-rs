@@ -304,6 +304,7 @@ onMounted(() => fetchAll())
           value-key="value"
           size="sm"
           icon="i-lucide-key-round"
+          aria-label="Filter by API key"
           class="w-56"
         />
       </div>

@@ -283,6 +283,7 @@ const hasHistory = computed(() => points.value.some((p) => p.requestCount > 0))
               v-model="tokenInput"
               class="flex-1 font-mono"
               placeholder="sk-proxy-..."
+              aria-label="API key"
               type="password"
               autofocus
             />
@@ -305,6 +306,7 @@ const hasHistory = computed(() => points.value.some((p) => p.requestCount > 0))
                 size="xs"
                 variant="ghost"
                 icon="i-lucide-refresh-cw"
+                aria-label="Refresh usage"
                 :loading="isLoading"
                 @click="fetchAll"
               />

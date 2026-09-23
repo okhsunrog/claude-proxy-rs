@@ -145,7 +145,11 @@ async function handleToggleExtraUsage(value: boolean) {
       </UDropdownMenu>
     </div>
     <div class="flex items-center gap-2 mt-3">
-      <USwitch :model-value="allowExtraUsage" @update:model-value="handleToggleExtraUsage" />
+      <USwitch
+        :model-value="allowExtraUsage"
+        aria-label="Allow extra usage"
+        @update:model-value="handleToggleExtraUsage"
+      />
       <span class="text-sm">Allow extra usage</span>
       <span class="text-xs text-muted">— use paid credits when subscription limits are full</span>
     </div>

@@ -204,10 +204,16 @@ function toggleExpanded() {
               size="xs"
               variant="ghost"
               icon="i-lucide-pencil"
+              :aria-label="`Edit limits for ${entry.model}`"
               @click="startEdit(entry)"
             />
             <UDropdownMenu :items="resetItems(entry.model)">
-              <UButton size="xs" variant="ghost" icon="i-lucide-rotate-ccw" />
+              <UButton
+                size="xs"
+                variant="ghost"
+                icon="i-lucide-rotate-ccw"
+                :aria-label="`Reset usage for ${entry.model}`"
+              />
             </UDropdownMenu>
           </div>
         </div>
