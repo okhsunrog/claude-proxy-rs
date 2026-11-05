@@ -361,9 +361,19 @@ endpoint, so account availability and compatibility may change.
 
 Transcription uses enabled proxy keys. Keys with a model whitelist must explicitly
 allow `chatgpt-transcribe` (add that identifier in Models before assigning it).
-It has separate in-memory limits: 10 attempts per minute per key, two simultaneous
-uploads/requests per process, and a 60-second upstream timeout. These counters reset
-on process restart. Claude subscription checks and monetary token budgets do not
+It has separate in-memory limits, configurable through environment variables:
+
+- `CLAUDE_PROXY_STT_REQUESTS_PER_MINUTE`: default **120** admitted attempts per key;
+  **0** disables this local rate limit.
+- `CLAUDE_PROXY_STT_MAX_CONCURRENT`: default **4** simultaneous uploads/requests per
+  process, a positive integer up to 65535. Busy requests do not consume the per-key
+  rate allowance. This is a capacity setting, not a promised upstream quota.
+
+Local rejections return HTTP 429 with `Retry-After`: remaining window rounded up,
+or one second when concurrency is full. Upstream `Retry-After` is preserved; an
+upstream 429 without it uses 15 seconds. Limits fail startup on invalid values.
+The upstream timeout remains 60 seconds. Counters reset on process restart and
+are not shared across replicas. Claude subscription checks and monetary token budgets do not
 apply: the transcription backend returns no token, cost, or quota usage. It is
 therefore not included in token-cost history. Audio and transcripts are not saved
 or captured by the proxy.

@@ -32,6 +32,8 @@ pub struct Config {
     pub cors_mode: CorsMode,
     pub disable_auth: bool,
     pub cloak_mode: CloakMode,
+    pub stt_requests_per_minute: u32,
+    pub stt_max_concurrent: usize,
 }
 
 impl Config {
@@ -93,6 +95,27 @@ impl Config {
             cors_mode,
             disable_auth,
             cloak_mode,
+            // Zero explicitly disables only the local per-key rate limit.
+            stt_requests_per_minute: env_number("CLAUDE_PROXY_STT_REQUESTS_PER_MINUTE", 120, true),
+            stt_max_concurrent: usize::from(env_number::<u16>(
+                "CLAUDE_PROXY_STT_MAX_CONCURRENT",
+                4,
+                false,
+            )),
         }
+    }
+}
+
+fn env_number<T>(name: &str, default: T, allow_zero: bool) -> T
+where
+    T: std::str::FromStr + Default + PartialEq,
+{
+    match env::var(name) {
+        Err(env::VarError::NotPresent) => default,
+        value => value
+            .ok()
+            .and_then(|value| value.parse::<T>().ok())
+            .filter(|value| allow_zero || *value != T::default())
+            .expect("Invalid STT limit environment variable: use a nonnegative integer rate and positive u16 concurrency"),
     }
 }

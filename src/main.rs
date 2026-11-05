@@ -235,9 +235,17 @@ async fn main() -> Result<()> {
     }
 
     let chatgpt = auth::chatgpt::ChatGptAuth::new(http_client.clone(), auth_store.clone());
+    info!(
+        requests_per_minute = config.stt_requests_per_minute,
+        max_concurrent = config.stt_max_concurrent,
+        "Transcription limits (rate 0 = unlimited)"
+    );
     let state = Arc::new(AppState {
         chatgpt,
-        transcription_limits: routes::transcription::TranscriptionLimits::new(),
+        transcription_limits: routes::transcription::TranscriptionLimits::new(
+            config.stt_requests_per_minute,
+            config.stt_max_concurrent,
+        ),
         auth_store,
         client_keys,
         models,

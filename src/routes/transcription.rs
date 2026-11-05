@@ -3,7 +3,7 @@ use crate::{AppState, error::ProxyError};
 use axum::{
     Json,
     extract::{Multipart, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode, header::RETRY_AFTER},
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
@@ -22,23 +22,29 @@ const URL: &str = "https://chatgpt.com/backend-api/transcribe";
 pub struct TranscriptionLimits {
     concurrency: Semaphore,
     requests: Mutex<HashMap<String, (Instant, u32)>>,
+    per_minute: u32,
 }
 impl TranscriptionLimits {
-    pub fn new() -> Self {
+    pub fn new(per_minute: u32, concurrent: usize) -> Self {
         Self {
-            concurrency: Semaphore::new(2),
+            concurrency: Semaphore::new(concurrent),
             requests: Mutex::new(HashMap::new()),
+            per_minute,
         }
     }
-    async fn admit(&self, key: &str) -> bool {
+    async fn admit(&self, key: &str) -> Result<(), Duration> {
+        if self.per_minute == 0 {
+            return Ok(());
+        }
+        let now = Instant::now();
         let mut requests = self.requests.lock().await;
-        requests.retain(|_, (start, _)| start.elapsed() < Duration::from_secs(60));
-        let (_, count) = requests.entry(key.into()).or_insert((Instant::now(), 0));
-        if *count >= 10 {
-            return false;
+        requests.retain(|_, (start, _)| now.duration_since(*start) < Duration::from_secs(60));
+        let (start, count) = requests.entry(key.into()).or_insert((now, 0));
+        if *count >= self.per_minute {
+            return Err(Duration::from_secs(60).saturating_sub(now.duration_since(*start)));
         }
         *count += 1;
-        true
+        Ok(())
     }
 }
 #[derive(Deserialize, Serialize)]
@@ -51,6 +57,19 @@ fn error(status: StatusCode, message: &str) -> Response {
         Json(json!({"error": {"message": message, "type": "transcription_error"}})),
     )
         .into_response()
+}
+
+fn throttled(message: &str, retry: Duration) -> Response {
+    let mut response = error(StatusCode::TOO_MANY_REQUESTS, message);
+    // Round up so clients don't immediately re-enter the same fixed window.
+    let seconds = retry
+        .as_secs()
+        .saturating_add(u64::from(retry.subsec_nanos() > 0))
+        .max(1);
+    if let Ok(value) = HeaderValue::from_str(&seconds.to_string()) {
+        response.headers_mut().insert(RETRY_AFTER, value);
+    }
+    response
 }
 
 pub async fn transcribe(
@@ -81,18 +100,16 @@ pub async fn transcribe(
         }
         Err(e) => return e.to_openai_response(),
     }
-    if !state.transcription_limits.admit(&key.id).await {
-        return error(
-            StatusCode::TOO_MANY_REQUESTS,
-            "Transcription limit: 10 requests per minute per key",
-        );
-    }
     let Ok(_permit) = state.transcription_limits.concurrency.try_acquire() else {
-        return error(
-            StatusCode::TOO_MANY_REQUESTS,
+        return throttled(
             "Transcription is busy; retry shortly",
+            Duration::from_secs(1),
         );
     };
+    // Busy requests do not consume the key's admission budget.
+    if let Err(retry) = state.transcription_limits.admit(&key.id).await {
+        return throttled("Transcription requests per minute exceeded", retry);
+    }
     let upload = match tokio::time::timeout(Duration::from_secs(60), parse_upload(multipart)).await
     {
         Ok(Ok(upload)) => upload,
@@ -155,7 +172,15 @@ pub async fn transcribe(
             } else {
                 StatusCode::BAD_GATEWAY
             };
-            return error(status, "Transcription service rejected the recording");
+            let mut rejected = error(status, "Transcription service rejected the recording");
+            if let Some(retry) = response.headers().get(RETRY_AFTER) {
+                rejected.headers_mut().insert(RETRY_AFTER, retry.clone());
+            } else if status == StatusCode::TOO_MANY_REQUESTS {
+                rejected
+                    .headers_mut()
+                    .insert(RETRY_AFTER, HeaderValue::from_static("15"));
+            }
+            return rejected;
         }
         return match response.json::<Transcript>().await {
             Ok(transcript) => {
@@ -340,12 +365,34 @@ mod tests {
     }
     #[tokio::test]
     async fn request_limits_are_per_key() {
-        let limits = TranscriptionLimits::new();
-        for _ in 0..10 {
-            assert!(limits.admit("a").await);
+        let limits = TranscriptionLimits::new(3, 4);
+        for _ in 0..3 {
+            assert!(limits.admit("a").await.is_ok());
         }
-        assert!(!limits.admit("a").await);
-        assert!(limits.admit("b").await);
+        let retry = limits.admit("a").await.unwrap_err();
+        assert!(retry > Duration::from_secs(59));
+        assert!(limits.admit("b").await.is_ok());
+        limits.requests.lock().await.get_mut("a").unwrap().0 =
+            Instant::now() - Duration::from_secs(61);
+        assert!(limits.admit("a").await.is_ok());
+    }
+    #[tokio::test]
+    async fn unlimited_rate_keeps_concurrency_bounded() {
+        let limits = TranscriptionLimits::new(0, 1);
+        for _ in 0..200 {
+            assert!(limits.admit("a").await.is_ok());
+        }
+        assert!(limits.requests.lock().await.is_empty());
+        let permit = limits.concurrency.try_acquire().unwrap();
+        assert!(limits.concurrency.try_acquire().is_err());
+        drop(permit);
+        assert!(limits.concurrency.try_acquire().is_ok());
+    }
+    #[test]
+    fn throttle_header_rounds_up() {
+        let response = throttled("busy", Duration::from_millis(1500));
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response.headers()[RETRY_AFTER], "2");
     }
     #[test]
     fn sanitizes_filename_and_rejects_invalid_formats() {
