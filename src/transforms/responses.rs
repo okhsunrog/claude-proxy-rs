@@ -143,6 +143,69 @@ mod tests {
     use llm_relay::protocol::{Policy, Protocol};
 
     #[test]
+    fn structured_output_property_order_survives_subscription_conversion() {
+        // Start with wire JSON, as the route's Json<Value> extractor does.
+        // Structured Outputs follows schema order, including nested objects.
+        let chat: Value = serde_json::from_str(
+            r#"{
+                "model":"gpt-test",
+                "messages":[{"role":"user","content":"Hi"}],
+                "response_format":{"type":"json_schema","json_schema":{
+                    "name":"hint","strict":true,"schema":{
+                        "type":"object","additionalProperties":false,
+                        "properties":{
+                            "action":{"type":"string"},
+                            "question":{"type":"string"},
+                            "cues":{"type":"array","items":{
+                                "type":"object","additionalProperties":false,
+                                "properties":{"text":{"type":"string"},"new":{"type":"boolean"}},
+                                "required":["text","new"]
+                            }},
+                            "correction":{"type":"string"}
+                        },
+                        "required":["action","question","cues","correction"]
+                    }
+                }}
+            }"#,
+        )
+        .unwrap();
+        let native = json!({
+            "model":"gpt-test","input":"Hi",
+            "text":{"format":{
+                "type":"json_schema",
+                "name":"hint","strict":true,
+                "schema":chat["response_format"]["json_schema"]["schema"].clone()
+            }}
+        });
+        for (protocol, body) in [
+            (Protocol::ChatCompletions, chat),
+            (Protocol::Responses, native),
+        ] {
+            let prepared = prepare_request(protocol, &body, Policy::Strict).unwrap();
+            // Exercise serialization to the upstream HTTP request as well.
+            let wire = serde_json::to_vec(&prepared.body).unwrap();
+            let upstream: Value = serde_json::from_slice(&wire).unwrap();
+            let schema = &upstream["text"]["format"]["schema"];
+            let keys = |value: &Value| {
+                value
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                keys(&schema["properties"]),
+                ["action", "question", "cues", "correction"]
+            );
+            assert_eq!(
+                keys(&schema["properties"]["cues"]["items"]["properties"]),
+                ["text", "new"]
+            );
+        }
+    }
+
+    #[test]
     fn required_messages_limit_is_reported_or_rejected() {
         let body = json!({"model":"gpt-test","max_tokens":128,"messages":[{"role":"user","content":"Hi"}]});
         let result = prepare_request(Protocol::Messages, &body, Policy::Compatible).unwrap();
