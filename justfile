@@ -52,7 +52,7 @@ sqlx-check:
 # Regenerate OpenAPI TypeScript client (no running backend needed)
 openapi:
     cargo run -- --openapi > admin-ui/openapi.json
-    cd admin-ui && vp exec openapi-ts
+    cd admin-ui && vp fmt openapi.json && vp exec openapi-ts
 
 # Run OpenAI compatibility test
 test-openai:

@@ -18,12 +18,12 @@ pub const ANTHROPIC_VERSION: &str = "2023-06-01";
 pub const OAUTH_USAGE_BETA: &str = "oauth-2025-04-20";
 
 /// Base beta header for inference requests — the stable core common to Claude
-/// Code 2.1.177/2.1.178 captures, plus `oauth-2025-04-20` (required for the
-/// OAuth-token upstream, which native Claude Code doesn't send itself).
+/// Code 2.1.326 local mock captures, plus `oauth-2025-04-20` (required for the
+/// OAuth-token upstream, also sent by current native Claude Code).
 /// Per-request, client-specific betas (context-1m, advisor-tool,
 /// mid-conversation-system, thinking-token-count, …) are forwarded from the
 /// inbound `anthropic-beta` header and merged on top of this base.
-pub const OAUTH_BETA_HEADER: &str = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,effort-2025-11-24";
+pub const OAUTH_BETA_HEADER: &str = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,thinking-token-count-2026-05-13,effort-2025-11-24,extended-cache-ttl-2025-04-11";
 
 /// Max output tokens for Opus 4.6 (128K)
 pub const OPUS_4_6_MAX_OUTPUT: u32 = 128000;
@@ -33,14 +33,14 @@ pub const DEFAULT_MAX_OUTPUT: u32 = 64000;
 
 /// User-Agent for inference requests — matches Claude Code's getUserAgent() function.
 /// Format: claude-cli/{VERSION} ({USER_TYPE}, {ENTRYPOINT})
-pub const INFERENCE_USER_AGENT: &str = "claude-cli/2.1.178 (external, cli)";
+pub const INFERENCE_USER_AGENT: &str = "claude-cli/2.1.326 (external, sdk-cli)";
 
 /// User-Agent for admin/non-inference requests — matches getClaudeCodeUserAgent().
 /// Used for usage API, profile, bootstrap calls.
-pub const USER_AGENT: &str = "claude-code/2.1.178";
+pub const USER_AGENT: &str = "claude-code/2.1.326";
 
 /// System message prefix for OAuth requests (Claude Code identity)
-pub const SYSTEM_PREFIX: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
+pub const SYSTEM_PREFIX: &str = "You are a Claude agent, built on Anthropic's Claude Agent SDK.";
 
 /// Seed models for initial database population.
 /// Used only on first startup when the models table is empty.

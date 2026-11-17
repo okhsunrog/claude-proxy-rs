@@ -89,9 +89,9 @@ pub struct KeyModelUsageResponse {
     tag = "keys",
     request_body = CreateKeyRequest,
     responses(
-        (status = 200, body = CreateKeyResponse),
-        (status = 400, body = ErrorResponse),
-        (status = 500, body = ErrorResponse),
+        (status = 200, description = "OK", body = CreateKeyResponse),
+        (status = 400, description = "Bad Request", body = ErrorResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 pub async fn create_key(
@@ -129,7 +129,7 @@ pub async fn create_key(
     path = "/keys/list",
     tag = "keys",
     responses(
-        (status = 200, body = ListKeysResponse),
+        (status = 200, description = "OK", body = ListKeysResponse),
     )
 )]
 pub async fn list_keys(
@@ -153,9 +153,9 @@ pub async fn list_keys(
     tag = "keys",
     params(("id" = String, Path, description = "Key ID")),
     responses(
-        (status = 200, body = SuccessResponse),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse),
+        (status = 200, description = "OK", body = SuccessResponse),
+        (status = 404, description = "Not Found", body = ErrorResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 pub async fn delete_key(
@@ -187,9 +187,9 @@ pub async fn delete_key(
     params(("id" = String, Path, description = "Key ID")),
     request_body = SetKeyEnabledRequest,
     responses(
-        (status = 200, body = SuccessResponse),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse),
+        (status = 200, description = "OK", body = SuccessResponse),
+        (status = 404, description = "Not Found", body = ErrorResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 pub async fn set_key_enabled(
@@ -222,9 +222,9 @@ pub async fn set_key_enabled(
     params(("id" = String, Path, description = "Key ID")),
     request_body = SetAllowExtraUsageRequest,
     responses(
-        (status = 200, body = SuccessResponse),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse),
+        (status = 200, description = "OK", body = SuccessResponse),
+        (status = 404, description = "Not Found", body = ErrorResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 pub async fn set_allow_extra_usage(
@@ -260,8 +260,8 @@ pub async fn set_allow_extra_usage(
     tag = "keys",
     params(("id" = String, Path, description = "Key ID")),
     responses(
-        (status = 200, body = KeyUsageResponse),
-        (status = 404, body = ErrorResponse),
+        (status = 200, description = "OK", body = KeyUsageResponse),
+        (status = 404, description = "Not Found", body = ErrorResponse),
     )
 )]
 pub async fn get_key_usage(
@@ -293,9 +293,9 @@ pub async fn get_key_usage(
     params(("id" = String, Path, description = "Key ID")),
     request_body = UpdateLimitsRequest,
     responses(
-        (status = 200, body = SuccessResponse),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse),
+        (status = 200, description = "OK", body = SuccessResponse),
+        (status = 404, description = "Not Found", body = ErrorResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 pub async fn update_key_limits(
@@ -334,10 +334,10 @@ pub async fn update_key_limits(
     params(("id" = String, Path, description = "Key ID")),
     request_body = ResetUsageRequest,
     responses(
-        (status = 200, body = SuccessResponse),
-        (status = 400, body = ErrorResponse),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse),
+        (status = 200, description = "OK", body = SuccessResponse),
+        (status = 400, description = "Bad Request", body = ErrorResponse),
+        (status = 404, description = "Not Found", body = ErrorResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 pub async fn reset_key_usage(
@@ -388,7 +388,7 @@ pub async fn reset_key_usage(
     tag = "keys",
     params(("id" = String, Path, description = "Key ID")),
     responses(
-        (status = 200, body = KeyModelsResponse),
+        (status = 200, description = "OK", body = KeyModelsResponse),
     )
 )]
 pub async fn get_key_models(
@@ -419,8 +419,8 @@ pub async fn get_key_models(
     params(("id" = String, Path, description = "Key ID")),
     request_body = SetKeyModelsRequest,
     responses(
-        (status = 200, body = SuccessResponse),
-        (status = 500, body = ErrorResponse),
+        (status = 200, description = "OK", body = SuccessResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 pub async fn set_key_models(
@@ -450,7 +450,7 @@ pub async fn set_key_models(
     tag = "keys",
     params(("id" = String, Path, description = "Key ID")),
     responses(
-        (status = 200, body = KeyModelUsageResponse),
+        (status = 200, description = "OK", body = KeyModelUsageResponse),
     )
 )]
 pub async fn get_key_model_usage(
@@ -479,8 +479,8 @@ pub async fn get_key_model_usage(
     ),
     request_body = UpdateLimitsRequest,
     responses(
-        (status = 200, body = SuccessResponse),
-        (status = 500, body = ErrorResponse),
+        (status = 200, description = "OK", body = SuccessResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 pub async fn set_key_model_limits(
@@ -519,9 +519,9 @@ pub async fn set_key_model_limits(
         ("model" = String, Path, description = "Model ID"),
     ),
     responses(
-        (status = 200, body = SuccessResponse),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse),
+        (status = 200, description = "OK", body = SuccessResponse),
+        (status = 404, description = "Not Found", body = ErrorResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 pub async fn remove_key_model_limits(
@@ -556,10 +556,10 @@ pub async fn remove_key_model_limits(
     ),
     request_body = ResetUsageRequest,
     responses(
-        (status = 200, body = SuccessResponse),
-        (status = 400, body = ErrorResponse),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse),
+        (status = 200, description = "OK", body = SuccessResponse),
+        (status = 400, description = "Bad Request", body = ErrorResponse),
+        (status = 404, description = "Not Found", body = ErrorResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 pub async fn reset_key_model_usage(

@@ -97,10 +97,10 @@ pub struct PeriodQuery {
     tag = "user-usage",
     security(("bearer_key" = [])),
     responses(
-        (status = 200, body = UserUsageResponse),
-        (status = 401, body = ErrorBody),
-        (status = 404, body = ErrorBody),
-        (status = 500, body = ErrorBody),
+        (status = 200, description = "OK", body = UserUsageResponse),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 404, description = "Not Found", body = ErrorBody),
+        (status = 500, description = "Internal Server Error", body = ErrorBody),
     )
 )]
 pub async fn get_my_usage(
@@ -159,9 +159,9 @@ pub async fn get_my_usage(
     security(("bearer_key" = [])),
     params(("period" = Option<String>, Query, description = "Period: 24h, 7d, or 30d")),
     responses(
-        (status = 200, body = TimeseriesResponse),
-        (status = 401, body = ErrorBody),
-        (status = 500, body = ErrorBody),
+        (status = 200, description = "OK", body = TimeseriesResponse),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 500, description = "Internal Server Error", body = ErrorBody),
     )
 )]
 pub async fn get_my_timeseries(
@@ -197,9 +197,9 @@ pub async fn get_my_timeseries(
     security(("bearer_key" = [])),
     params(("period" = Option<String>, Query, description = "Period: 24h, 7d, or 30d")),
     responses(
-        (status = 200, body = ModelBreakdownResponse),
-        (status = 401, body = ErrorBody),
-        (status = 500, body = ErrorBody),
+        (status = 200, description = "OK", body = ModelBreakdownResponse),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 500, description = "Internal Server Error", body = ErrorBody),
     )
 )]
 pub async fn get_my_by_model(

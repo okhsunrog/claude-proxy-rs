@@ -5,6 +5,7 @@ mod config;
 mod constants;
 mod db;
 mod error;
+mod identity;
 mod routes;
 mod subscription;
 mod transforms;
@@ -68,6 +69,7 @@ pub struct AppState {
     /// Stable session UUID sent as X-Claude-Code-Session-Id header on every inference request.
     /// Matches Claude Code's per-process session ID behavior.
     pub session_id: String,
+    pub device_id: String,
     /// Optional request/response capture sink for debugging client compatibility.
     pub capture: CaptureConfig,
 }
@@ -257,6 +259,11 @@ async fn main() -> Result<()> {
         cloak_mode,
         usage_cache: UsageCache::new(),
         session_id: Uuid::new_v4().to_string(),
+        device_id: identity::load_device_id(std::path::Path::new(
+            &std::env::var("CLAUDE_PROXY_DEVICE_ID_FILE")
+                .unwrap_or_else(|_| ".claude-proxy-device-id".into()),
+        ))
+        .context("Failed to load persistent device identity")?,
         capture,
     });
 
@@ -293,6 +300,8 @@ async fn main() -> Result<()> {
             header::CONTENT_TYPE,
             header::AUTHORIZATION,
             HeaderName::from_static("x-api-key"),
+            HeaderName::from_static("x-session-id"),
+            HeaderName::from_static("x-claude-code-session-id"),
             HeaderName::from_static("anthropic-version"),
             HeaderName::from_static("x-proxy-compatibility"),
         ])

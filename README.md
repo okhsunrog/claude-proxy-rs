@@ -36,8 +36,8 @@ Use your existing Claude Pro/Max subscription with AI coding assistants and tool
 
 ### Requirements
 
-- [Rust](https://www.rust-lang.org/) >= 1.94.0 (edition 2024)
-- [Bun](https://bun.sh/) >= 1.3.0
+- [Rust](https://www.rust-lang.org/) >= 1.100.0 (edition 2024)
+- [Bun](https://bun.sh/) >= 1.4.2
 - [Vite+](https://viteplus.dev/) (`vp` CLI) — unified frontend toolchain
 - [just](https://github.com/casey/just) command runner
 - PostgreSQL
@@ -466,3 +466,14 @@ uv run --env-file .env --with anthropic scripts/test_chatgpt_messages.py --model
 uv run --env-file .env scripts/test_chatgpt_claude_code.py --model YOUR_MODEL_ID
 uv run --env-file .env scripts/test_chatgpt_claude_code.py --model YOUR_MODEL_ID --read-file
 ```
+
+The proxy keeps its generated installation ID in `.claude-proxy-device-id` in the
+working directory. Set `CLAUDE_PROXY_DEVICE_ID_FILE` to use a different persistent
+path; keep this file across restarts. Account metadata is resolved from the proxy's
+OAuth login, including a cached profile lookup for existing logins.
+
+Clients can send `x-session-id` with a conversation UUID. Native Claude Code session
+metadata is preserved. Without an explicit session ID, generated sessions are
+scoped to the proxy key and first user message; two conversations with the same
+opening message should send different `x-session-id` values. Keep the first user
+message in subsequent history requests for this fallback to remain stable.

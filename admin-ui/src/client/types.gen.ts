@@ -135,7 +135,7 @@ export type LimitEntry = {
     kind?: string | null;
     percent?: number | null;
     resets_at?: string | null;
-    scope?: null | LimitScope;
+    scope?: LimitScope | null;
     /**
      * e.g. "normal", "warning", "critical"
      */
@@ -143,7 +143,7 @@ export type LimitEntry = {
 };
 
 export type LimitScope = {
-    model?: null | LimitScopeModel;
+    model?: LimitScopeModel | null;
 };
 
 /**
@@ -246,8 +246,8 @@ export type SetKeyModelsRequest = {
  * response.
  */
 export type SubscriptionUsageResponse = {
-    extra_usage?: null | ExtraUsage;
-    five_hour?: null | UsageLimit;
+    extra_usage?: ExtraUsage | null;
+    five_hour?: UsageLimit | null;
     /**
      * Epoch-ms timestamp of the last successful full HTTP fetch. Tracks the
      * freshness of extras (`extra_usage`, `limits`, etc.) that
@@ -266,10 +266,10 @@ export type SubscriptionUsageResponse = {
      * on current accounts).
      */
     limits?: Array<LimitEntry>;
-    seven_day?: null | UsageLimit;
-    seven_day_oauth_apps?: null | UsageLimit;
-    seven_day_opus?: null | UsageLimit;
-    seven_day_sonnet?: null | UsageLimit;
+    seven_day?: UsageLimit | null;
+    seven_day_oauth_apps?: UsageLimit | null;
+    seven_day_opus?: UsageLimit | null;
+    seven_day_sonnet?: UsageLimit | null;
     /**
      * Which fetcher produced the current snapshot, or [`UsageSource::None`]
      * if no full fetch has succeeded yet.
@@ -412,12 +412,18 @@ export type ChatgptLogoutData = {
 };
 
 export type ChatgptLogoutErrors = {
+    /**
+     * Bad Request
+     */
     400: ErrorResponse;
 };
 
 export type ChatgptLogoutError = ChatgptLogoutErrors[keyof ChatgptLogoutErrors];
 
 export type ChatgptLogoutResponses = {
+    /**
+     * OK
+     */
     200: SuccessResponse;
 };
 
@@ -431,12 +437,18 @@ export type ChatgptLoginData = {
 };
 
 export type ChatgptLoginErrors = {
+    /**
+     * Bad Request
+     */
     400: ErrorResponse;
 };
 
 export type ChatgptLoginError = ChatgptLoginErrors[keyof ChatgptLoginErrors];
 
 export type ChatgptLoginResponses = {
+    /**
+     * OK
+     */
     200: DeviceLogin;
 };
 
@@ -450,12 +462,18 @@ export type ChatgptModelsData = {
 };
 
 export type ChatgptModelsErrors = {
+    /**
+     * Bad Request
+     */
     400: ErrorResponse;
 };
 
 export type ChatgptModelsError = ChatgptModelsErrors[keyof ChatgptModelsErrors];
 
 export type ChatgptModelsResponses = {
+    /**
+     * OK
+     */
     200: Array<AvailableModel>;
 };
 
@@ -469,12 +487,18 @@ export type ChatgptPollData = {
 };
 
 export type ChatgptPollErrors = {
+    /**
+     * Bad Request
+     */
     400: ErrorResponse;
 };
 
 export type ChatgptPollError = ChatgptPollErrors[keyof ChatgptPollErrors];
 
 export type ChatgptPollResponses = {
+    /**
+     * OK
+     */
     200: ConnectionStatus;
 };
 
@@ -488,12 +512,18 @@ export type ChatgptStatusData = {
 };
 
 export type ChatgptStatusErrors = {
+    /**
+     * Bad Request
+     */
     400: ErrorResponse;
 };
 
 export type ChatgptStatusError = ChatgptStatusErrors[keyof ChatgptStatusErrors];
 
 export type ChatgptStatusResponses = {
+    /**
+     * OK
+     */
     200: ConnectionStatus;
 };
 
@@ -507,13 +537,22 @@ export type CreateKeyData = {
 };
 
 export type CreateKeyErrors = {
+    /**
+     * Bad Request
+     */
     400: ErrorResponse;
+    /**
+     * Internal Server Error
+     */
     500: ErrorResponse;
 };
 
 export type CreateKeyError = CreateKeyErrors[keyof CreateKeyErrors];
 
 export type CreateKeyResponses = {
+    /**
+     * OK
+     */
     200: CreateKeyResponse;
 };
 
@@ -527,6 +566,9 @@ export type ListKeysData = {
 };
 
 export type ListKeysResponses = {
+    /**
+     * OK
+     */
     200: ListKeysResponse;
 };
 
@@ -545,13 +587,22 @@ export type DeleteKeyData = {
 };
 
 export type DeleteKeyErrors = {
+    /**
+     * Not Found
+     */
     404: ErrorResponse;
+    /**
+     * Internal Server Error
+     */
     500: ErrorResponse;
 };
 
 export type DeleteKeyError = DeleteKeyErrors[keyof DeleteKeyErrors];
 
 export type DeleteKeyResponses = {
+    /**
+     * OK
+     */
     200: SuccessResponse;
 };
 
@@ -570,13 +621,22 @@ export type SetAllowExtraUsageData = {
 };
 
 export type SetAllowExtraUsageErrors = {
+    /**
+     * Not Found
+     */
     404: ErrorResponse;
+    /**
+     * Internal Server Error
+     */
     500: ErrorResponse;
 };
 
 export type SetAllowExtraUsageError = SetAllowExtraUsageErrors[keyof SetAllowExtraUsageErrors];
 
 export type SetAllowExtraUsageResponses = {
+    /**
+     * OK
+     */
     200: SuccessResponse;
 };
 
@@ -595,13 +655,22 @@ export type SetKeyEnabledData = {
 };
 
 export type SetKeyEnabledErrors = {
+    /**
+     * Not Found
+     */
     404: ErrorResponse;
+    /**
+     * Internal Server Error
+     */
     500: ErrorResponse;
 };
 
 export type SetKeyEnabledError = SetKeyEnabledErrors[keyof SetKeyEnabledErrors];
 
 export type SetKeyEnabledResponses = {
+    /**
+     * OK
+     */
     200: SuccessResponse;
 };
 
@@ -620,13 +689,22 @@ export type UpdateKeyLimitsData = {
 };
 
 export type UpdateKeyLimitsErrors = {
+    /**
+     * Not Found
+     */
     404: ErrorResponse;
+    /**
+     * Internal Server Error
+     */
     500: ErrorResponse;
 };
 
 export type UpdateKeyLimitsError = UpdateKeyLimitsErrors[keyof UpdateKeyLimitsErrors];
 
 export type UpdateKeyLimitsResponses = {
+    /**
+     * OK
+     */
     200: SuccessResponse;
 };
 
@@ -645,6 +723,9 @@ export type GetKeyModelUsageData = {
 };
 
 export type GetKeyModelUsageResponses = {
+    /**
+     * OK
+     */
     200: KeyModelUsageResponse;
 };
 
@@ -667,13 +748,22 @@ export type RemoveKeyModelLimitsData = {
 };
 
 export type RemoveKeyModelLimitsErrors = {
+    /**
+     * Not Found
+     */
     404: ErrorResponse;
+    /**
+     * Internal Server Error
+     */
     500: ErrorResponse;
 };
 
 export type RemoveKeyModelLimitsError = RemoveKeyModelLimitsErrors[keyof RemoveKeyModelLimitsErrors];
 
 export type RemoveKeyModelLimitsResponses = {
+    /**
+     * OK
+     */
     200: SuccessResponse;
 };
 
@@ -696,12 +786,18 @@ export type SetKeyModelLimitsData = {
 };
 
 export type SetKeyModelLimitsErrors = {
+    /**
+     * Internal Server Error
+     */
     500: ErrorResponse;
 };
 
 export type SetKeyModelLimitsError = SetKeyModelLimitsErrors[keyof SetKeyModelLimitsErrors];
 
 export type SetKeyModelLimitsResponses = {
+    /**
+     * OK
+     */
     200: SuccessResponse;
 };
 
@@ -724,14 +820,26 @@ export type ResetKeyModelUsageData = {
 };
 
 export type ResetKeyModelUsageErrors = {
+    /**
+     * Bad Request
+     */
     400: ErrorResponse;
+    /**
+     * Not Found
+     */
     404: ErrorResponse;
+    /**
+     * Internal Server Error
+     */
     500: ErrorResponse;
 };
 
 export type ResetKeyModelUsageError = ResetKeyModelUsageErrors[keyof ResetKeyModelUsageErrors];
 
 export type ResetKeyModelUsageResponses = {
+    /**
+     * OK
+     */
     200: SuccessResponse;
 };
 
@@ -750,6 +858,9 @@ export type GetKeyModelsData = {
 };
 
 export type GetKeyModelsResponses = {
+    /**
+     * OK
+     */
     200: KeyModelsResponse;
 };
 
@@ -768,12 +879,18 @@ export type SetKeyModelsData = {
 };
 
 export type SetKeyModelsErrors = {
+    /**
+     * Internal Server Error
+     */
     500: ErrorResponse;
 };
 
 export type SetKeyModelsError = SetKeyModelsErrors[keyof SetKeyModelsErrors];
 
 export type SetKeyModelsResponses = {
+    /**
+     * OK
+     */
     200: SuccessResponse;
 };
 
@@ -792,12 +909,18 @@ export type GetKeyUsageData = {
 };
 
 export type GetKeyUsageErrors = {
+    /**
+     * Not Found
+     */
     404: ErrorResponse;
 };
 
 export type GetKeyUsageError = GetKeyUsageErrors[keyof GetKeyUsageErrors];
 
 export type GetKeyUsageResponses = {
+    /**
+     * OK
+     */
     200: KeyUsageResponse;
 };
 
@@ -816,14 +939,26 @@ export type ResetKeyUsageData = {
 };
 
 export type ResetKeyUsageErrors = {
+    /**
+     * Bad Request
+     */
     400: ErrorResponse;
+    /**
+     * Not Found
+     */
     404: ErrorResponse;
+    /**
+     * Internal Server Error
+     */
     500: ErrorResponse;
 };
 
 export type ResetKeyUsageError = ResetKeyUsageErrors[keyof ResetKeyUsageErrors];
 
 export type ResetKeyUsageResponses = {
+    /**
+     * OK
+     */
     200: SuccessResponse;
 };
 
@@ -837,6 +972,9 @@ export type ListModelsAdminData = {
 };
 
 export type ListModelsAdminResponses = {
+    /**
+     * OK
+     */
     200: ListModelsResponse;
 };
 
@@ -850,13 +988,22 @@ export type AddModelData = {
 };
 
 export type AddModelErrors = {
+    /**
+     * Bad Request
+     */
     400: ErrorResponse;
+    /**
+     * Internal Server Error
+     */
     500: ErrorResponse;
 };
 
 export type AddModelError = AddModelErrors[keyof AddModelErrors];
 
 export type AddModelResponses = {
+    /**
+     * OK
+     */
     200: SuccessResponse;
 };
 
@@ -870,12 +1017,18 @@ export type ReorderModelsData = {
 };
 
 export type ReorderModelsErrors = {
+    /**
+     * Internal Server Error
+     */
     500: ErrorResponse;
 };
 
 export type ReorderModelsError = ReorderModelsErrors[keyof ReorderModelsErrors];
 
 export type ReorderModelsResponses = {
+    /**
+     * OK
+     */
     200: SuccessResponse;
 };
 
@@ -894,13 +1047,22 @@ export type DeleteModelData = {
 };
 
 export type DeleteModelErrors = {
+    /**
+     * Not Found
+     */
     404: ErrorResponse;
+    /**
+     * Internal Server Error
+     */
     500: ErrorResponse;
 };
 
 export type DeleteModelError = DeleteModelErrors[keyof DeleteModelErrors];
 
 export type DeleteModelResponses = {
+    /**
+     * OK
+     */
     200: SuccessResponse;
 };
 
@@ -919,13 +1081,22 @@ export type UpdateModelData = {
 };
 
 export type UpdateModelErrors = {
+    /**
+     * Not Found
+     */
     404: ErrorResponse;
+    /**
+     * Internal Server Error
+     */
     500: ErrorResponse;
 };
 
 export type UpdateModelError = UpdateModelErrors[keyof UpdateModelErrors];
 
 export type UpdateModelResponses = {
+    /**
+     * OK
+     */
     200: SuccessResponse;
 };
 
@@ -939,12 +1110,18 @@ export type DeleteOauthData = {
 };
 
 export type DeleteOauthErrors = {
+    /**
+     * Internal Server Error
+     */
     500: ErrorResponse;
 };
 
 export type DeleteOauthError = DeleteOauthErrors[keyof DeleteOauthErrors];
 
 export type DeleteOauthResponses = {
+    /**
+     * OK
+     */
     200: SuccessResponse;
 };
 
@@ -958,12 +1135,18 @@ export type ExchangeOauthCodeData = {
 };
 
 export type ExchangeOauthCodeErrors = {
+    /**
+     * Bad Request
+     */
     400: ErrorResponse;
 };
 
 export type ExchangeOauthCodeError = ExchangeOauthCodeErrors[keyof ExchangeOauthCodeErrors];
 
 export type ExchangeOauthCodeResponses = {
+    /**
+     * OK
+     */
     200: SuccessResponse;
 };
 
@@ -977,6 +1160,9 @@ export type StartOauthFlowData = {
 };
 
 export type StartOauthFlowResponses = {
+    /**
+     * OK
+     */
     200: OAuthUrlResponse;
 };
 
@@ -990,6 +1176,9 @@ export type GetOauthStatusData = {
 };
 
 export type GetOauthStatusResponses = {
+    /**
+     * OK
+     */
     200: OAuthStatusResponse;
 };
 
@@ -1011,6 +1200,9 @@ export type GetSubscriptionUsageData = {
 };
 
 export type GetSubscriptionUsageResponses = {
+    /**
+     * OK
+     */
     200: SubscriptionUsageResponse;
 };
 
@@ -1024,12 +1216,18 @@ export type DeleteWebSessionData = {
 };
 
 export type DeleteWebSessionErrors = {
+    /**
+     * Internal Server Error
+     */
     500: ErrorResponse;
 };
 
 export type DeleteWebSessionError = DeleteWebSessionErrors[keyof DeleteWebSessionErrors];
 
 export type DeleteWebSessionResponses = {
+    /**
+     * OK
+     */
     200: SuccessResponse;
 };
 
@@ -1043,6 +1241,9 @@ export type GetWebSessionStatusData = {
 };
 
 export type GetWebSessionStatusResponses = {
+    /**
+     * OK
+     */
     200: WebSessionStatusResponse;
 };
 
@@ -1056,12 +1257,18 @@ export type SaveWebSessionData = {
 };
 
 export type SaveWebSessionErrors = {
+    /**
+     * Internal Server Error
+     */
     500: ErrorResponse;
 };
 
 export type SaveWebSessionError = SaveWebSessionErrors[keyof SaveWebSessionErrors];
 
 export type SaveWebSessionResponses = {
+    /**
+     * OK
+     */
     200: SuccessResponse;
 };
 
@@ -1075,12 +1282,18 @@ export type DeleteUsageHistoryData = {
 };
 
 export type DeleteUsageHistoryErrors = {
+    /**
+     * Internal Server Error
+     */
     500: ErrorResponse;
 };
 
 export type DeleteUsageHistoryError = DeleteUsageHistoryErrors[keyof DeleteUsageHistoryErrors];
 
 export type DeleteUsageHistoryResponses = {
+    /**
+     * OK
+     */
     200: SuccessResponse;
 };
 
@@ -1103,6 +1316,9 @@ export type GetUsageHistoryByKeyData = {
 };
 
 export type GetUsageHistoryByKeyResponses = {
+    /**
+     * OK
+     */
     200: KeyBreakdownResponse;
 };
 
@@ -1125,6 +1341,9 @@ export type GetUsageHistoryByKeyModelData = {
 };
 
 export type GetUsageHistoryByKeyModelResponses = {
+    /**
+     * OK
+     */
     200: KeyModelBreakdownResponse;
 };
 
@@ -1147,6 +1366,9 @@ export type GetUsageHistoryByModelData = {
 };
 
 export type GetUsageHistoryByModelResponses = {
+    /**
+     * OK
+     */
     200: ModelBreakdownResponse;
 };
 
@@ -1169,6 +1391,9 @@ export type GetUsageHistoryTimeseriesData = {
 };
 
 export type GetUsageHistoryTimeseriesResponses = {
+    /**
+     * OK
+     */
     200: TimeseriesResponse;
 };
 
@@ -1187,13 +1412,22 @@ export type GetMyByModelData = {
 };
 
 export type GetMyByModelErrors = {
+    /**
+     * Unauthorized
+     */
     401: ErrorBody;
+    /**
+     * Internal Server Error
+     */
     500: ErrorBody;
 };
 
 export type GetMyByModelError = GetMyByModelErrors[keyof GetMyByModelErrors];
 
 export type GetMyByModelResponses = {
+    /**
+     * OK
+     */
     200: ModelBreakdownResponse;
 };
 
@@ -1212,13 +1446,22 @@ export type GetMyTimeseriesData = {
 };
 
 export type GetMyTimeseriesErrors = {
+    /**
+     * Unauthorized
+     */
     401: ErrorBody;
+    /**
+     * Internal Server Error
+     */
     500: ErrorBody;
 };
 
 export type GetMyTimeseriesError = GetMyTimeseriesErrors[keyof GetMyTimeseriesErrors];
 
 export type GetMyTimeseriesResponses = {
+    /**
+     * OK
+     */
     200: TimeseriesResponse;
 };
 
@@ -1232,14 +1475,26 @@ export type GetMyUsageData = {
 };
 
 export type GetMyUsageErrors = {
+    /**
+     * Unauthorized
+     */
     401: ErrorBody;
+    /**
+     * Not Found
+     */
     404: ErrorBody;
+    /**
+     * Internal Server Error
+     */
     500: ErrorBody;
 };
 
 export type GetMyUsageError = GetMyUsageErrors[keyof GetMyUsageErrors];
 
 export type GetMyUsageResponses = {
+    /**
+     * OK
+     */
     200: UserUsageResponse;
 };
 

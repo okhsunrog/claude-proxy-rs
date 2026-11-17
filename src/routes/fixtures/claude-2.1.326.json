@@ -1,0 +1,369 @@
+[
+  {
+    "path": "/v1/messages?beta=true",
+    "headers": {
+      "accept": "application/json",
+      "content-type": "application/json",
+      "user-agent": "claude-cli/2.1.326 (external, sdk-cli)",
+      "x-claude-code-session-id": "a124614b-229d-47e1-bdb4-17c30cb564e1",
+      "x-stainless-arch": "x64",
+      "x-stainless-lang": "js",
+      "x-stainless-os": "Linux",
+      "x-stainless-package-version": "0.128.0",
+      "x-stainless-retry-count": "0",
+      "x-stainless-runtime": "node",
+      "x-stainless-runtime-version": "v26.12.1",
+      "x-stainless-timeout": "600",
+      "anthropic-beta": "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,thinking-token-count-2026-05-13,effort-2025-11-24,extended-cache-ttl-2025-04-11",
+      "anthropic-dangerous-direct-browser-access": "true",
+      "anthropic-version": "2023-06-01",
+      "x-app": "cli",
+      "connection": "keep-alive",
+      "accept-encoding": "gzip, deflate, br, zstd"
+    },
+    "body": {
+      "model": "claude-sonnet-4-6",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Reply exactly OK.",
+              "cache_control": {
+                "type": "ephemeral",
+                "ttl": "1h"
+              }
+            }
+          ]
+        }
+      ],
+      "system": [
+        {
+          "type": "text",
+          "text": "x-anthropic-billing-header: cc_version=2.1.326.dd3; cc_entrypoint=sdk-cli;"
+        },
+        {
+          "type": "text",
+          "text": "You are a Claude agent, built on Anthropic's Claude Agent SDK.",
+          "cache_control": {
+            "type": "ephemeral",
+            "ttl": "1h"
+          }
+        },
+        {
+          "type": "text",
+          "text": "Local capture fixture.",
+          "cache_control": {
+            "type": "ephemeral",
+            "ttl": "1h"
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "Read",
+          "description": "Read a local file.",
+          "input_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "file_path": {
+                "description": "The absolute path to the file to read",
+                "type": "string"
+              },
+              "offset": {
+                "description": "The line number to start reading from. Only provide if the file is too large to read at once",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "limit": {
+                "description": "The number of lines to read. Only provide if the file is too large to read at once.",
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "pages": {
+                "description": "Page range for PDF files (e.g., \"1-5\", \"3\", \"10-20\"). Only applicable to PDF files. Maximum 20 pages per request.",
+                "type": "string"
+              },
+              "allow_large": {
+                "description": "Set to true to read a text file, or a line range of one, that is over the usual size limits, up to what still fits in your context. Only use this when you genuinely need all of it or the user asked for the whole file; otherwise read it in parts with offset and limit, or search it.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "file_path"
+            ],
+            "additionalProperties": false
+          }
+        }
+      ],
+      "metadata": {
+        "user_id": "{\"device_id\":\"07ccc153667adee43cfdce38f3ee5f32c1ba79f7b271fb4709c927743dadfbc5\",\"account_uuid\":\"\",\"session_id\":\"a124614b-229d-47e1-bdb4-17c30cb564e1\"}"
+      },
+      "max_tokens": 32000,
+      "thinking": {
+        "type": "adaptive",
+        "display": "omitted"
+      },
+      "context_management": {
+        "edits": [
+          {
+            "type": "clear_thinking_20251015",
+            "keep": "all"
+          }
+        ]
+      },
+      "output_config": {
+        "effort": "high"
+      },
+      "stream": true
+    }
+  },
+  {
+    "path": "/v1/messages?beta=true",
+    "headers": {
+      "accept": "application/json",
+      "content-type": "application/json",
+      "user-agent": "claude-cli/2.1.326 (external, sdk-cli)",
+      "x-claude-code-session-id": "c4a003f1-a96a-4351-9a9b-f99f21f4609b",
+      "x-stainless-arch": "x64",
+      "x-stainless-lang": "js",
+      "x-stainless-os": "Linux",
+      "x-stainless-package-version": "0.128.0",
+      "x-stainless-retry-count": "0",
+      "x-stainless-runtime": "node",
+      "x-stainless-runtime-version": "v26.12.1",
+      "x-stainless-timeout": "600",
+      "anthropic-beta": "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,thinking-token-count-2026-05-13,effort-2025-11-24,extended-cache-ttl-2025-04-11",
+      "anthropic-dangerous-direct-browser-access": "true",
+      "anthropic-version": "2023-06-01",
+      "x-app": "cli",
+      "connection": "keep-alive",
+      "accept-encoding": "gzip, deflate, br, zstd"
+    },
+    "body": {
+      "model": "claude-opus-4-6",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Reply exactly OK.",
+              "cache_control": {
+                "type": "ephemeral",
+                "ttl": "1h"
+              }
+            }
+          ]
+        }
+      ],
+      "system": [
+        {
+          "type": "text",
+          "text": "x-anthropic-billing-header: cc_version=2.1.326.dd3; cc_entrypoint=sdk-cli;"
+        },
+        {
+          "type": "text",
+          "text": "You are a Claude agent, built on Anthropic's Claude Agent SDK.",
+          "cache_control": {
+            "type": "ephemeral",
+            "ttl": "1h"
+          }
+        },
+        {
+          "type": "text",
+          "text": "Local capture fixture.",
+          "cache_control": {
+            "type": "ephemeral",
+            "ttl": "1h"
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "Read",
+          "description": "Read a local file.",
+          "input_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "file_path": {
+                "description": "The absolute path to the file to read",
+                "type": "string"
+              },
+              "offset": {
+                "description": "The line number to start reading from. Only provide if the file is too large to read at once",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "limit": {
+                "description": "The number of lines to read. Only provide if the file is too large to read at once.",
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "pages": {
+                "description": "Page range for PDF files (e.g., \"1-5\", \"3\", \"10-20\"). Only applicable to PDF files. Maximum 20 pages per request.",
+                "type": "string"
+              },
+              "allow_large": {
+                "description": "Set to true to read a text file, or a line range of one, that is over the usual size limits, up to what still fits in your context. Only use this when you genuinely need all of it or the user asked for the whole file; otherwise read it in parts with offset and limit, or search it.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "file_path"
+            ],
+            "additionalProperties": false
+          }
+        }
+      ],
+      "metadata": {
+        "user_id": "{\"device_id\":\"d4e4aca38fd4beb1f127de2a16a0fa05f4fe4bdc7fda73b7595112c95da31260\",\"account_uuid\":\"\",\"session_id\":\"c4a003f1-a96a-4351-9a9b-f99f21f4609b\"}"
+      },
+      "max_tokens": 64000,
+      "thinking": {
+        "type": "adaptive",
+        "display": "omitted"
+      },
+      "context_management": {
+        "edits": [
+          {
+            "type": "clear_thinking_20251015",
+            "keep": "all"
+          }
+        ]
+      },
+      "output_config": {
+        "effort": "high"
+      },
+      "stream": true
+    }
+  },
+  {
+    "path": "/v1/messages?beta=true",
+    "headers": {
+      "accept": "application/json",
+      "content-type": "application/json",
+      "user-agent": "claude-cli/2.1.326 (external, sdk-cli)",
+      "x-claude-code-session-id": "d062999a-9037-4568-b522-13664e2d6937",
+      "x-stainless-arch": "x64",
+      "x-stainless-lang": "js",
+      "x-stainless-os": "Linux",
+      "x-stainless-package-version": "0.128.0",
+      "x-stainless-retry-count": "0",
+      "x-stainless-runtime": "node",
+      "x-stainless-runtime-version": "v26.12.1",
+      "x-stainless-timeout": "600",
+      "anthropic-beta": "oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,claude-code-20250219,thinking-token-count-2026-05-13,extended-cache-ttl-2025-04-11",
+      "anthropic-dangerous-direct-browser-access": "true",
+      "anthropic-version": "2023-06-01",
+      "x-app": "cli",
+      "connection": "keep-alive",
+      "accept-encoding": "gzip, deflate, br, zstd"
+    },
+    "body": {
+      "model": "claude-haiku-4-5",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Reply exactly OK.",
+              "cache_control": {
+                "type": "ephemeral",
+                "ttl": "1h"
+              }
+            }
+          ]
+        }
+      ],
+      "system": [
+        {
+          "type": "text",
+          "text": "x-anthropic-billing-header: cc_version=2.1.326.dd3; cc_entrypoint=sdk-cli;"
+        },
+        {
+          "type": "text",
+          "text": "You are a Claude agent, built on Anthropic's Claude Agent SDK.",
+          "cache_control": {
+            "type": "ephemeral",
+            "ttl": "1h"
+          }
+        },
+        {
+          "type": "text",
+          "text": "Local capture fixture.",
+          "cache_control": {
+            "type": "ephemeral",
+            "ttl": "1h"
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "Read",
+          "description": "Read a local file.",
+          "input_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "file_path": {
+                "description": "The absolute path to the file to read",
+                "type": "string"
+              },
+              "offset": {
+                "description": "The line number to start reading from. Only provide if the file is too large to read at once",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "limit": {
+                "description": "The number of lines to read. Only provide if the file is too large to read at once.",
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "pages": {
+                "description": "Page range for PDF files (e.g., \"1-5\", \"3\", \"10-20\"). Only applicable to PDF files. Maximum 20 pages per request.",
+                "type": "string"
+              },
+              "allow_large": {
+                "description": "Set to true to read a text file, or a line range of one, that is over the usual size limits, up to what still fits in your context. Only use this when you genuinely need all of it or the user asked for the whole file; otherwise read it in parts with offset and limit, or search it.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "file_path"
+            ],
+            "additionalProperties": false
+          }
+        }
+      ],
+      "metadata": {
+        "user_id": "{\"device_id\":\"1e4926e45edb674f19fc6ce3e1bd9d0f0a0c694ce4c17a26f282b64b790f949b\",\"account_uuid\":\"\",\"session_id\":\"d062999a-9037-4568-b522-13664e2d6937\"}"
+      },
+      "max_tokens": 32000,
+      "thinking": {
+        "budget_tokens": 31999,
+        "type": "enabled",
+        "display": "omitted"
+      },
+      "context_management": {
+        "edits": [
+          {
+            "type": "clear_thinking_20251015",
+            "keep": "all"
+          }
+        ]
+      },
+      "stream": true
+    }
+  }
+]

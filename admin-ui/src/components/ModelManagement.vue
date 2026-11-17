@@ -292,10 +292,7 @@ async function handleDelete() {
     <!-- Delete Confirmation Modal -->
     <UModal v-model:open="showDeleteModal" title="Confirm Delete" :ui="{ width: 'max-w-md' }">
       <template #body>
-        <p>
-          Are you sure you want to delete model "<strong>{{ deleteTarget?.id }}</strong
-          >"?
-        </p>
+        <p>Are you sure you want to delete model "<strong>{{ deleteTarget?.id }}</strong>"?</p>
       </template>
       <template #footer>
         <div class="flex justify-end gap-2">

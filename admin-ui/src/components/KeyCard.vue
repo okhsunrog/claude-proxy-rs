@@ -210,10 +210,7 @@ const usageSummary = computed<UsageSummaryItem[]>(() => {
 
     <UModal v-model:open="showDeleteModal" title="Confirm Delete" :ui="{ width: 'max-w-md' }">
       <template #body>
-        <p>
-          Are you sure you want to delete key "<strong>{{ keyData.name }}</strong
-          >"?
-        </p>
+        <p>Are you sure you want to delete key "<strong>{{ keyData.name }}</strong>"?</p>
       </template>
       <template #footer>
         <div class="flex justify-end gap-2">

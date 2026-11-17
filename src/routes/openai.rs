@@ -100,6 +100,21 @@ pub async fn chat_completions(
         .and_then(|m| m.as_str())
         .unwrap_or("")
         .to_string();
+    let session_id = crate::identity::session_id(
+        &anthropic_value,
+        &headers,
+        &auth.client_key.id,
+        &state.device_id,
+    );
+    let mut anthropic_value = anthropic_value;
+    if cloak || anthropic_value.get("metadata").is_some() {
+        crate::transforms::prepare::apply_identity(
+            &mut anthropic_value,
+            &state.device_id,
+            auth.account_uuid.as_deref(),
+            &session_id,
+        );
+    }
     let prepared = prepare_anthropic_request(anthropic_value, cloak);
     if let Some(capture) = &capture {
         capture
@@ -113,6 +128,8 @@ pub async fn chat_completions(
         &auth.token,
         Some(&prepared.betas),
         &state.session_id,
+        &prepared.body,
+        Some(&headers),
     );
 
     let response: reqwest::Response = match req_builder.json(&prepared.body).send().await {
@@ -142,6 +159,8 @@ pub async fn chat_completions(
             &new_token,
             Some(&prepared.betas),
             &state.session_id,
+            &prepared.body,
+            Some(&headers),
         );
         match retry_builder.json(&prepared.body).send().await {
             Ok(r) => r,

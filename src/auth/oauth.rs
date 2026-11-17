@@ -34,6 +34,17 @@ struct TokenResponse {
     refresh_token: String,
     expires_in: u64,
     token_type: String,
+    #[serde(default)]
+    account: Option<serde_json::Value>,
+}
+
+fn account_uuid_from_value(value: &serde_json::Value) -> Option<String> {
+    value
+        .get("uuid")
+        .or_else(|| value.get("account_uuid"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|id| uuid::Uuid::parse_str(id).is_ok())
+        .map(str::to_owned)
 }
 
 struct PendingFlow {
@@ -49,6 +60,7 @@ pub struct OAuthManager {
     /// Prevents concurrent token refreshes (Anthropic rotates refresh tokens,
     /// so two simultaneous refreshes would invalidate each other).
     refresh_lock: Mutex<()>,
+    account_cache: Mutex<Option<(String, Option<String>, Instant)>>,
 }
 
 impl OAuthManager {
@@ -58,6 +70,7 @@ impl OAuthManager {
             pending: RwLock::new(None),
             auth_store,
             refresh_lock: Mutex::new(()),
+            account_cache: Mutex::new(None),
         }
     }
 
@@ -131,6 +144,7 @@ impl OAuthManager {
             .map_err(|e| format!("Failed to parse token response: {}", e))?;
 
         let expires = now_millis() + (token.expires_in * 1000);
+        let account_id = token.account.as_ref().and_then(account_uuid_from_value);
 
         self.auth_store
             .set(
@@ -139,7 +153,7 @@ impl OAuthManager {
                     access: token.access_token,
                     refresh: token.refresh_token,
                     expires,
-                    account_id: None,
+                    account_id,
                     enterprise_url: None,
                 },
             )
@@ -147,6 +161,52 @@ impl OAuthManager {
             .map_err(|e| format!("Failed to save auth: {}", e))?;
 
         Ok(())
+    }
+
+    /// Resolve identity for the token owner, never from caller-provided metadata.
+    /// Failed profile lookups are retried after a minute without blocking inference.
+    pub async fn account_uuid(&self, token: &str) -> Option<String> {
+        self.account_uuid_at(token, crate::constants::ANTHROPIC_PROFILE_URL)
+            .await
+    }
+
+    async fn account_uuid_at(&self, token: &str, profile_url: &str) -> Option<String> {
+        if let Some(Auth::OAuth {
+            account_id: Some(id),
+            access,
+            ..
+        }) = self.auth_store.get("anthropic").await
+            && access == token
+            && uuid::Uuid::parse_str(&id).is_ok()
+        {
+            return Some(id);
+        }
+        let mut cache = self.account_cache.lock().await;
+        if let Some((cached_token, id, time)) = cache.as_ref() {
+            let ttl = if id.is_some() { 1800 } else { 60 };
+            if cached_token == token && time.elapsed().as_secs() < ttl {
+                return id.clone();
+            }
+        }
+        let id = match self
+            .client
+            .get(profile_url)
+            .bearer_auth(token)
+            .header("anthropic-beta", crate::constants::OAUTH_USAGE_BETA)
+            .header("user-agent", crate::constants::USER_AGENT)
+            .timeout(std::time::Duration::from_secs(5))
+            .send()
+            .await
+        {
+            Ok(response) if response.status().is_success() => response
+                .json::<serde_json::Value>()
+                .await
+                .ok()
+                .and_then(|v| v.get("account").and_then(account_uuid_from_value)),
+            _ => None,
+        };
+        *cache = Some((token.to_owned(), id.clone(), Instant::now()));
+        id
     }
 
     async fn take_verifier(&self, code: &str, state: &str) -> Result<String, String> {
@@ -349,5 +409,59 @@ mod tests {
         });
         assert!(manager.take_verifier("code", "s").await.is_err());
         assert!(manager.pending.read().await.is_none());
+    }
+    #[tokio::test]
+    async fn resolves_and_caches_profile_identity_for_existing_logins() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/profile", listener.local_addr().unwrap());
+        let expected = uuid::Uuid::new_v4().to_string();
+        let owner = expected.clone();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut received = Vec::new();
+            loop {
+                let mut buffer = [0; 4096];
+                let count = socket.read(&mut buffer).await.unwrap();
+                assert!(count > 0);
+                received.extend_from_slice(&buffer[..count]);
+                if received.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let request = String::from_utf8(received).unwrap().to_lowercase();
+            assert!(request.contains("authorization: bearer local-profile-token"));
+            let body = serde_json::json!({"account":{"uuid":owner}}).to_string();
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).as_bytes()).await.unwrap();
+        });
+        let manager = OAuthManager::new(
+            Client::builder().no_proxy().build().unwrap(),
+            Arc::new(AuthStore::new()),
+        );
+        assert_eq!(
+            manager
+                .account_uuid_at("local-profile-token", &url)
+                .await
+                .as_deref(),
+            Some(expected.as_str())
+        );
+        server.await.unwrap();
+        // The server is gone; this must come from the token-specific cache.
+        assert_eq!(
+            manager
+                .account_uuid_at("local-profile-token", &url)
+                .await
+                .as_deref(),
+            Some(expected.as_str())
+        );
+        let response: TokenResponse = serde_json::from_value(serde_json::json!({"access_token":"test", "refresh_token":"test", "expires_in":3600,"token_type":"Bearer","account":{"uuid":expected}})).unwrap();
+        assert_eq!(
+            response
+                .account
+                .as_ref()
+                .and_then(account_uuid_from_value)
+                .as_deref(),
+            Some(expected.as_str())
+        );
     }
 }

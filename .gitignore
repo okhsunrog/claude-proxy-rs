@@ -2,3 +2,5 @@
 .env
 *.key
 *.pem
+
+.claude-proxy-device-id

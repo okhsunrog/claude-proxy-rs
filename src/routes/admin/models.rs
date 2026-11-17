@@ -55,7 +55,7 @@ pub struct ReorderModelsRequest {
     path = "/models",
     tag = "models",
     responses(
-        (status = 200, body = ListModelsResponse),
+        (status = 200, description = "OK", body = ListModelsResponse),
     )
 )]
 pub async fn list_models_admin(
@@ -79,9 +79,9 @@ pub async fn list_models_admin(
     tag = "models",
     request_body = AddModelRequest,
     responses(
-        (status = 200, body = SuccessResponse),
-        (status = 400, body = ErrorResponse),
-        (status = 500, body = ErrorResponse),
+        (status = 200, description = "OK", body = SuccessResponse),
+        (status = 400, description = "Bad Request", body = ErrorResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 pub async fn add_model(
@@ -140,9 +140,9 @@ pub async fn add_model(
     tag = "models",
     params(("id" = String, Path, description = "Model ID")),
     responses(
-        (status = 200, body = SuccessResponse),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse),
+        (status = 200, description = "OK", body = SuccessResponse),
+        (status = 404, description = "Not Found", body = ErrorResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 pub async fn delete_model(
@@ -174,9 +174,9 @@ pub async fn delete_model(
     params(("id" = String, Path, description = "Model ID")),
     request_body = UpdateModelRequest,
     responses(
-        (status = 200, body = SuccessResponse),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse),
+        (status = 200, description = "OK", body = SuccessResponse),
+        (status = 404, description = "Not Found", body = ErrorResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 pub async fn update_model(
@@ -237,8 +237,8 @@ pub async fn update_model(
     tag = "models",
     request_body = ReorderModelsRequest,
     responses(
-        (status = 200, body = SuccessResponse),
-        (status = 500, body = ErrorResponse),
+        (status = 200, description = "OK", body = SuccessResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 pub async fn reorder_models(

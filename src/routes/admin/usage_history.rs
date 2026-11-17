@@ -28,7 +28,7 @@ pub struct UsageHistoryQuery {
     path = "/usage-history/timeseries",
     params(UsageHistoryQuery),
     responses(
-        (status = 200, body = TimeseriesResponse),
+        (status = 200, description = "OK", body = TimeseriesResponse),
     )
 )]
 pub async fn get_usage_history_timeseries(
@@ -52,7 +52,7 @@ pub async fn get_usage_history_timeseries(
     path = "/usage-history/by-model",
     params(UsageHistoryQuery),
     responses(
-        (status = 200, body = ModelBreakdownResponse),
+        (status = 200, description = "OK", body = ModelBreakdownResponse),
     )
 )]
 pub async fn get_usage_history_by_model(
@@ -76,7 +76,7 @@ pub async fn get_usage_history_by_model(
     path = "/usage-history/by-key",
     params(UsageHistoryQuery),
     responses(
-        (status = 200, body = KeyBreakdownResponse),
+        (status = 200, description = "OK", body = KeyBreakdownResponse),
     )
 )]
 pub async fn get_usage_history_by_key(
@@ -100,7 +100,7 @@ pub async fn get_usage_history_by_key(
     path = "/usage-history/by-key-model",
     params(UsageHistoryQuery),
     responses(
-        (status = 200, body = KeyModelBreakdownResponse),
+        (status = 200, description = "OK", body = KeyModelBreakdownResponse),
     )
 )]
 pub async fn get_usage_history_by_key_model(
@@ -123,8 +123,8 @@ pub async fn get_usage_history_by_key_model(
     delete,
     path = "/usage-history",
     responses(
-        (status = 200, body = SuccessResponse),
-        (status = 500, body = ErrorResponse),
+        (status = 200, description = "OK", body = SuccessResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 pub async fn delete_usage_history()

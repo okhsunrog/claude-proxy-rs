@@ -62,6 +62,17 @@ pub async fn messages(
     .await;
 
     // Apply all transformations via unified pipeline
+    let session_id =
+        crate::identity::session_id(&body, &headers, &auth.client_key.id, &state.device_id);
+    let mut body = body;
+    if cloak || body.get("metadata").is_some() {
+        crate::transforms::prepare::apply_identity(
+            &mut body,
+            &state.device_id,
+            auth.account_uuid.as_deref(),
+            &session_id,
+        );
+    }
     let mut prepared = prepare_anthropic_request(body, cloak);
     // Forward beta flags the client sent in the `anthropic-beta` header. Native
     // Claude Code carries them there (not in a body `betas` field), and dropping
@@ -90,6 +101,8 @@ pub async fn messages(
         &auth.token,
         Some(&prepared.betas),
         &state.session_id,
+        &prepared.body,
+        Some(&headers),
     );
 
     let response: reqwest::Response = match req_builder.json(&prepared.body).send().await {
@@ -119,6 +132,8 @@ pub async fn messages(
             &new_token,
             Some(&prepared.betas),
             &state.session_id,
+            &prepared.body,
+            Some(&headers),
         );
         match retry_builder.json(&prepared.body).send().await {
             Ok(r) => r,
@@ -283,6 +298,8 @@ pub async fn count_tokens(
         &auth.token,
         Some(&prepared.betas),
         &state.session_id,
+        &prepared.body,
+        Some(&headers),
     );
 
     let response: reqwest::Response = match req_builder.json(&prepared.body).send().await {

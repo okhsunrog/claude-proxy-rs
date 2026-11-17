@@ -18,6 +18,7 @@ use llm_relay::anthropic::tool_names::transform_request_tool_names;
 
 use super::tool_aliases::{ToolNameMap, normalize_claude_code_tool_names};
 use crate::constants::SYSTEM_PREFIX;
+use sha2::{Digest, Sha256};
 
 /// Result of preparing a request for Anthropic API.
 pub struct PreparedRequest {
@@ -43,6 +44,16 @@ pub struct PreparedRequest {
 /// Returns the transformed body and extracted betas.
 pub fn prepare_anthropic_request(body: Value, cloak: bool) -> PreparedRequest {
     let (betas, body) = extract_betas(body);
+    // Native envelopes already carry the client's exact prompts, tool names,
+    // cache policy and context edits. Rewriting them changes the wire contract.
+    if is_native_envelope(&body) {
+        return PreparedRequest {
+            body,
+            betas,
+            tool_name_map: ToolNameMap::default(),
+        };
+    }
+
     let body = disable_thinking_if_forced(body);
     let body = if cloak {
         inject_fake_user_id(body)
@@ -57,7 +68,6 @@ pub fn prepare_anthropic_request(body: Value, cloak: bool) -> PreparedRequest {
         sanitize_system_only(body)
     };
     let body = ensure_cache_control(body);
-    let body = strip_unsupported_fields(body);
 
     let mut body = body;
     let tool_name_map = if cloak {
@@ -72,13 +82,21 @@ pub fn prepare_anthropic_request(body: Value, cloak: bool) -> PreparedRequest {
     }
 }
 
-/// Strip fields not supported by the Anthropic OAuth API endpoint.
-/// Claude Code may send newer fields that the OAuth backend rejects.
-fn strip_unsupported_fields(mut body: Value) -> Value {
-    if let Some(obj) = body.as_object_mut() {
-        obj.remove("context_management");
-    }
-    body
+/// Recognize the current native envelope without trusting arbitrary metadata alone.
+fn is_native_envelope(body: &Value) -> bool {
+    body.get("system")
+        .and_then(Value::as_array)
+        .is_some_and(|blocks| {
+            blocks
+                .first()
+                .and_then(|b| b.get("text"))
+                .and_then(Value::as_str)
+                .is_some_and(|s| s.starts_with("x-anthropic-billing-header: "))
+        })
+        && body
+            .pointer("/metadata/user_id")
+            .and_then(Value::as_str)
+            .is_some_and(is_valid_user_id)
 }
 
 /// Prepare a count_tokens request for the Anthropic API.
@@ -177,10 +195,70 @@ fn inject_fake_user_id(mut body: Value) -> Value {
     body
 }
 
+/// Replace only token-owner identity and conversation state; preserve native extras.
+pub fn apply_identity(body: &mut Value, device: &str, account: Option<&str>, session: &str) {
+    let mut id = body
+        .pointer("/metadata/user_id")
+        .and_then(Value::as_str)
+        .and_then(|s| serde_json::from_str::<Value>(s).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+    if id
+        .get("device_id")
+        .and_then(Value::as_str)
+        .is_none_or(|s| s.len() != 64 || !s.bytes().all(|b| b.is_ascii_hexdigit()))
+    {
+        id.insert("device_id".into(), json!(device));
+    }
+    id.insert("account_uuid".into(), json!(account.unwrap_or("")));
+    id.insert("session_id".into(), json!(session));
+    if let Some(object) = body.as_object_mut() {
+        let mut metadata = object
+            .get("metadata")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        metadata.insert("user_id".into(), json!(Value::Object(id).to_string()));
+        object.insert("metadata".into(), Value::Object(metadata));
+    }
+}
+
+fn billing_prefix(body: &Value) -> String {
+    let content = body
+        .get("messages")
+        .and_then(Value::as_array)
+        .and_then(|a| {
+            a.iter()
+                .find(|m| m.get("role").and_then(Value::as_str) == Some("user"))
+        })
+        .and_then(|m| m.get("content"));
+    let text = content
+        .and_then(|v| {
+            v.as_str().or_else(|| {
+                v.as_array()
+                    .and_then(|a| a.iter().find_map(|b| b.get("text").and_then(Value::as_str)))
+            })
+        })
+        .unwrap_or("");
+    // The installed JS binary indexes UTF-16 code units, not Unicode scalars.
+    let units: Vec<u16> = text.encode_utf16().collect();
+    let sampled: Vec<u16> = [4, 7, 20]
+        .iter()
+        .map(|&i| units.get(i).copied().unwrap_or(u16::from(b'0')))
+        .collect();
+    let hash = Sha256::digest(
+        format!("59cf53e54c78{}2.1.326", String::from_utf16_lossy(&sampled)).as_bytes(),
+    );
+    let suffix: String = hash.iter().map(|b| format!("{b:02x}")).collect();
+    let suffix: String = suffix.chars().take(3).collect();
+    format!("x-anthropic-billing-header: cc_version=2.1.326.{suffix}; cc_entrypoint=sdk-cli;")
+}
+
 /// Inject system message prefix into the request body (Claude Code identity).
 ///
 /// Cache_control is handled separately by ensure_cache_control().
 fn inject_system_message(mut body: Value) -> Value {
+    let billing = billing_prefix(&body);
     let obj = match body.as_object_mut() {
         Some(o) => o,
         None => return body,
@@ -192,15 +270,16 @@ fn inject_system_message(mut body: Value) -> Value {
     });
 
     let new_system = match obj.get("system").cloned() {
-        None => json!([prefix]),
+        None => json!([{"type": "text", "text": billing}, prefix]),
         Some(Value::String(s)) => {
             json!([
+                {"type": "text", "text": billing},
                 prefix,
                 {"type": "text", "text": s}
             ])
         }
         Some(Value::Array(arr)) => {
-            let mut new_arr = vec![prefix];
+            let mut new_arr = vec![json!({"type": "text", "text": billing}), prefix];
             new_arr.extend(arr);
             Value::Array(new_arr)
         }
@@ -229,18 +308,29 @@ fn sanitize_system_only(mut body: Value) -> Value {
 }
 
 /// Generate a fake user ID in Claude Code format.
-/// Format: user_[64-hex-chars]_account__session_[UUID-v4]
+/// JSON string containing device_id, account_uuid and session_id.
 fn generate_fake_user_id() -> String {
     let mut rng = rand::rng();
     let hex_bytes: [u8; 32] = rng.random();
     let hex_part: String = hex_bytes.iter().map(|b| format!("{:02x}", b)).collect();
     let uuid_part = Uuid::new_v4().to_string();
-    format!("user_{}_account__session_{}", hex_part, uuid_part)
+    json!({"device_id": hex_part, "account_uuid": "", "session_id": uuid_part}).to_string()
 }
 
 /// Check if a user ID matches Claude Code format.
-/// Format: user_[64-hex]_account__session_[uuid-v4]
+/// Accept current JSON metadata and legacy IDs from existing clients.
 fn is_valid_user_id(user_id: &str) -> bool {
+    if let Ok(value) = serde_json::from_str::<Value>(user_id) {
+        return value
+            .get("device_id")
+            .and_then(Value::as_str)
+            .is_some_and(|s| s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit()))
+            && value.get("account_uuid").is_some_and(Value::is_string)
+            && value
+                .get("session_id")
+                .and_then(Value::as_str)
+                .is_some_and(|s| Uuid::parse_str(s).is_ok());
+    }
     let Some((user_part, uuid_part)) = user_id.split_once("_account__session_") else {
         return false;
     };
@@ -328,7 +418,7 @@ mod tests {
         let body = json!({"model": "claude-3"});
         let result = inject_fake_user_id(body);
         let user_id = result["metadata"]["user_id"].as_str().unwrap();
-        assert!(user_id.starts_with("user_"));
+        assert!(is_valid_user_id(user_id));
     }
 
     #[test]
@@ -336,7 +426,13 @@ mod tests {
         let body = json!({"model": "claude-3"});
         let result = inject_system_message(body);
         let system = result["system"].as_array().unwrap();
-        assert_eq!(system[0]["text"], SYSTEM_PREFIX);
+        assert!(
+            system[0]["text"]
+                .as_str()
+                .unwrap()
+                .starts_with("x-anthropic-billing-header: cc_version=2.1.326.")
+        );
+        assert_eq!(system[1]["text"], SYSTEM_PREFIX);
     }
 
     #[test]
@@ -346,8 +442,8 @@ mod tests {
         });
         let result = inject_system_message(body);
         let system = result["system"].as_array().unwrap();
-        // Second element is the user-provided system prompt (first is prefix)
-        let text = system[1]["text"].as_str().unwrap();
+        // Billing and identity precede the client prompt.
+        let text = system[2]["text"].as_str().unwrap();
         assert!(!text.contains("OpenCode"));
         assert!(!text.contains("opencode"));
         assert!(text.contains("Claude Code"));
@@ -364,9 +460,9 @@ mod tests {
         });
         let result = inject_system_message(body);
         let system = result["system"].as_array().unwrap();
-        // Index 0 is prefix, 1 and 2 are user-provided
-        assert!(!system[1]["text"].as_str().unwrap().contains("OpenCode"));
-        assert!(!system[2]["text"].as_str().unwrap().contains("opencode"));
+        // Billing and identity precede the two client blocks.
+        assert!(!system[2]["text"].as_str().unwrap().contains("OpenCode"));
+        assert!(!system[3]["text"].as_str().unwrap().contains("opencode"));
     }
 
     #[test]
@@ -388,8 +484,7 @@ mod tests {
     #[test]
     fn test_generate_fake_user_id_format() {
         let id = generate_fake_user_id();
-        assert!(id.starts_with("user_"));
-        assert!(id.contains("_account__session_"));
+        assert!(serde_json::from_str::<Value>(&id).is_ok());
         assert!(is_valid_user_id(&id));
     }
 
@@ -401,5 +496,41 @@ mod tests {
         assert!(!is_valid_user_id("invalid"));
         assert!(!is_valid_user_id("user_short_account__session_uuid"));
         assert!(!is_valid_user_id(""));
+    }
+    #[test]
+    fn oauth_identity_replaces_account_but_preserves_native_device_and_extras() {
+        let mut body = json!({"metadata":{"user_id":json!({"device_id":"a".repeat(64),"account_uuid":"wrong-owner","session_id":"old","parent_session_id":"parent"}).to_string()}});
+        apply_identity(
+            &mut body,
+            &"b".repeat(64),
+            Some("token-owner"),
+            "conversation",
+        );
+        let id: Value =
+            serde_json::from_str(body["metadata"]["user_id"].as_str().unwrap()).unwrap();
+        assert_eq!(id["account_uuid"], "token-owner");
+        assert_eq!(id["device_id"], "a".repeat(64));
+        assert_eq!(id["session_id"], "conversation");
+        assert_eq!(id["parent_session_id"], "parent");
+        let mut empty = json!({"messages":[]});
+        apply_identity(&mut empty, &"b".repeat(64), None, "conversation");
+        let id: Value =
+            serde_json::from_str(empty["metadata"]["user_id"].as_str().unwrap()).unwrap();
+        assert_eq!(id["device_id"], "b".repeat(64));
+        assert_eq!(id["account_uuid"], "");
+    }
+    #[test]
+    fn billing_marker_matches_captured_prompt_and_changes_with_prompt() {
+        let body = json!({"messages":[{"role":"user","content":"Reply exactly OK."}]});
+        assert_eq!(
+            billing_prefix(&body),
+            "x-anthropic-billing-header: cc_version=2.1.326.dd3; cc_entrypoint=sdk-cli;"
+        );
+        assert_ne!(
+            billing_prefix(&body),
+            billing_prefix(
+                &json!({"messages":[{"role":"user","content":"A different first prompt changes sampled characters."}]})
+            )
+        );
     }
 }

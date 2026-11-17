@@ -13,6 +13,7 @@ use crate::error::ProxyError;
 pub struct AuthResult {
     pub client_key: ClientKey,
     pub token: String,
+    pub account_uuid: Option<String>,
 }
 
 /// Extract API key from Authorization: Bearer header (OpenAI style)
@@ -164,7 +165,12 @@ async fn authenticate_key(
     }
     let client_key = validate_inference_key(key, state, model, false).await?;
     let token = get_oauth_token(state).await?;
-    Ok(AuthResult { client_key, token })
+    let account_uuid = state.oauth.account_uuid(&token).await;
+    Ok(AuthResult {
+        client_key,
+        token,
+        account_uuid,
+    })
 }
 
 /// Full authentication flow for OpenAI-compatible endpoint
@@ -224,18 +230,45 @@ fn build_beta_header(extras: &[String]) -> String {
 
 /// Build a request to the Anthropic API with OAuth headers.
 ///
-/// Headers mirror the Claude Code 2.1.178 CLI exactly (captured from live
-/// traffic) so the upstream request is indistinguishable from the real client.
+/// Headers follow local Claude Code 2.1.326 print-mode captures.
+/// Transport framing and application payloads still depend on the caller.
 pub fn build_anthropic_request(
     client: &Client,
     url: &str,
     token: &str,
     extra_betas: Option<&[String]>,
     session_id: &str,
+    body: &serde_json::Value,
+    client_headers: Option<&HeaderMap>,
 ) -> RequestBuilder {
-    let beta_header = build_beta_header(extra_betas.unwrap_or(&[]));
+    let mut beta_header = build_beta_header(extra_betas.unwrap_or(&[]));
+    if body
+        .get("model")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|m| m.contains("haiku"))
+    {
+        let extras: Vec<String> = beta_header
+            .split(',')
+            .filter(|b| !OAUTH_BETA_HEADER.split(',').any(|base| base == *b))
+            .map(str::to_owned)
+            .collect();
+        beta_header = "oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,claude-code-20250219,thinking-token-count-2026-05-13,extended-cache-ttl-2025-04-11".to_owned();
+        for extra in extras {
+            beta_header.push(',');
+            beta_header.push_str(&extra);
+        }
+    }
+    let metadata = body
+        .pointer("/metadata/user_id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+    let session_id = metadata
+        .as_ref()
+        .and_then(|m| m.get("session_id"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(session_id);
 
-    client
+    let mut request = client
         .post(url)
         .header("anthropic-version", ANTHROPIC_VERSION)
         .header("content-type", "application/json")
@@ -246,8 +279,8 @@ pub fn build_anthropic_request(
         .header("x-app", "cli")
         .header("X-Claude-Code-Session-Id", session_id)
         .header("x-stainless-retry-count", "0")
-        .header("x-stainless-runtime-version", "v24.3.0")
-        .header("x-stainless-package-version", "0.94.0")
+        .header("x-stainless-runtime-version", "v26.12.1")
+        .header("x-stainless-package-version", "0.128.0")
         .header("x-stainless-runtime", "node")
         .header("x-stainless-lang", "js")
         .header("x-stainless-arch", "x64")
@@ -255,6 +288,43 @@ pub fn build_anthropic_request(
         .header("x-stainless-timeout", "600")
         .header("connection", "keep-alive")
         .header("accept", "application/json")
+        .header("accept-encoding", "gzip, deflate, br, zstd");
+    if let Some(headers) = client_headers.filter(|h| {
+        h.get("user-agent")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|s| s.starts_with("claude-cli/"))
+    }) {
+        let mut overrides = HeaderMap::new();
+        for name in [
+            "user-agent",
+            "x-stainless-runtime-version",
+            "x-stainless-package-version",
+            "x-stainless-runtime",
+            "x-stainless-lang",
+            "x-stainless-arch",
+            "x-stainless-os",
+            "x-stainless-timeout",
+        ] {
+            if let Some(value) = headers.get(name) {
+                overrides.insert(name, value.clone());
+            }
+        }
+        if let Some(betas) = headers.get("anthropic-beta").and_then(|v| v.to_str().ok()) {
+            let mut betas: Vec<&str> = betas
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !betas.contains(&"oauth-2025-04-20") {
+                betas.push("oauth-2025-04-20");
+            }
+            if let Ok(value) = betas.join(",").parse() {
+                overrides.insert("anthropic-beta", value);
+            }
+        }
+        request = request.headers(overrides);
+    }
+    request
 }
 
 #[cfg(test)]
@@ -307,5 +377,120 @@ mod tests {
     #[test]
     fn build_beta_header_no_extras_is_base() {
         assert_eq!(build_beta_header(&[]), OAUTH_BETA_HEADER);
+    }
+    /// Compare real HTTP traffic against minimized OAuth captures from the
+    /// installed 2.1.326 binary (Sonnet, Opus, Haiku; Read tool enabled).
+    #[tokio::test]
+    async fn native_capture_matches_outbound_wire() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let fixtures: serde_json::Value =
+            serde_json::from_str(include_str!("fixtures/claude-2.1.326.json")).unwrap();
+        for fixture in fixtures.as_array().unwrap() {
+            let body = fixture["body"].clone();
+            let prepared =
+                crate::transforms::prepare::prepare_anthropic_request(body.clone(), true);
+            assert_eq!(prepared.body, body, "native body must survive unchanged");
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let expected = fixture.clone();
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut bytes = Vec::new();
+                loop {
+                    let mut chunk = [0; 4096];
+                    let count = socket.read(&mut chunk).await.unwrap();
+                    assert!(count > 0);
+                    bytes.extend_from_slice(&chunk[..count]);
+                    if let Some(offset) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let head = String::from_utf8_lossy(&bytes[..offset]);
+                        let headers: std::collections::HashMap<String, String> = head
+                            .lines()
+                            .skip(1)
+                            .filter_map(|l| l.split_once(":"))
+                            .map(|(k, v)| (k.to_lowercase(), v.trim().to_owned()))
+                            .collect();
+                        let length: usize = headers["content-length"].parse().unwrap();
+                        if bytes.len() < offset + 4 + length {
+                            continue;
+                        }
+                        assert_eq!(
+                            head.lines().next().unwrap(),
+                            format!("POST {} HTTP/1.1", expected["path"].as_str().unwrap())
+                        );
+                        assert_eq!(
+                            headers.len(),
+                            expected["headers"].as_object().unwrap().len() + 3,
+                            "only authorization, host and content-length differ"
+                        );
+                        assert_eq!(headers["authorization"], "Bearer local-test-token");
+                        for (name, value) in expected["headers"].as_object().unwrap() {
+                            assert_eq!(
+                                headers.get(name).map(String::as_str),
+                                value.as_str(),
+                                "header {name}"
+                            );
+                        }
+                        let actual: serde_json::Value =
+                            serde_json::from_slice(&bytes[offset + 4..]).unwrap();
+                        assert_eq!(actual, expected["body"]);
+                        socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").await.unwrap();
+                        break;
+                    }
+                }
+            });
+            let client = Client::builder()
+                .no_proxy()
+                .timeout(std::time::Duration::from_secs(5))
+                .build()
+                .unwrap();
+            let url = format!("http://{address}{}", fixture["path"].as_str().unwrap());
+            let request = build_anthropic_request(
+                &client,
+                &url,
+                "local-test-token",
+                Some(&prepared.betas),
+                "fallback-session",
+                &prepared.body,
+                None,
+            )
+            .json(&prepared.body);
+            request.send().await.unwrap().error_for_status().unwrap();
+            server.await.unwrap();
+        }
+    }
+    #[test]
+    fn native_headers_replace_defaults_without_duplicates() {
+        let mut headers = headers_with_beta("claude-code-20250219,custom-beta");
+        headers.insert(
+            "user-agent",
+            "claude-cli/2.1.326 (external, cli)".parse().unwrap(),
+        );
+        headers.insert("x-stainless-runtime-version", "v26.12.1".parse().unwrap());
+        let body = serde_json::json!({"model":"claude-sonnet-4-6"});
+        let request = build_anthropic_request(
+            &Client::new(),
+            "http://localhost/v1/messages",
+            "proxy-owner-token",
+            None,
+            "session",
+            &body,
+            Some(&headers),
+        )
+        .build()
+        .unwrap();
+        assert_eq!(request.headers().get_all("user-agent").iter().count(), 1);
+        assert_eq!(request.headers()["user-agent"], headers["user-agent"]);
+        assert_eq!(
+            request.headers().get_all("anthropic-beta").iter().count(),
+            1
+        );
+        assert_eq!(
+            request.headers()["anthropic-beta"],
+            "claude-code-20250219,custom-beta,oauth-2025-04-20"
+        );
+        assert_eq!(
+            request.headers()["authorization"],
+            "Bearer proxy-owner-token"
+        );
     }
 }

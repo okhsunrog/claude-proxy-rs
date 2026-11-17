@@ -64,7 +64,7 @@ pub struct GetUsageQuery {
     path = "/oauth/status",
     tag = "oauth",
     responses(
-        (status = 200, body = OAuthStatusResponse),
+        (status = 200, description = "OK", body = OAuthStatusResponse),
     )
 )]
 pub async fn get_oauth_status(State(state): State<Arc<AppState>>) -> Json<OAuthStatusResponse> {
@@ -86,7 +86,7 @@ pub async fn get_oauth_status(State(state): State<Arc<AppState>>) -> Json<OAuthS
     path = "/oauth/start-flow",
     tag = "oauth",
     responses(
-        (status = 200, body = OAuthUrlResponse),
+        (status = 200, description = "OK", body = OAuthUrlResponse),
     )
 )]
 pub async fn start_oauth_flow(State(state): State<Arc<AppState>>) -> Json<OAuthUrlResponse> {
@@ -101,8 +101,8 @@ pub async fn start_oauth_flow(State(state): State<Arc<AppState>>) -> Json<OAuthU
     tag = "oauth",
     request_body = ExchangeCodeRequest,
     responses(
-        (status = 200, body = SuccessResponse),
-        (status = 400, body = ErrorResponse),
+        (status = 200, description = "OK", body = SuccessResponse),
+        (status = 400, description = "Bad Request", body = ErrorResponse),
     )
 )]
 pub async fn exchange_oauth_code(
@@ -127,8 +127,8 @@ pub async fn exchange_oauth_code(
     path = "/oauth",
     tag = "oauth",
     responses(
-        (status = 200, body = SuccessResponse),
-        (status = 500, body = ErrorResponse),
+        (status = 200, description = "OK", body = SuccessResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 pub async fn delete_oauth(
@@ -163,7 +163,7 @@ pub async fn delete_oauth(
     tag = "oauth",
     params(GetUsageQuery),
     responses(
-        (status = 200, body = SubscriptionUsageResponse),
+        (status = 200, description = "OK", body = SubscriptionUsageResponse),
     )
 )]
 pub async fn get_subscription_usage(
@@ -183,7 +183,7 @@ pub async fn get_subscription_usage(
     get,
     path = "/oauth/web-session",
     tag = "oauth",
-    responses((status = 200, body = WebSessionStatusResponse))
+    responses((status = 200, description = "OK", body = WebSessionStatusResponse))
 )]
 pub async fn get_web_session_status(
     State(state): State<Arc<AppState>>,
@@ -205,8 +205,8 @@ pub async fn get_web_session_status(
     tag = "oauth",
     request_body = WebSessionRequest,
     responses(
-        (status = 200, body = SuccessResponse),
-        (status = 500, body = ErrorResponse),
+        (status = 200, description = "OK", body = SuccessResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 pub async fn save_web_session(
@@ -247,8 +247,8 @@ pub async fn save_web_session(
     path = "/oauth/web-session",
     tag = "oauth",
     responses(
-        (status = 200, body = SuccessResponse),
-        (status = 500, body = ErrorResponse),
+        (status = 200, description = "OK", body = SuccessResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 pub async fn delete_web_session(

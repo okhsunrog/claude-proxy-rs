@@ -2,43 +2,43 @@
 name = "claude-proxy-rs"
 version = "2.0.1"
 edition = "2024"
-rust-version = "1.94"
+rust-version = "1.100"
 
 [dependencies]
 async-stream = "0.3.6"
 anyhow = "1.0"
-axum = { version = "0.8.8", features = ["multipart"] }
-base64 = "0.22.1"
-bytes = "1.11.1"
-chrono = "0.4.43"
-clap = { version = "4.5.57", features = ["derive", "env"] }
+axum = { version = "0.8.9", features = ["multipart"] }
+base64 = "0.23.1"
+bytes = "1.12.1"
+chrono = "0.4.45"
+clap = { version = "4.6.8", features = ["derive", "env"] }
 dotenvy = "0.15.7"
-futures-util = "0.3.31"
+futures-util = "0.3.34"
 llm-relay = { version = "1.0.1", default-features = false }
-memory-serve = "2.0.0-beta.0"
+memory-serve = "2.4.0"
 rand = "0.10"
-reqwest = { version = "0.13.1", features = ["form", "json", "multipart", "stream"] }
-serde = { version = "1.0.228", features = ["derive"] }
+reqwest = { version = "0.13.5", features = ["brotli", "deflate", "form", "gzip", "json", "multipart", "stream", "zstd"] }
+serde = { version = "1.0.229", features = ["derive"] }
 # Structured-output schemas must retain the client's generation order.
-serde_json = { version = "1.0.149", features = ["preserve_order"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
 sha2 = "0.11"
 subtle = "2.6.1"
 thiserror = "2.0"
-tokio = { version = "1.49.0", features = ["full"] }
+tokio = { version = "1.54.1", features = ["full"] }
 tower-http = { version = "0.7", features = ["cors", "normalize-path"] }
 tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 url = "2.5.8"
 urlencoding = "2.1.3"
-utoipa = { version = "5.4.0", features = ["axum_extras"] }
-utoipa-axum = "0.2.0"
-uuid = { version = "1.20.0", features = ["v4", "serde"] }
+utoipa = { version = "6.0.0", features = ["axum_extras"] }
+utoipa-axum = "0.3.0"
+uuid = { version = "1.29.3", features = ["v4", "serde"] }
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "macros", "migrate"] }
 eventsource-stream = "0.2.3"
 
 [build-dependencies]
-chrono = "0.4.43"
-memory-serve = "2.0.0-beta.0"
+chrono = "0.4.45"
+memory-serve = "2.4.0"
 
 [lints.clippy]
 # Extra production guardrails. Keep noisy style categories out; run with
