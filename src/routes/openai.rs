@@ -188,6 +188,7 @@ pub async fn chat_completions(
 
     if !response.status().is_success() {
         let status = response.status();
+        let upstream_headers = response.headers().clone();
         if let Some(capture) = &capture {
             capture
                 .write_upstream_response(status, response.headers())
@@ -197,11 +198,13 @@ pub async fn chat_completions(
         if let Some(capture) = &capture {
             capture.write_upstream_body(&text).await;
         }
-        return (
+        let mut response = (
             StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY),
             Json(json!({ "error": text })),
         )
             .into_response();
+        super::auth::preserve_retry_headers(&upstream_headers, &mut response);
+        return response;
     }
 
     // Update window resets from rate-limit headers on every successful response.

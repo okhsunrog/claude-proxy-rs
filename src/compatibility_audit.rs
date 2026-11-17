@@ -25,6 +25,25 @@ async fn upstream(
     Json(body): Json<Value>,
 ) -> Response {
     captures.lock().await.push(body.clone());
+    if body["messages"][0]["content"]
+        .to_string()
+        .contains("audit rate-limit")
+    {
+        return (
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            [
+                ("retry-after", "3"),
+                ("retry-after-ms", "3000"),
+                ("x-should-retry", "true"),
+                ("request-id", "audit-limit"),
+                ("set-cookie", "private-cookie"),
+            ],
+            Json(
+                json!({"type":"error","error":{"type":"rate_limit_error","message":"audit limit"}}),
+            ),
+        )
+            .into_response();
+    }
     let opencode = body["messages"][0]["content"]
         .to_string()
         .contains("audit opencode");
@@ -297,6 +316,15 @@ async fn real_clients_through_http_and_postgres() {
             .await
             .unwrap();
         assert_eq!(response.status(), 400);
+        for endpoint in ["/v1/messages", "/v1/chat/completions"] {
+            let response=client.post(format!("{proxy_url}{endpoint}")).bearer_auth(&key.key).json(&json!({"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"audit rate-limit"}]})).send().await.unwrap();
+            assert_eq!(response.status(), 429);
+            assert_eq!(response.headers()["retry-after"], "3");
+            assert_eq!(response.headers()["retry-after-ms"], "3000");
+            assert_eq!(response.headers()["x-should-retry"], "true");
+            assert_eq!(response.headers()["request-id"], "audit-limit");
+            assert!(!response.headers().contains_key("set-cookie"));
+        }
     }
     if let Ok(binary) = std::env::var("PROXY_AUDIT_OPENCODE_BIN") {
         let workspace = root.join("opencode");

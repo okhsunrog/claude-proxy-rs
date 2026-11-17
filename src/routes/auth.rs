@@ -12,6 +12,21 @@ use crate::constants::{
 };
 use crate::error::ProxyError;
 
+/// Preserve actionable retry hints without forwarding cookies or credentials.
+pub fn preserve_retry_headers(upstream: &HeaderMap, response: &mut axum::response::Response) {
+    for name in [
+        "retry-after",
+        "retry-after-ms",
+        "x-should-retry",
+        "request-id",
+        "x-request-id",
+    ] {
+        if let Some(value) = upstream.get(name) {
+            response.headers_mut().insert(name, value.clone());
+        }
+    }
+}
+
 /// Result of successful authentication containing the client key and OAuth token
 pub struct AuthResult {
     pub client_key: ClientKey,

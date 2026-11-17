@@ -83,7 +83,7 @@ pub fn normalize_tools(body: &mut Value, profile: ClientProfile) -> ToolNameMap 
             if tool
                 .get("type")
                 .and_then(|t| t.as_str())
-                .is_some_and(|t| !t.is_empty())
+                .is_some_and(|t| !t.is_empty() && t != "custom")
             {
                 continue;
             }
@@ -370,5 +370,16 @@ mod tests {
         assert_eq!(body["tools"][0]["name"], "mcp_Read");
         assert_eq!(body["tools"][1]["name"], "mcp__read_file");
         assert_eq!(body["tools"][1]["input_schema"], second["input_schema"]);
+    }
+
+    #[test]
+    fn explicit_custom_type_is_not_a_server_tool() {
+        let mut tool = read_tool("read_file");
+        tool["type"] = json!("custom");
+        let mut body = json!({"tools":[tool,{"name":"web_search","type":"web_search_20250305"}]});
+        let map = normalize_tools(&mut body, ClientProfile::OpenAi);
+        assert_eq!(body["tools"][0]["name"], "mcp_Read");
+        assert_eq!(map.restore("mcp_Read"), "read_file");
+        assert_eq!(body["tools"][1]["name"], "web_search");
     }
 }
