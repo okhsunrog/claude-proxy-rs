@@ -1,4 +1,5 @@
 mod admin_session;
+mod anthropic_transport;
 mod auth;
 mod capture;
 mod config;
@@ -55,6 +56,7 @@ pub struct AppState {
     pub chatgpt: auth::chatgpt::ChatGptAuth,
     pub transcription_limits: routes::transcription::TranscriptionLimits,
     pub http_client: Client,
+    pub anthropic_transport: anthropic_transport::AnthropicTransport,
     pub admin_credentials: AdminCredentials,
     /// Whether to set Secure flag on cookies (true when not binding to localhost)
     pub secure_cookies: bool,
@@ -253,6 +255,7 @@ async fn main() -> Result<()> {
         models,
         oauth,
         http_client,
+        anthropic_transport: anthropic_transport::AnthropicTransport::new()?,
         admin_credentials,
         secure_cookies,
         disable_auth,

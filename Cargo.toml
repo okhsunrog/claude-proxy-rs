@@ -35,8 +35,10 @@ utoipa-axum = "0.3.0"
 uuid = { version = "1.29.3", features = ["v4", "serde"] }
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "macros", "migrate"] }
 eventsource-stream = "0.2.3"
+wreq = { version = "6.0.0-rc.31", features = ["stream", "gzip", "brotli", "deflate", "zstd", "system-proxy"] }
 
 [build-dependencies]
+cc = "1.11.2"
 chrono = "0.4.45"
 memory-serve = "2.4.0"
 

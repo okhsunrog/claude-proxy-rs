@@ -105,7 +105,11 @@ pub async fn messages(
         Some(&headers),
     );
 
-    let response: reqwest::Response = match req_builder.json(&prepared.body).send().await {
+    let response: reqwest::Response = match state
+        .anthropic_transport
+        .send(req_builder.json(&prepared.body))
+        .await
+    {
         Ok(r) => r,
         Err(e) => {
             return ProxyError::AnthropicApiError(format!("Failed to contact Anthropic: {}", e))
@@ -135,7 +139,11 @@ pub async fn messages(
             &prepared.body,
             Some(&headers),
         );
-        match retry_builder.json(&prepared.body).send().await {
+        match state
+            .anthropic_transport
+            .send(retry_builder.json(&prepared.body))
+            .await
+        {
             Ok(r) => r,
             Err(e) => {
                 return ProxyError::AnthropicApiError(format!(
@@ -302,7 +310,11 @@ pub async fn count_tokens(
         Some(&headers),
     );
 
-    let response: reqwest::Response = match req_builder.json(&prepared.body).send().await {
+    let response: reqwest::Response = match state
+        .anthropic_transport
+        .send(req_builder.json(&prepared.body))
+        .await
+    {
         Ok(r) => r,
         Err(e) => {
             return ProxyError::AnthropicApiError(format!("Failed to contact Anthropic: {}", e))
