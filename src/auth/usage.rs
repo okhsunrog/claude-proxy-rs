@@ -25,6 +25,9 @@ pub fn usage_from_json(value: &Value) -> Usage {
         cache_read_input_tokens: value
             .get("cache_read_input_tokens")
             .and_then(|v| v.as_u64()),
+        cache_creation: value
+            .get("cache_creation")
+            .and_then(|value| serde_json::from_value(value.clone()).ok()),
         ..Usage::default()
     }
 }

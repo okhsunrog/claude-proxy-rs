@@ -31,7 +31,7 @@ async fn upstream(
     let cancel = body["messages"][0]["content"]
         .to_string()
         .contains("audit cancel");
-    let usage = json!({"input_tokens":11,"output_tokens":7,"cache_read_input_tokens":3,"cache_creation_input_tokens":4});
+    let usage = json!({"input_tokens":11,"output_tokens":7,"cache_read_input_tokens":3,"cache_creation_input_tokens":4,"cache_creation":{"ephemeral_5m_input_tokens":2,"ephemeral_1h_input_tokens":2}});
     let mut turn = body["messages"]
         .as_array()
         .unwrap()
@@ -125,8 +125,10 @@ async fn upstream(
     if body["stream"] != true {
         return Json(message).into_response();
     }
+    let mut start_usage = usage.clone();
+    start_usage["output_tokens"] = json!(0);
     let mut events = vec![
-        json!({"type":"message_start","message":{"id":"msg_audit","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[],"usage":{"input_tokens":11,"output_tokens":0,"cache_read_input_tokens":3,"cache_creation_input_tokens":4},"stop_reason":null,"stop_sequence":null}}),
+        json!({"type":"message_start","message":{"id":"msg_audit","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[],"usage":start_usage,"stop_reason":null,"stop_sequence":null}}),
     ];
     if cancel {
         events.push(json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}));
@@ -274,6 +276,11 @@ async fn real_clients_through_http_and_postgres() {
                     assert_eq!(entry.total.output, 30);
                     assert_eq!(entry.total.cache_read, 15);
                     assert_eq!(entry.total.cache_write, 20);
+                    let (_, usage) = state.client_keys.get_usage(&key.id).await.unwrap().unwrap();
+                    assert_eq!(
+                        usage.total_tokens, 715,
+                        "mixed 5m/1h costs, including cancellation"
+                    );
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(20)).await;

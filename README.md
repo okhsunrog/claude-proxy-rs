@@ -228,6 +228,8 @@ Cache policy is independent: `CLAUDE_PROXY_CACHE_POLICY=auto-5m|auto-1h|preserve
 
 Existing automatic system-prompt substitutions remain enabled independently of the selected tool profile.
 
+Usage accounting preserves the provider's five-minute/one-hour cache-write breakdown. The configured cache write price represents five-minute writes; one-hour writes are calculated at 1.6 times that rate. The database/UI retain aggregate write tokens and the resulting cost. This is a local cost estimate for budgets, not a subscription invoice.
+
 #### Alternative: OpenAI Compatible
 
 | Setting | Value |

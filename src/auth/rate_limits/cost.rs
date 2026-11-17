@@ -81,10 +81,19 @@ pub(super) async fn compute_cost(conn: &Connection, model: &str, report: &Usage)
         return 0;
     };
 
+    let write_tokens = report.cache_creation_input_tokens.unwrap_or(0);
+    let hour_tokens = report
+        .cache_creation
+        .as_ref()
+        .map_or(0, |cache| cache.ephemeral_1h_input_tokens)
+        .min(write_tokens);
     let cost = report.input_tokens as f64 * row.input_price
         + report.output_tokens as f64 * row.output_price
         + report.cache_read_input_tokens.unwrap_or(0) as f64 * row.cache_read_price
-        + report.cache_creation_input_tokens.unwrap_or(0) as f64 * row.cache_write_price;
+        + (write_tokens-hour_tokens) as f64 * row.cache_write_price
+        // Configured cache_write_price is the 5m rate (1.25x input); the
+        // 1h rate is 2x input, i.e. 1.6x that configured write rate.
+        + hour_tokens as f64 * row.cache_write_price * 1.6;
 
     #[expect(
         clippy::cast_sign_loss,

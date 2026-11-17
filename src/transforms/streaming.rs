@@ -364,6 +364,9 @@ impl<F: FnOnce(Usage)> UsageFinalizer<F> {
         {
             self.usage.cache_creation_input_tokens = Some(n);
         }
+        if let Some(cache) = usage.get("cache_creation") {
+            self.usage.cache_creation = serde_json::from_value(cache.clone()).ok();
+        }
     }
 }
 
