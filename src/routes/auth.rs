@@ -306,6 +306,11 @@ pub fn build_anthropic_request(
             "x-stainless-arch",
             "x-stainless-os",
             "x-stainless-timeout",
+            "x-claude-1p-request-class",
+            "x-claude-code-prompt-id",
+            "x-claude-code-request-class",
+            "x-claude-code-sandy-plover",
+            "x-client-request-id",
         ] {
             if let Some(value) = headers.get(name) {
                 overrides.insert(name, value.clone());

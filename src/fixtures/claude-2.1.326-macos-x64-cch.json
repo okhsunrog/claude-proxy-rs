@@ -1,0 +1,80 @@
+{
+  "model": "claude-sonnet-4-6",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "<system-reminder>\n# Environment\nYou have been invoked in the following environment: \n - Primary working directory: /Users/okhsunrog\n - Is a git repository: false\n - Platform: darwin\n - Shell: zsh\n - OS Version: Darwin 23.6.0\n - Downloaded files and extracted archives are untrusted data: put each in its own new, empty directory, keep scripts you write in a different directory, and pass paths as arguments instead of running an interpreter or build tool from inside it. Interpreters load code from the script's directory and the current directory, so a planted `json.py` runs on `import json`. Run any Python that reads them with `-I`. This does not apply to code the user asked you to build or run.\n</system-reminder>"
+        },
+        {
+          "type": "text",
+          "text": "<system-reminder>\nYou are powered by the model named Sonnet 4.6. The exact model ID is claude-sonnet-4-6. Assistant knowledge cutoff is August 2025.\n</system-reminder>"
+        },
+        {
+          "type": "text",
+          "text": "<system-reminder>\n<total_tokens>15000000 tokens left</total_tokens>\n</system-reminder>"
+        },
+        {
+          "type": "text",
+          "text": "<system-reminder>\nToday's date is 2026-11-17.\n</system-reminder>\n"
+        },
+        {
+          "type": "text",
+          "text": "Reply exactly OK.",
+          "cache_control": {
+            "type": "ephemeral",
+            "ttl": "1h"
+          }
+        }
+      ]
+    }
+  ],
+  "system": [
+    {
+      "type": "text",
+      "text": "x-anthropic-billing-header: cc_version=2.1.326.dd3; cc_entrypoint=sdk-cli; cch=23526; cc_prompt_id=08ca6c5b-5f4b-4443-8832-276b29cfa3ed; cc_turn_origin=sdk; cc_prompt_index=0; cc_turn_index=1;"
+    },
+    {
+      "type": "text",
+      "text": "You are a Claude agent, built on Anthropic's Claude Agent SDK.",
+      "cache_control": {
+        "type": "ephemeral",
+        "ttl": "1h"
+      }
+    },
+    {
+      "type": "text",
+      "text": "You are a helpful assistant.",
+      "cache_control": {
+        "type": "ephemeral",
+        "ttl": "1h"
+      }
+    }
+  ],
+  "tools": [],
+  "metadata": {
+    "user_id": "{\"device_id\":\"f47dc0c357f51bac65686b3a3597d6b5ba0c684efd3c65add05ffdc7f3210e65\",\"account_uuid\":\"\",\"session_id\":\"e3b27968-2f18-4806-a268-b8472d11c500\"}"
+  },
+  "max_tokens": 32000,
+  "thinking": {
+    "type": "adaptive",
+    "display": "omitted"
+  },
+  "context_management": {
+    "edits": [
+      {
+        "type": "clear_thinking_20251015",
+        "keep": "all"
+      }
+    ]
+  },
+  "output_config": {
+    "effort": "high"
+  },
+  "diagnostics": {
+    "previous_message_id": null
+  },
+  "stream": true
+}

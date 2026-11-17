@@ -493,6 +493,12 @@ OAuth token, a first-party API URL, and a local CONNECT mock; authenticated upst
 acceptance is not verified. Local wire tests check cipher suites, extension order,
 key-exchange groups and share sizes (including X25519MLKEM768), signature algorithms,
 ALPN, header order and streaming. This does not imply identical application payloads.
+The final inference body gets a fresh `cch` checksum after all transformations,
+including account metadata replacement. A native macOS message capture checks the
+checksum against the client implementation. First-party prompt/request identifiers
+and request classification headers are retained when supplied by a native client.
+Prepared diagnostic captures precede transport finalization; their billing checksum
+may differ from the final wire body. Count-token requests are not signed this way.
 Certificate verification remains enabled. Other providers keep the existing HTTP
 client. GNU/Linux builds statically link the TLS library's C++ runtime.
 

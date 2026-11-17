@@ -5,6 +5,7 @@
 //! - `openai_compat`: OpenAI ↔ Anthropic format conversion
 //! - `streaming`: SSE stream transformations
 
+pub mod billing;
 pub mod openai_compat;
 pub mod prepare;
 pub mod streaming;

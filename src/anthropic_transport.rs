@@ -29,6 +29,10 @@ const HEADER_ORDER: &[&str] = &[
     "anthropic-dangerous-direct-browser-access",
     "anthropic-version",
     "x-app",
+    "x-claude-1p-request-class",
+    "x-claude-code-prompt-id",
+    "x-claude-code-request-class",
+    "x-claude-code-sandy-plover",
     "x-client-request-id",
     "Connection",
     "Host",
@@ -113,10 +117,19 @@ impl AnthropicTransport {
             .transpose()?
             .unwrap_or_default()
             .to_vec();
+        let body = if request.url().path() == "/v1/messages" {
+            crate::transforms::billing::finalize(&body)?
+        } else {
+            body
+        };
+        let mut headers = request.headers().clone();
+        // Adding a CCH field can change the body length. Let the transport
+        // calculate framing from the finalized bytes, including on retries.
+        headers.remove(reqwest::header::CONTENT_LENGTH);
         let response = self
             .client
             .request(request.method().clone(), request.url().as_str())
-            .headers(request.headers().clone())
+            .headers(headers)
             .body(body)
             .send()
             .await?;
@@ -152,6 +165,78 @@ mod tests {
             .chunks_exact(2)
             .map(|x| u16::from_be_bytes([x[0], x[1]]))
             .collect()
+    }
+
+    #[tokio::test]
+    async fn finalizes_checksum_and_content_length_on_the_wire() {
+        let mut body: serde_json::Value =
+            serde_json::from_str(include_str!("fixtures/claude-2.1.326-macos-x64-cch.json"))
+                .unwrap();
+        body["metadata"]["user_id"] = "proxy-owner".into();
+        body["system"][0]["text"] = body["system"][0]["text"]
+            .as_str()
+            .unwrap()
+            .replace(" cch=23526;", "")
+            .into();
+        let input_length = serde_json::to_vec(&body).unwrap().len();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!(
+            "http://{}/v1/messages?beta=true",
+            listener.local_addr().unwrap()
+        );
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut bytes = Vec::new();
+            loop {
+                let mut chunk = [0; 4096];
+                let n = socket.read(&mut chunk).await.unwrap();
+                assert!(n > 0);
+                bytes.extend_from_slice(&chunk[..n]);
+                let Some(offset) = bytes.windows(4).position(|b| b == b"\r\n\r\n") else {
+                    continue;
+                };
+                let head = String::from_utf8_lossy(&bytes[..offset]);
+                let length: usize = head
+                    .lines()
+                    .find_map(|line| line.strip_prefix("Content-Length: "))
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                if bytes.len() < offset + 4 + length {
+                    continue;
+                }
+                assert_eq!(length, input_length + " cch=00000;".len());
+                let value: serde_json::Value =
+                    serde_json::from_slice(&bytes[offset + 4..]).unwrap();
+                // Independently calculated from the native VM fixture with only
+                // metadata.user_id changed; excludes model/dispatch fields.
+                assert!(
+                    value["system"][0]["text"]
+                        .as_str()
+                        .unwrap()
+                        .contains(" cch=b662b;")
+                );
+                assert_eq!(value["metadata"]["user_id"], "proxy-owner");
+                socket
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                    )
+                    .await
+                    .unwrap();
+                break;
+            }
+        });
+        let request = reqwest::Client::new()
+            .post(url)
+            .header(reqwest::header::CONTENT_LENGTH, input_length)
+            .json(&body);
+        let response = AnthropicTransport::build(true)
+            .unwrap()
+            .send(request)
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        server.await.unwrap();
     }
 
     #[tokio::test]

@@ -36,6 +36,7 @@ uuid = { version = "1.29.3", features = ["v4", "serde"] }
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "macros", "migrate"] }
 eventsource-stream = "0.2.3"
 wreq = { version = "6.0.0-rc.31", features = ["stream", "gzip", "brotli", "deflate", "zstd", "system-proxy"] }
+xxhash-rust = { version = "0.8.21", features = ["xxh64"] }
 
 [build-dependencies]
 cc = "1.11.2"
