@@ -12,6 +12,7 @@ mod error;
 mod identity;
 mod routes;
 mod subscription;
+mod thread_state;
 mod transforms;
 mod usage;
 
@@ -61,6 +62,7 @@ pub struct AppState {
     pub anthropic_transport: anthropic_transport::AnthropicTransport,
     pub inference_url: String,
     pub count_tokens_url: String,
+    pub threads: Arc<thread_state::ThreadStore>,
     pub admin_credentials: AdminCredentials,
     /// Whether to set Secure flag on cookies (true when not binding to localhost)
     pub secure_cookies: bool,
@@ -260,6 +262,7 @@ async fn main() -> Result<()> {
         anthropic_transport: anthropic_transport::AnthropicTransport::new()?,
         inference_url: constants::ANTHROPIC_API_URL.into(),
         count_tokens_url: constants::ANTHROPIC_COUNT_TOKENS_URL.into(),
+        threads: Arc::new(thread_state::ThreadStore::default()),
         admin_credentials,
         secure_cookies,
         disable_auth,

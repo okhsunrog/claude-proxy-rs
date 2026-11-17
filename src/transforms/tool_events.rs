@@ -22,14 +22,12 @@ pub fn restore(
             let kind=event.get("type").and_then(Value::as_str).unwrap_or("").to_owned();
             let index=event.get("index").and_then(Value::as_u64).unwrap_or(0);
             if kind=="content_block_start" && let Some(block)=event.get_mut("content_block") {
-                if block.get("type").and_then(Value::as_str)==Some("tool_use") {
-                    let adapter=block.get("name").and_then(Value::as_str).and_then(|n|map.adapter(n)).filter(|a|a.changes_arguments()).cloned();
+                    let adapter=block.get("name").and_then(Value::as_str).filter(|_|block.get("type").and_then(Value::as_str)==Some("tool_use")).and_then(|n|map.adapter(n)).filter(|a|a.changes_arguments()).cloned();
                     let empty=block.get("input").is_none_or(|i|i.as_object().is_some_and(|o|o.is_empty()));
                     if let Some(adapter)=adapter && empty {pending.insert(index,(adapter,String::new()));}
                     let mut message=json!({"content":[block.clone()]});
                     restore_response_tool_names(&mut message,&map);
                     if let Some(restored)=message.pointer("/content/0") {*block=restored.clone();}
-                }
             } else if kind=="content_block_delta" && let Some((_,buffer))=pending.get_mut(&index)
                 && let Some(fragment)=event.pointer("/delta/partial_json").and_then(Value::as_str) {
                 if buffer.len().saturating_add(fragment.len())>MAX_ARGUMENT_BYTES {yield Err(io::Error::other("Adapted tool arguments exceed 4 MiB"));return;}
@@ -59,6 +57,24 @@ mod tests {
     use super::*;
     use crate::{compatibility::ClientProfile, transforms::tool_aliases::normalize_tools};
     use futures_util::stream;
+
+    #[tokio::test]
+    async fn restores_server_search_results_on_streamed_block_start() {
+        let mut body = json!({"tools":[{"name":"file?","input_schema":{"type":"object"}}]});
+        let map = normalize_tools(&mut body, ClientProfile::Generic);
+        let name = body["tools"][0]["name"].clone();
+        let events = vec![
+            Ok(
+                json!({"type":"content_block_start","index":1,"content_block":{"type":"tool_search_tool_result","tool_use_id":"search","content":{"type":"tool_search_tool_search_result","tool_references":[{"type":"tool_reference","tool_name":name}]}}}),
+            ),
+            Ok(json!({"type":"message_stop"})),
+        ];
+        let output: Vec<_> = restore(stream::iter(events), map).collect().await;
+        assert_eq!(
+            output[0].as_ref().unwrap()["content_block"]["content"]["tool_references"][0]["tool_name"],
+            "file?"
+        );
+    }
 
     #[tokio::test]
     async fn malformed_truncated_and_oversized_arguments_fail() {

@@ -59,6 +59,8 @@ pub enum ProxyError {
     InvalidModel(String),
     #[error("Invalid request: {0}")]
     InvalidRequest(String),
+    #[error("Thread state not found; replay the full conversation with thread create")]
+    ThreadNotFound,
 }
 
 impl ProxyError {
@@ -69,6 +71,7 @@ impl ProxyError {
             | ProxyError::MissingHeader(_)
             | ProxyError::NoAuthConfigured => (StatusCode::UNAUTHORIZED, self.to_string()),
             ProxyError::RateLimitExceeded(_) => (StatusCode::TOO_MANY_REQUESTS, self.to_string()),
+            ProxyError::ThreadNotFound => (StatusCode::NOT_FOUND, self.to_string()),
             ProxyError::ModelNotAllowed(_) => (StatusCode::FORBIDDEN, self.to_string()),
             ProxyError::InvalidModel(_) | ProxyError::InvalidRequest(_) => {
                 (StatusCode::BAD_REQUEST, self.to_string())
@@ -88,6 +91,9 @@ impl ProxyError {
 
     /// Convert error to Anthropic-compatible error response
     pub fn to_anthropic_response(&self) -> Response {
+        if matches!(self, Self::ThreadNotFound) {
+            return (StatusCode::NOT_FOUND,Json(json!({"type":"error","error":{"type":"not_found_error","message":self.to_string(),"details":{"error_code":"thread_not_found"}}}))).into_response();
+        }
         let (status, error_type, message) = match self {
             ProxyError::InvalidApiKey
             | ProxyError::MissingHeader(_)
@@ -103,6 +109,9 @@ impl ProxyError {
             ),
             ProxyError::ModelNotAllowed(_) => {
                 (StatusCode::FORBIDDEN, "permission_error", self.to_string())
+            }
+            ProxyError::ThreadNotFound => {
+                (StatusCode::NOT_FOUND, "not_found_error", self.to_string())
             }
             ProxyError::InvalidModel(_) | ProxyError::InvalidRequest(_) => (
                 StatusCode::BAD_REQUEST,

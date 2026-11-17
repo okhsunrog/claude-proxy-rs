@@ -25,6 +25,26 @@ async fn upstream(
     Json(body): Json<Value>,
 ) -> Response {
     captures.lock().await.push(body.clone());
+    let threaded = body.get("thread").is_some();
+    if body.pointer("/thread/type").and_then(Value::as_str) == Some("continue") {
+        assert!(body.get("system").is_none() && body.get("tools").is_none());
+        assert_eq!(body["tool_choice"]["name"], "mcp_Read");
+        assert_eq!(
+            body["messages"][0]["content"][0]["content"][0]["tool_name"],
+            "mcp_Read"
+        );
+        let captures = captures.lock().await;
+        let created = captures
+            .iter()
+            .rev()
+            .find(|b| b.pointer("/thread/type").and_then(Value::as_str) == Some("create"))
+            .unwrap();
+        let created: Value =
+            serde_json::from_str(created["metadata"]["user_id"].as_str().unwrap()).unwrap();
+        let continued: Value =
+            serde_json::from_str(body["metadata"]["user_id"].as_str().unwrap()).unwrap();
+        assert_eq!(created["session_id"], continued["session_id"]);
+    }
     if body["messages"][0]["content"]
         .to_string()
         .contains("audit rate-limit")
@@ -63,7 +83,7 @@ async fn upstream(
     if opencode && body.get("tools").is_none() {
         turn = 3;
     }
-    if turn > 0 && body.get("tools").is_some() {
+    if turn > 0 && body.get("tools").is_some() && !threaded {
         let results: Vec<_> = body["messages"]
             .as_array()
             .unwrap()
@@ -87,7 +107,7 @@ async fn upstream(
             }
         }
     }
-    let mut content = match turn {
+    let mut content = match if threaded { 0 } else { turn } {
         0 => {
             json!({"type":"tool_use","id":"call0","name":"mcp_Read","input":{"file_path":"probe.txt"}})
         }
@@ -139,7 +159,11 @@ async fn upstream(
         }
         content["input"] = args;
     }
-    let stop = if turn < 3 { "tool_use" } else { "end_turn" };
+    let stop = if turn < 3 || threaded {
+        "tool_use"
+    } else {
+        "end_turn"
+    };
     let message = json!({"id":"msg_audit","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[content.clone()],"stop_reason":stop,"stop_sequence":null,"usage":usage});
     if body["stream"] != true {
         return Json(message).into_response();
@@ -230,6 +254,7 @@ async fn real_clients_through_http_and_postgres() {
         anthropic_transport: crate::anthropic_transport::AnthropicTransport::new().unwrap(),
         inference_url: upstream_url,
         count_tokens_url: "http://127.0.0.1:1/unused".into(),
+        threads: Arc::new(crate::thread_state::ThreadStore::default()),
         transcription_limits: crate::routes::transcription::TranscriptionLimits::new(120, 4),
         admin_credentials: crate::admin_session::AdminCredentials {
             username: "audit".into(),
@@ -240,7 +265,7 @@ async fn real_clients_through_http_and_postgres() {
         cloak_mode: crate::config::CloakMode::Always,
         compatibility: Compatibility::default(),
         usage_cache: crate::usage::UsageCache::new(),
-        device_id: "audit-device".into(),
+        device_id: "a".repeat(64),
         capture: crate::capture::CaptureConfig::from_env(),
     });
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -384,6 +409,38 @@ async fn real_clients_through_http_and_postgres() {
         .expect("OpenCode usage in DB");
         println!("OpenCode read/error/edit tool loop passed");
     }
+    let key = state
+        .client_keys
+        .create("audit-threads".into())
+        .await
+        .unwrap();
+    let output = Command::new("uv")
+        .args([
+            "run",
+            "--project",
+            "tests/clients",
+            "python",
+            "tests/clients/threads.py",
+        ])
+        .env("PROXY_AUDIT_URL", &proxy_url)
+        .env("PROXY_AUDIT_KEY", &key.key)
+        .kill_on_drop(true)
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    println!("{}", String::from_utf8_lossy(&output.stdout));
+    let response=client.post(format!("{proxy_url}/v1/messages")).bearer_auth(state.client_keys.create("other-thread-client".into()).await.unwrap().key).json(&json!({"model":"claude-sonnet-4-6","thread":{"type":"continue","previous_message_id":"msg_audit"},"messages":[]})).send().await.unwrap();
+    assert_eq!(response.status(), 404);
+    assert_eq!(
+        response.json::<Value>().await.unwrap()["error"]["details"]["error_code"],
+        "thread_not_found"
+    );
     let bodies = captures.lock().await;
     assert!(bodies.len() >= 20);
     std::fs::write(
@@ -392,6 +449,9 @@ async fn real_clients_through_http_and_postgres() {
     )
     .unwrap();
     for body in bodies.iter().filter(|b| b.get("tools").is_some()) {
+        if body.get("thread").is_some() {
+            continue;
+        }
         if body["messages"][0]["content"]
             .to_string()
             .contains("audit opencode")

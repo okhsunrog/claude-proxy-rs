@@ -230,6 +230,10 @@ Existing automatic system-prompt substitutions remain enabled independently of t
 
 Usage accounting preserves the provider's five-minute/one-hour cache-write breakdown. The configured cache write price represents five-minute writes; one-hour writes are calculated at 1.6 times that rate. The database/UI retain aggregate write tokens and the resulting cost. This is a local cost estimate for budgets, not a subscription invoice.
 
+Messages threads preserve tool aliases and the conversation session across `thread.create` / `thread.continue`, including JSON and SSE responses. Continue requests must omit `system` and `tools`; the proxy does not inject prompts or automatic cache markers on these turns. The process-local state is scoped to client key, OAuth account and model, expires after five minutes and is bounded to 1024 entries / approximately 16 MiB. Missing state returns HTTP 404 with `details.error_code=thread_not_found`, so the client can replay its own full conversation. State is recorded only for completed responses, never a cancelled or failed stream.
+
+Tool-search references are translated in both directions in server search results and custom `tool_result` content, including SSE block starts. Opaque text and tool input objects are not rewritten. Deferred tool definitions retain `defer_loading`; the proxy does not execute searches or expand references itself.
+
 #### Alternative: OpenAI Compatible
 
 | Setting | Value |

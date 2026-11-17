@@ -296,9 +296,13 @@ pub fn stream_restore_native_tool_names_with_usage(
     key_id: String,
     model: String,
     tool_name_map: ToolNameMap,
+    thread_turn: Option<crate::thread_state::Turn>,
 ) -> impl Stream<Item = Result<Bytes, IoError>> + Send {
     native_events(
-        tracked_events(body, recorder(state, key_id, model)),
+        crate::thread_state::track(
+            tracked_events(body, recorder(state, key_id, model)),
+            thread_turn,
+        ),
         tool_name_map,
     )
 }

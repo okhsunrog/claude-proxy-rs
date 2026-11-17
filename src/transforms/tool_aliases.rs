@@ -19,6 +19,54 @@ struct ToolNameAlias {
 }
 
 impl ToolNameMap {
+    pub fn forward_request(&self, body: &mut Value) {
+        if let Some(choice) = body.get_mut("tool_choice") {
+            self.forward_block(choice);
+        }
+        if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
+            for message in messages {
+                if let Some(content) = message.get_mut("content").and_then(Value::as_array_mut) {
+                    for block in content {
+                        if block.get("type").and_then(Value::as_str) == Some("tool_use") {
+                            self.forward_block(block);
+                        }
+                        rewrite_references(block, &|name| {
+                            self.aliases
+                                .iter()
+                                .find(|a| a.client == name)
+                                .map(|a| a.upstream.clone())
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    fn forward_block(&self, block: &mut Value) {
+        let Some(alias) = block
+            .get("name")
+            .and_then(Value::as_str)
+            .and_then(|n| self.aliases.iter().find(|a| a.client == n))
+        else {
+            return;
+        };
+        set_name(block, &alias.upstream);
+        if let Some(input) = block.get_mut("input") {
+            alias.adapter.forward(input);
+        }
+    }
+
+    pub fn estimated_bytes(&self) -> usize {
+        self.aliases
+            .iter()
+            .map(|a| {
+                a.upstream.len()
+                    + a.client.len()
+                    + a.adapter.estimated_bytes()
+                    + std::mem::size_of::<ToolNameAlias>()
+            })
+            .sum()
+    }
     pub fn restore(&self, upstream_name: &str) -> String {
         self.aliases
             .iter()
@@ -139,6 +187,18 @@ pub fn normalize_tools(body: &mut Value, profile: ClientProfile) -> ToolNameMap 
         );
     }
 
+    if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
+        for message in messages {
+            if let Some(content) = message.get_mut("content").and_then(Value::as_array_mut) {
+                for block in content {
+                    rewrite_references(block, &|name| {
+                        forward.get(name).map(|(name, _)| name.clone())
+                    });
+                }
+            }
+        }
+    }
+
     map
 }
 
@@ -148,7 +208,52 @@ pub fn restore_response_tool_names(body: &mut Value, map: &ToolNameMap) {
             if block.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
                 restore_name_field(block, map);
             }
+            rewrite_references(block, &|name| {
+                map.aliases
+                    .iter()
+                    .find(|a| a.upstream == name)
+                    .map(|a| a.client.clone())
+            });
         }
+    }
+}
+
+// Only traverse protocol content containers. Tool inputs and arbitrary JSON in
+// text/results can contain identically named keys and are not protocol blocks.
+fn rewrite_references(block: &mut Value, rename: &impl Fn(&str) -> Option<String>) {
+    match block.get("type").and_then(Value::as_str) {
+        Some("tool_reference") => {
+            if let Some(name) = block
+                .get("tool_name")
+                .and_then(Value::as_str)
+                .and_then(rename)
+                && let Some(object) = block.as_object_mut()
+            {
+                object.insert("tool_name".into(), Value::String(name));
+            }
+        }
+        Some("tool_result" | "tool_search_tool_result") => {
+            if let Some(content) = block.get_mut("content") {
+                if let Some(items) = content.as_array_mut() {
+                    for item in items {
+                        rewrite_references(item, rename);
+                    }
+                } else if content.is_object() {
+                    rewrite_references(content, rename);
+                }
+            }
+        }
+        Some("tool_search_tool_search_result") => {
+            if let Some(items) = block
+                .get_mut("tool_references")
+                .and_then(Value::as_array_mut)
+            {
+                for item in items {
+                    rewrite_references(item, rename);
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -381,5 +486,40 @@ mod tests {
         assert_eq!(body["tools"][0]["name"], "mcp_Read");
         assert_eq!(map.restore("mcp_Read"), "read_file");
         assert_eq!(body["tools"][1]["name"], "web_search");
+    }
+
+    #[test]
+    fn search_references_round_trip_without_rewriting_tool_input() {
+        let server = json!({"type":"tool_search_tool_result","content":{"type":"tool_search_tool_search_result","tool_references":[{"type":"tool_reference","tool_name":"read_file"}]}});
+        let custom = json!({"type":"tool_result","content":[{"type":"tool_reference","tool_name":"read_file"}]});
+        let opaque = json!({"type":"tool_use","name":"read_file","input":{"path":"p","payload":{"type":"tool_reference","tool_name":"read_file"}}});
+        let mut tool = read_tool("read_file");
+        tool["defer_loading"] = json!(true);
+        let mut body = json!({"tools":[tool],"messages":[{"role":"assistant","content":[server,custom,opaque.clone()]}]});
+        let map = normalize_tools(&mut body, ClientProfile::OpenAi);
+        assert_eq!(
+            body["messages"][0]["content"][0]["content"]["tool_references"][0]["tool_name"],
+            "mcp_Read"
+        );
+        assert_eq!(
+            body["messages"][0]["content"][1]["content"][0]["tool_name"],
+            "mcp_Read"
+        );
+        assert_eq!(
+            body["messages"][0]["content"][2]["input"]["payload"],
+            opaque["input"]["payload"]
+        );
+        assert_eq!(body["tools"][0]["defer_loading"], true);
+        let mut response = json!({"content":body["messages"][0]["content"].clone()});
+        restore_response_tool_names(&mut response, &map);
+        assert_eq!(
+            response["content"][0]["content"]["tool_references"][0]["tool_name"],
+            "read_file"
+        );
+        assert_eq!(
+            response["content"][1]["content"][0]["tool_name"],
+            "read_file"
+        );
+        assert_eq!(response["content"][2], opaque);
     }
 }

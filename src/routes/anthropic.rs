@@ -62,8 +62,39 @@ pub async fn messages(
     .await;
 
     // Apply all transformations via unified pipeline
-    let session_id =
-        crate::identity::session_id(&body, &headers, &auth.client_key.id, &state.device_id);
+    let thread_mode = match crate::thread_state::mode(&body) {
+        Ok(mode) => mode,
+        Err(error) => return error.to_anthropic_response(),
+    };
+    let scope = crate::thread_state::Scope {
+        key: auth.client_key.id.clone(),
+        model: model.clone(),
+        account: auth.account_uuid.clone().unwrap_or_else(|| {
+            use sha2::Digest;
+            sha2::Sha256::digest(auth.token.as_bytes())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect()
+        }),
+    };
+    let continued = if thread_mode == Some("continue") {
+        let previous = body
+            .pointer("/thread/previous_message_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        match state.threads.load(&scope, previous).await {
+            Some(saved) => Some(saved),
+            None => return ProxyError::ThreadNotFound.to_anthropic_response(),
+        }
+    } else {
+        None
+    };
+    let session_id = continued
+        .as_ref()
+        .map(|s| s.session.clone())
+        .unwrap_or_else(|| {
+            crate::identity::session_id(&body, &headers, &auth.client_key.id, &state.device_id)
+        });
     let mut body = body;
     if cloak || body.get("metadata").is_some() {
         crate::transforms::prepare::apply_identity(
@@ -73,7 +104,18 @@ pub async fn messages(
             &session_id,
         );
     }
-    let mut prepared = crate::transforms::prepare::prepare_with_policy(body, cloak, policy);
+    let transform_thinking = continued.as_ref().map_or_else(
+        || {
+            !crate::transforms::prepare::is_native_envelope(&body)
+                && policy.profile != crate::compatibility::ClientProfile::Native
+        },
+        |s| s.transform_thinking,
+    );
+    let mut prepared = if let Some(saved) = continued {
+        crate::transforms::prepare::prepare_continuation(body, saved.tools, transform_thinking)
+    } else {
+        crate::transforms::prepare::prepare_with_policy(body, cloak, policy)
+    };
     // Forward beta flags the client sent in the `anthropic-beta` header. Native
     // Claude Code carries them there (not in a body `betas` field), and dropping
     // them makes Anthropic reject newer tool types like `advisor_*` with a 400.
@@ -83,6 +125,15 @@ pub async fn messages(
         }
     }
     let tool_name_map = prepared.tool_name_map.clone();
+    let thread_turn = thread_mode.map(|_| crate::thread_state::Turn {
+        store: state.threads.clone(),
+        scope,
+        state: crate::thread_state::ThreadState {
+            tools: tool_name_map.clone(),
+            session: session_id.clone(),
+            transform_thinking,
+        },
+    });
     if let Some(capture) = &capture {
         capture
             .write_prepared(&prepared.body, &prepared.betas, cloak)
@@ -206,6 +257,7 @@ pub async fn messages(
             key_id,
             model,
             tool_name_map,
+            thread_turn,
         );
 
         match Response::builder()
@@ -256,6 +308,9 @@ pub async fn messages(
             }
         }
 
+        if let Some(turn) = thread_turn {
+            turn.record(&json_response).await;
+        }
         // Restore client-visible tool names in response.
         restore_response_tool_names(&mut json_response, &tool_name_map);
         Json(json_response).into_response()

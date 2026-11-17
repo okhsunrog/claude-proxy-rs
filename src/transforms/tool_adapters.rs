@@ -10,6 +10,12 @@ pub struct ArgumentAdapter {
 }
 
 impl ArgumentAdapter {
+    pub fn estimated_bytes(&self) -> usize {
+        self.fields
+            .iter()
+            .map(|(a, b)| a.len() + b.len() + std::mem::size_of::<(String, String)>())
+            .sum()
+    }
     pub fn select(
         name: &str,
         tool: &Value,

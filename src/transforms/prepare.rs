@@ -89,8 +89,27 @@ pub fn prepare_with_policy(body: Value, cloak: bool, policy: Compatibility) -> P
     }
 }
 
+pub fn prepare_continuation(
+    body: Value,
+    map: ToolNameMap,
+    transform_thinking: bool,
+) -> PreparedRequest {
+    let (betas, body) = extract_betas(body);
+    let mut body = if transform_thinking {
+        disable_thinking_if_forced(body)
+    } else {
+        body
+    };
+    map.forward_request(&mut body);
+    PreparedRequest {
+        body,
+        betas,
+        tool_name_map: map,
+    }
+}
+
 /// Recognize the current native envelope without trusting arbitrary metadata alone.
-fn is_native_envelope(body: &Value) -> bool {
+pub(crate) fn is_native_envelope(body: &Value) -> bool {
     body.get("system")
         .and_then(Value::as_array)
         .is_some_and(|blocks| {
