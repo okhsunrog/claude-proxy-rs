@@ -25,11 +25,14 @@ async fn upstream(
     Json(body): Json<Value>,
 ) -> Response {
     captures.lock().await.push(body.clone());
+    let opencode = body["messages"][0]["content"]
+        .to_string()
+        .contains("audit opencode");
     let cancel = body["messages"][0]["content"]
         .to_string()
         .contains("audit cancel");
     let usage = json!({"input_tokens":11,"output_tokens":7,"cache_read_input_tokens":3,"cache_creation_input_tokens":4});
-    let turn = body["messages"]
+    let mut turn = body["messages"]
         .as_array()
         .unwrap()
         .iter()
@@ -37,7 +40,11 @@ async fn upstream(
         .flatten()
         .filter(|b| b["type"] == "tool_result")
         .count();
-    if turn > 0 {
+    // OpenCode also makes auxiliary title/summary calls without tools.
+    if opencode && body.get("tools").is_none() {
+        turn = 3;
+    }
+    if turn > 0 && body.get("tools").is_some() {
         let results: Vec<_> = body["messages"]
             .as_array()
             .unwrap()
@@ -46,15 +53,22 @@ async fn upstream(
             .flatten()
             .filter(|b| b["type"] == "tool_result")
             .collect();
-        let expected = ["before", "file missing", "edited"];
+        let expected = if opencode {
+            ["before", "File not found", "Edited"]
+        } else {
+            ["before", "file missing", "edited"]
+        };
         for (i, result) in results.iter().enumerate() {
             assert!(
                 result["content"].to_string().contains(expected[i]),
                 "{result}"
             );
+            if opencode && i == 1 {
+                assert_eq!(result["is_error"], true);
+            }
         }
     }
-    let content = match turn {
+    let mut content = match turn {
         0 => {
             json!({"type":"tool_use","id":"call0","name":"mcp_Read","input":{"file_path":"probe.txt"}})
         }
@@ -66,6 +80,46 @@ async fn upstream(
         }
         _ => json!({"type":"text","text":"done"}),
     };
+    if opencode && turn < 3 {
+        let needle = if turn < 2 { "read" } else { "edit" };
+        let tool = body["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| {
+                t["name"]
+                    .as_str()
+                    .is_some_and(|n| n.to_ascii_lowercase().ends_with(needle))
+            })
+            .expect("real client must register file tools");
+        content["name"] = tool["name"].clone();
+        let properties = &tool["input_schema"]["properties"];
+        let path_key = ["path", "filePath", "file_path"]
+            .into_iter()
+            .find(|k| properties.get(*k).is_some())
+            .unwrap();
+        let mut args = json!({});
+        args[path_key] = json!(if turn == 1 {
+            "missing.txt"
+        } else {
+            "probe.txt"
+        });
+        if turn == 2 {
+            let old = if properties.get("oldString").is_some() {
+                "oldString"
+            } else {
+                "old_string"
+            };
+            let new = if properties.get("newString").is_some() {
+                "newString"
+            } else {
+                "new_string"
+            };
+            args[old] = json!("before");
+            args[new] = json!("after");
+        }
+        content["input"] = args;
+    }
     let stop = if turn < 3 { "tool_use" } else { "end_turn" };
     let message = json!({"id":"msg_audit","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[content.clone()],"stop_reason":stop,"stop_sequence":null,"usage":usage});
     if body["stream"] != true {
@@ -198,6 +252,7 @@ async fn real_clients_through_http_and_postgres() {
                 .env("PROXY_AUDIT_KEY", &key.key)
                 .env("PROXY_AUDIT_MODE", mode)
                 .env("PROXY_AUDIT_WORKSPACE", root.join(mode))
+                .kill_on_drop(true)
                 .output(),
         )
         .await
@@ -236,14 +291,78 @@ async fn real_clients_through_http_and_postgres() {
             .unwrap();
         assert_eq!(response.status(), 400);
     }
+    if let Ok(binary) = std::env::var("PROXY_AUDIT_OPENCODE_BIN") {
+        let workspace = root.join("opencode");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::write(workspace.join("probe.txt"), "before\n").unwrap();
+        let key = state
+            .client_keys
+            .create("audit-opencode".into())
+            .await
+            .unwrap();
+        let config = json!({"update":"disable","share":"disabled","snapshots":false,"providers":{"audit":{"package":"@ai-sdk/anthropic","settings":{"baseURL":format!("{proxy_url}/v1"),"apiKey":key.key},"headers":{"x-proxy-client-profile":"opencode"},"models":{"claude-sonnet-4-6":{"name":"Audit","limit":{"context":200000,"output":4096},"capabilities":{"tools":true,"reasoning":{"supported":false}}}}}}});
+        std::fs::write(workspace.join("opencode.json"), config.to_string()).unwrap();
+        let home = root.join("opencode-home");
+        std::fs::create_dir_all(&home).unwrap();
+        let output=tokio::time::timeout(Duration::from_secs(60),Command::new(binary).args(["run","--standalone","--auto","--archived","--format","json","--model","audit/claude-sonnet-4-6","audit opencode: read probe.txt, read missing.txt, replace before with after in probe.txt"])
+            .current_dir(&workspace).env_clear().env("PATH",std::env::var("PATH").unwrap()).env("HOME",&home)
+            .env("XDG_CONFIG_HOME",home.join("config")).env("XDG_DATA_HOME",home.join("data")).env("XDG_CACHE_HOME",home.join("cache")).env("XDG_STATE_HOME",home.join("state"))
+            .env("TMPDIR",&root).kill_on_drop(true).output()).await.expect("OpenCode audit timeout").unwrap();
+        std::fs::write(root.join("opencode.stdout"), &output.stdout).unwrap();
+        std::fs::write(root.join("opencode.stderr"), &output.stderr).unwrap();
+        assert!(
+            output.status.success(),
+            "OpenCode: {} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            std::fs::read_to_string(workspace.join("probe.txt")).unwrap(),
+            "after\n",
+            "{} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let entries = state.client_keys.get_model_usage(&key.id).await.unwrap();
+                let count = captures
+                    .lock()
+                    .await
+                    .iter()
+                    .filter(|b| {
+                        b["messages"][0]["content"]
+                            .to_string()
+                            .contains("audit opencode")
+                    })
+                    .count() as u64;
+                if let Some(entry) = entries.first()
+                    && entry.total.input == count * 11
+                {
+                    assert_eq!(entry.total.output, count * 7);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("OpenCode usage in DB");
+        println!("OpenCode read/error/edit tool loop passed");
+    }
     let bodies = captures.lock().await;
-    assert_eq!(bodies.len(), 20);
+    assert!(bodies.len() >= 20);
     std::fs::write(
         root.join("upstream.json"),
         serde_json::to_vec_pretty(&*bodies).unwrap(),
     )
     .unwrap();
     for body in bodies.iter().filter(|b| b.get("tools").is_some()) {
+        if body["messages"][0]["content"]
+            .to_string()
+            .contains("audit opencode")
+        {
+            continue;
+        }
         assert_eq!(body["tools"][0]["name"], "mcp_Read");
         assert!(
             body["tools"][0]["input_schema"]["properties"]

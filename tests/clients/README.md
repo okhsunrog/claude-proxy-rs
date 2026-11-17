@@ -10,3 +10,5 @@ cargo test real_clients_through_http_and_postgres -- --ignored --nocapture
 ```
 
 The test applies migrations and creates keys/auth rows. Its endpoint injection is internal application state; normal startup always uses the production API constants. It saves synthetic upstream requests beneath `PROXY_AUDIT_ROOT`. This verifies SDK tool loops, not execution inside the Cline or Roo extension host.
+
+Set `PROXY_AUDIT_OPENCODE_BIN` to an absolute path to the installed OpenCode executable to additionally run its actual read/error/edit loop. The test launches a private server with isolated home/XDG directories and local provider configuration, verifies the resulting file and database usage, and saves its output under the audit root. OpenCode 2.2.7 has been exercised this way; its read/shell schemas remain MCP tools while its compatible edit schema uses the reversible Edit adapter.
