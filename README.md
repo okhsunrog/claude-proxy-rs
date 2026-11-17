@@ -477,3 +477,7 @@ metadata is preserved. Without an explicit session ID, generated sessions are
 scoped to the proxy key and first user message; two conversations with the same
 opening message should send different `x-session-id` values. Keep the first user
 message in subsequent history requests for this fallback to remain stable.
+
+Generated inference headers advertise a macOS/ARM64 client profile. Recognized
+native clients retain their own platform headers. Working environment text in
+messages and system instructions is preserved; header defaults do not emulate TLS.

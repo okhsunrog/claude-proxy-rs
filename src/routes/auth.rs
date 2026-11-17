@@ -6,7 +6,9 @@ use tracing::warn;
 
 use crate::AppState;
 use crate::auth::ClientKey;
-use crate::constants::{ANTHROPIC_VERSION, INFERENCE_USER_AGENT, OAUTH_BETA_HEADER};
+use crate::constants::{
+    ANTHROPIC_VERSION, INFERENCE_ARCH, INFERENCE_OS, INFERENCE_USER_AGENT, OAUTH_BETA_HEADER,
+};
 use crate::error::ProxyError;
 
 /// Result of successful authentication containing the client key and OAuth token
@@ -283,8 +285,8 @@ pub fn build_anthropic_request(
         .header("x-stainless-package-version", "0.128.0")
         .header("x-stainless-runtime", "node")
         .header("x-stainless-lang", "js")
-        .header("x-stainless-arch", "x64")
-        .header("x-stainless-os", "Linux")
+        .header("x-stainless-arch", INFERENCE_ARCH)
+        .header("x-stainless-os", INFERENCE_OS)
         .header("x-stainless-timeout", "600")
         .header("connection", "keep-alive")
         .header("accept", "application/json")
@@ -444,6 +446,13 @@ mod tests {
                 .build()
                 .unwrap();
             let url = format!("http://{address}{}", fixture["path"].as_str().unwrap());
+            let mut incoming = HeaderMap::new();
+            for (key, value) in fixture["headers"].as_object().unwrap() {
+                incoming.insert(
+                    axum::http::HeaderName::from_bytes(key.as_bytes()).unwrap(),
+                    value.as_str().unwrap().parse().unwrap(),
+                );
+            }
             let request = build_anthropic_request(
                 &client,
                 &url,
@@ -451,7 +460,7 @@ mod tests {
                 Some(&prepared.betas),
                 "fallback-session",
                 &prepared.body,
-                None,
+                Some(&incoming),
             )
             .json(&prepared.body);
             request.send().await.unwrap().error_for_status().unwrap();
@@ -491,6 +500,31 @@ mod tests {
         assert_eq!(
             request.headers()["authorization"],
             "Bearer proxy-owner-token"
+        );
+    }
+    #[test]
+    fn generated_profile_is_macos_arm64_without_changing_working_context() {
+        let body = serde_json::json!({"model":"claude-sonnet-4-6", "system":"Tools execute on Linux.", "messages":[{"role":"user","content":"hello"}]});
+        let request = build_anthropic_request(
+            &Client::new(),
+            "http://localhost/v1/messages",
+            "test",
+            None,
+            "session",
+            &body,
+            None,
+        )
+        .json(&body)
+        .build()
+        .unwrap();
+        assert_eq!(request.headers()["x-stainless-os"], "MacOS");
+        assert_eq!(request.headers()["x-stainless-arch"], "arm64");
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(
+                request.body().unwrap().as_bytes().unwrap()
+            )
+            .unwrap(),
+            body
         );
     }
 }

@@ -35,6 +35,10 @@ pub const DEFAULT_MAX_OUTPUT: u32 = 64000;
 /// Format: claude-cli/{VERSION} ({USER_TYPE}, {ENTRYPOINT})
 pub const INFERENCE_USER_AGENT: &str = "claude-cli/2.1.326 (external, sdk-cli)";
 
+/// Generated client identity. Native clients retain their own platform headers.
+pub const INFERENCE_OS: &str = "MacOS";
+pub const INFERENCE_ARCH: &str = "arm64";
+
 /// User-Agent for admin/non-inference requests — matches getClaudeCodeUserAgent().
 /// Used for usage API, profile, bootstrap calls.
 pub const USER_AGENT: &str = "claude-code/2.1.326";
