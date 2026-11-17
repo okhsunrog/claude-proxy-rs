@@ -25,6 +25,10 @@ pub const OAUTH_USAGE_BETA: &str = "oauth-2025-04-20";
 /// inbound `anthropic-beta` header and merged on top of this base.
 pub const OAUTH_BETA_HEADER: &str = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,thinking-token-count-2026-05-13,effort-2025-11-24,extended-cache-ttl-2025-04-11";
 
+/// First-party defaults observed in the macOS 2.1.326 OAuth capture matrix.
+pub const CURRENT_INFERENCE_BETAS: &str = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24,thinking-binding-controls-2026-08-01,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
+pub const CURRENT_HAIKU_BETAS: &str = "oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,claude-code-20250219,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,thinking-binding-controls-2026-08-01,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
+
 /// Max output tokens for Opus 4.6 (128K)
 pub const OPUS_4_6_MAX_OUTPUT: u32 = 128000;
 

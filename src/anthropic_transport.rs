@@ -50,6 +50,9 @@ fn tls_options() -> TlsOptions {
         .min_tls_version(TlsVersion::TLS_1_2)
         .max_tls_version(TlsVersion::TLS_1_3)
         .grease_enabled(false)
+        // Native captures used fresh TLS handshakes on reconnect, including
+        // tool continuations and 429 retries. Keep session resumption disabled.
+        .pre_shared_key(false)
         .permute_extensions(false)
         .enable_ocsp_stapling(true)
         .enable_signed_cert_timestamps(true)

@@ -7,7 +7,8 @@ use tracing::warn;
 use crate::AppState;
 use crate::auth::ClientKey;
 use crate::constants::{
-    ANTHROPIC_VERSION, INFERENCE_ARCH, INFERENCE_OS, INFERENCE_USER_AGENT, OAUTH_BETA_HEADER,
+    ANTHROPIC_VERSION, CURRENT_HAIKU_BETAS, CURRENT_INFERENCE_BETAS, INFERENCE_ARCH, INFERENCE_OS,
+    INFERENCE_USER_AGENT, OAUTH_BETA_HEADER,
 };
 use crate::error::ProxyError;
 
@@ -244,20 +245,36 @@ pub fn build_anthropic_request(
     client_headers: Option<&HeaderMap>,
 ) -> RequestBuilder {
     let mut beta_header = build_beta_header(extra_betas.unwrap_or(&[]));
-    if body
+    let model = body
         .get("model")
         .and_then(serde_json::Value::as_str)
-        .is_some_and(|m| m.contains("haiku"))
-    {
+        .unwrap_or("");
+    let is_messages = reqwest::Url::parse(url)
+        .ok()
+        .is_some_and(|u| u.path() == "/v1/messages");
+    let profile = if is_messages && model.contains("haiku-4-5") {
+        Some(CURRENT_HAIKU_BETAS)
+    } else if is_messages && (model.contains("sonnet-4-6") || model.contains("opus-4-6")) {
+        Some(CURRENT_INFERENCE_BETAS)
+    } else if model.contains("haiku") {
+        Some(
+            "oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,claude-code-20250219,thinking-token-count-2026-05-13,extended-cache-ttl-2025-04-11",
+        )
+    } else {
+        None
+    };
+    if let Some(profile) = profile {
         let extras: Vec<String> = beta_header
             .split(',')
             .filter(|b| !OAUTH_BETA_HEADER.split(',').any(|base| base == *b))
             .map(str::to_owned)
             .collect();
-        beta_header = "oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,claude-code-20250219,thinking-token-count-2026-05-13,extended-cache-ttl-2025-04-11".to_owned();
+        beta_header = profile.to_owned();
         for extra in extras {
-            beta_header.push(',');
-            beta_header.push_str(&extra);
+            if !profile.split(',').any(|b| b == extra) {
+                beta_header.push(',');
+                beta_header.push_str(&extra);
+            }
         }
     }
     let metadata = body
@@ -291,6 +308,24 @@ pub fn build_anthropic_request(
         .header("connection", "keep-alive")
         .header("accept", "application/json")
         .header("accept-encoding", "gzip, deflate, br, zstd");
+    if let Some(prompt_id) = body
+        .pointer("/system/0/text")
+        .and_then(serde_json::Value::as_str)
+        .filter(|s| s.starts_with("x-anthropic-billing-header: "))
+        .and_then(|s| {
+            s.split(';')
+                .find_map(|field| field.trim().strip_prefix("cc_prompt_id="))
+        })
+        .filter(|id| uuid::Uuid::parse_str(id).is_ok())
+        .filter(|_| is_messages)
+    {
+        request = request
+            .header("x-claude-code-prompt-id", prompt_id)
+            .header("x-claude-1p-request-class", "main")
+            .header("x-claude-code-request-class", "main")
+            .header("x-claude-code-sandy-plover", "[]")
+            .header("x-client-request-id", uuid::Uuid::new_v4().to_string());
+    }
     if let Some(headers) = client_headers.filter(|h| {
         h.get("user-agent")
             .and_then(|v| v.to_str().ok())
@@ -542,6 +577,41 @@ mod tests {
             )
             .unwrap(),
             body
+        );
+    }
+
+    #[test]
+    fn generated_dispatch_headers_match_billing_prompt_and_native_betas() {
+        let body = crate::transforms::prepare::prepare_anthropic_request(serde_json::json!({
+            "model":"claude-sonnet-4-6", "messages":[{"role":"user","content":"Reply exactly OK."}]
+        }), true).body;
+        let request = build_anthropic_request(
+            &Client::new(),
+            "http://localhost/v1/messages",
+            "test",
+            None,
+            "session",
+            &body,
+            None,
+        )
+        .build()
+        .unwrap();
+        let fixtures: serde_json::Value =
+            serde_json::from_str(include_str!("fixtures/claude-2.1.326.json")).unwrap();
+        let native = fixtures.as_array().unwrap().last().unwrap();
+        assert_eq!(
+            request.headers()["anthropic-beta"],
+            native["headers"]["anthropic-beta"].as_str().unwrap()
+        );
+        let prompt = request.headers()["x-claude-code-prompt-id"]
+            .to_str()
+            .unwrap();
+        assert!(uuid::Uuid::parse_str(prompt).is_ok());
+        assert!(body["system"][0]["text"].as_str().unwrap().contains(prompt));
+        assert_eq!(request.headers()["x-claude-code-request-class"], "main");
+        assert!(
+            uuid::Uuid::parse_str(request.headers()["x-client-request-id"].to_str().unwrap())
+                .is_ok()
         );
     }
 }

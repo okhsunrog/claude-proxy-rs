@@ -482,6 +482,17 @@ message in subsequent history requests for this fallback to remain stable.
 Generated inference headers advertise a macOS/x64 client profile. Recognized
 native clients retain their own platform headers. Working environment text in
 messages and system instructions is preserved.
+Generated SDK-style requests include a per-prompt UUID shared by the billing block
+and dispatch headers, a fresh per-request UUID, and the captured main-request class
+and SDK origin/counter fields. Sonnet/Opus 4.6 and Haiku 4.5 use the first-party beta
+defaults measured in 2.1.326. Native beta headers and dispatch values override these
+defaults. Message dispatch fields are not added to count-token requests.
+
+This profile covers inference traffic. Application prompts, tool schemas, caching
+policy, telemetry, profile/usage requests and OAuth lifecycle traffic depend on the
+calling application and are not a complete reproduction of the desktop process.
+HTTP acceptance and matching captures do not establish how an upstream service
+classifies a client. The audit has not validated the deployed service end to end.
 
 Anthropic inference uses a separate Rust TLS/HTTP client with ordered headers and
 an explicit ClientHello profile initially derived from
@@ -520,6 +531,14 @@ separate ignored `live_native_and_generated_inference` test reads
 `{"access_token":"..."}` from stdin and makes two short, paid upstream requests.
 It exercises the production preparation/header/transport pipeline without starting
 the HTTP service or using its database, authentication middleware or usage storage.
+The opt-in `generated_headers_match_captured_profiles` test compares generated
+static headers and UUID fields with the three captured model profiles. All three
+opt-in audits passed locally; native and generated live requests returned HTTP 200.
+The captured reconnects contained no PSK extension, and the inference client keeps
+TLS session resumption disabled. Connection timing, every possible helper/tool,
+long sessions and upstream client-classification decisions remain outside this audit.
+OAuth authorization scopes also remain limited to the proxy's existing features;
+the full CLI additionally requests plugin and privacy-consent permissions.
 Certificate verification remains enabled. Other providers keep the existing HTTP
 client. GNU/Linux builds statically link the TLS library's C++ runtime.
 

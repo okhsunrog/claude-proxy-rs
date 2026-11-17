@@ -63,7 +63,7 @@ pub fn prepare_anthropic_request(body: Value, cloak: bool) -> PreparedRequest {
     let mut body = body;
     transform_request_tool_names(&mut body);
     let body = if cloak {
-        inject_system_message(body)
+        inject_system_message(body, true)
     } else {
         sanitize_system_only(body)
     };
@@ -110,7 +110,7 @@ fn is_native_envelope(body: &Value) -> bool {
 pub fn prepare_count_tokens_request(body: Value, cloak: bool) -> PreparedRequest {
     let (betas, body) = extract_betas(body);
     let body = if cloak {
-        inject_system_message(body)
+        inject_system_message(body, false)
     } else {
         sanitize_system_only(body)
     };
@@ -251,14 +251,20 @@ fn billing_prefix(body: &Value) -> String {
     );
     let suffix: String = hash.iter().map(|b| format!("{b:02x}")).collect();
     let suffix: String = suffix.chars().take(3).collect();
-    format!("x-anthropic-billing-header: cc_version=2.1.326.{suffix}; cc_entrypoint=sdk-cli;")
+    let prompt_id = Uuid::new_v4();
+    format!(
+        "x-anthropic-billing-header: cc_version=2.1.326.{suffix}; cc_entrypoint=sdk-cli; cc_prompt_id={prompt_id}; cc_turn_origin=sdk; cc_prompt_index=0; cc_turn_index=1;"
+    )
 }
 
 /// Inject system message prefix into the request body (Claude Code identity).
 ///
 /// Cache_control is handled separately by ensure_cache_control().
-fn inject_system_message(mut body: Value) -> Value {
-    let billing = billing_prefix(&body);
+fn inject_system_message(mut body: Value, dispatch: bool) -> Value {
+    let mut billing = billing_prefix(&body);
+    if !dispatch && let Some(index) = billing.find(" cc_prompt_id=") {
+        billing.truncate(index);
+    }
     let obj = match body.as_object_mut() {
         Some(o) => o,
         None => return body,
@@ -424,7 +430,7 @@ mod tests {
     #[test]
     fn test_inject_system_message() {
         let body = json!({"model": "claude-3"});
-        let result = inject_system_message(body);
+        let result = inject_system_message(body, true);
         let system = result["system"].as_array().unwrap();
         assert!(
             system[0]["text"]
@@ -440,7 +446,7 @@ mod tests {
         let body = json!({
             "system": "You are OpenCode, an AI assistant. Use opencode tools."
         });
-        let result = inject_system_message(body);
+        let result = inject_system_message(body, true);
         let system = result["system"].as_array().unwrap();
         // Billing and identity precede the client prompt.
         let text = system[2]["text"].as_str().unwrap();
@@ -458,7 +464,7 @@ mod tests {
                 {"type": "text", "text": "Use opencode for help"}
             ]
         });
-        let result = inject_system_message(body);
+        let result = inject_system_message(body, true);
         let system = result["system"].as_array().unwrap();
         // Billing and identity precede the two client blocks.
         assert!(!system[2]["text"].as_str().unwrap().contains("OpenCode"));
@@ -470,7 +476,7 @@ mod tests {
         let body = json!({
             "system": "Here is some useful information about the environment you are running in:\n<env>x</env>"
         });
-        let result = inject_system_message(body);
+        let result = inject_system_message(body, true);
         let joined: String = result["system"]
             .as_array()
             .unwrap()
@@ -522,15 +528,14 @@ mod tests {
     #[test]
     fn billing_marker_matches_captured_prompt_and_changes_with_prompt() {
         let body = json!({"messages":[{"role":"user","content":"Reply exactly OK."}]});
-        assert_eq!(
-            billing_prefix(&body),
-            "x-anthropic-billing-header: cc_version=2.1.326.dd3; cc_entrypoint=sdk-cli;"
-        );
+        let billing = billing_prefix(&body);
+        assert!(billing.starts_with("x-anthropic-billing-header: cc_version=2.1.326.dd3; cc_entrypoint=sdk-cli; cc_prompt_id="));
+        assert!(billing.ends_with("; cc_turn_origin=sdk; cc_prompt_index=0; cc_turn_index=1;"));
         assert_ne!(
-            billing_prefix(&body),
+            billing.split("; cc_prompt_id=").next(),
             billing_prefix(
                 &json!({"messages":[{"role":"user","content":"A different first prompt changes sampled characters."}]})
-            )
+            ).split("; cc_prompt_id=").next()
         );
     }
 }

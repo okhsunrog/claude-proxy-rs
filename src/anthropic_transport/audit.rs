@@ -233,3 +233,66 @@ async fn live_native_and_generated_inference() {
         println!("{mode}: HTTP {status}; response {answer:?}");
     }
 }
+
+#[test]
+#[ignore = "Requires private macOS captures in CLAUDE_PROXY_AUDIT_DIR; no network"]
+fn generated_headers_match_captured_profiles() {
+    let mut count = 0;
+    for (name, case) in captures()
+        .into_iter()
+        .filter(|(n, _)| n.contains("-plain-"))
+    {
+        let model = case["body"]["model"].as_str().unwrap();
+        let body = json!({"model":model,"system":"Client instructions.","messages":[{"role":"user","content":"Reply exactly OK."}]});
+        let prepared = prepare(body, &HeaderMap::new(), &"a".repeat(64), None, true);
+        let first = crate::routes::auth::build_anthropic_request(
+            &reqwest::Client::new(),
+            crate::constants::ANTHROPIC_API_URL,
+            "audit-token",
+            Some(&prepared.betas),
+            "fallback",
+            &prepared.body,
+            None,
+        )
+        .json(&prepared.body)
+        .build()
+        .unwrap();
+        assert_eq!(
+            first.headers().len() + 2,
+            case["headers"].as_array().unwrap().len(),
+            "Header count: {name}"
+        );
+        for pair in case["headers"].as_array().unwrap() {
+            let key = pair[0].as_str().unwrap();
+            let lower = key.to_lowercase();
+            if matches!(lower.as_str(), "host" | "content-length" | "authorization") {
+                continue;
+            }
+            let actual = first.headers().get(key).unwrap().to_str().unwrap();
+            if matches!(
+                lower.as_str(),
+                "x-claude-code-session-id" | "x-claude-code-prompt-id" | "x-client-request-id"
+            ) {
+                assert!(
+                    uuid::Uuid::parse_str(actual).is_ok(),
+                    "Invalid UUID in {key}"
+                );
+            } else {
+                assert!(
+                    actual == pair[1].as_str().unwrap(),
+                    "Generated {key}: {name}"
+                );
+            }
+        }
+        let prompt_id = first.headers()["x-claude-code-prompt-id"].to_str().unwrap();
+        assert!(
+            prepared.body["system"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains(prompt_id)
+        );
+        count += 1;
+        println!("generated headers matched {model}");
+    }
+    assert_eq!(count, 3);
+}
