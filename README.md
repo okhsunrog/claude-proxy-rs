@@ -479,16 +479,20 @@ scoped to the proxy key and first user message; two conversations with the same
 opening message should send different `x-session-id` values. Keep the first user
 message in subsequent history requests for this fallback to remain stable.
 
-Generated inference headers advertise a macOS/ARM64 client profile. Recognized
+Generated inference headers advertise a macOS/x64 client profile. Recognized
 native clients retain their own platform headers. Working environment text in
 messages and system instructions is preserved.
 
 Anthropic inference uses a separate Rust TLS/HTTP client with ordered headers and
-an explicit macOS ARM64 Node/OpenSSL ClientHello profile derived from
+an explicit ClientHello profile initially derived from
 [CLIProxyAPI 7df56074](https://github.com/router-for-me/CLIProxyAPI/blob/7df56074b252384d878ec4fca840552c6fb5236e/internal/runtime/executor/helps/utls_client.go).
-That reference documents a Claude Code 2.1.220 macOS capture; it is not a fresh
-hardware capture of 2.1.326. Local wire tests verify cipher suites, extension order,
-key-exchange groups, signature algorithms, ALPN, header order and streaming.
+The current profile is verified against Claude Code 2.1.326 running on macOS 14.8.9
+x86_64 in a local QEMU/KVM guest. Capture provenance and normalized TLS fields are
+committed in `src/fixtures/claude-2.1.326-macos-x64-tls.json`. The capture uses a dummy
+OAuth token, a first-party API URL, and a local CONNECT mock; authenticated upstream
+acceptance is not verified. Local wire tests check cipher suites, extension order,
+key-exchange groups and share sizes (including X25519MLKEM768), signature algorithms,
+ALPN, header order and streaming. This does not imply identical application payloads.
 Certificate verification remains enabled. Other providers keep the existing HTTP
 client. GNU/Linux builds statically link the TLS library's C++ runtime.
 

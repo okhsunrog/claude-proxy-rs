@@ -37,7 +37,7 @@ pub const INFERENCE_USER_AGENT: &str = "claude-cli/2.1.326 (external, sdk-cli)";
 
 /// Generated client identity. Native clients retain their own platform headers.
 pub const INFERENCE_OS: &str = "MacOS";
-pub const INFERENCE_ARCH: &str = "arm64";
+pub const INFERENCE_ARCH: &str = "x64";
 
 /// User-Agent for admin/non-inference requests — matches getClaudeCodeUserAgent().
 /// Used for usage API, profile, bootstrap calls.

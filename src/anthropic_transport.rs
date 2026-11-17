@@ -1,5 +1,5 @@
-//! macOS ARM64 inference transport, based on the measured Node/OpenSSL profile
-//! in CLIProxyAPI 7df56074 (internal/runtime/executor/helps/utls_client.go).
+//! macOS x64 inference transport, verified against a local 2.1.326 VM capture.
+//! See fixtures/claude-2.1.326-macos-x64-tls.json for capture provenance.
 //! Header identity and model-visible working context are separate concerns.
 //! Upstream profile attribution and MIT notice: licenses/CLIProxyAPI.txt.
 use std::time::Duration;
@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use futures_util::TryStreamExt;
 use wreq::{
     header::OrigHeaderMap,
-    tls::{AlpnProtocol, ExtensionType as E, TlsOptions, TlsVersion},
+    tls::{AlpnProtocol, ExtensionType as E, KeyShare, TlsOptions, TlsVersion},
 };
 
 const HEADER_ORDER: &[&str] = &[
@@ -45,7 +45,8 @@ fn tls_options() -> TlsOptions {
         .permute_extensions(false)
         .enable_ocsp_stapling(true)
         .enable_signed_cert_timestamps(true)
-        .curves_list("X25519:P-256:P-384")
+        .curves_list("X25519MLKEM768:X25519:P-256:P-384")
+        .key_shares(vec![KeyShare::X25519_MLKEM768, KeyShare::X25519])
         .cipher_list(concat!(
             "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:",
             "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:",
@@ -56,7 +57,7 @@ fn tls_options() -> TlsOptions {
             "AES128-GCM-SHA256:AES256-GCM-SHA384:AES128-SHA:AES256-SHA"
         ))
         .preserve_tls13_cipher_list(true)
-        .sigalgs_list("ecdsa_secp256r1_sha256:rsa_pss_rsae_sha256:rsa_pkcs1_sha256:ecdsa_secp384r1_sha384:rsa_pss_rsae_sha384:rsa_pkcs1_sha384:rsa_pss_rsae_sha512:rsa_pkcs1_sha512:rsa_pkcs1_sha1")
+        .sigalgs_list("ecdsa_secp256r1_sha256:rsa_pss_rsae_sha256:rsa_pkcs1_sha256:ecdsa_secp384r1_sha384:rsa_pss_rsae_sha384:rsa_pkcs1_sha384:rsa_pss_rsae_sha512:rsa_pkcs1_sha512:ed25519:ecdsa_secp521r1_sha512:rsa_pkcs1_sha1")
         .extension_permutation(vec![
             E::SERVER_NAME, E::EXTENDED_MASTER_SECRET, E::RENEGOTIATE,
             E::SUPPORTED_GROUPS, E::EC_POINT_FORMATS, E::SESSION_TICKET,
@@ -154,7 +155,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn client_hello_matches_macos_reference_profile() {
+    async fn client_hello_matches_macos_vm_capture() {
+        let reference: serde_json::Value =
+            serde_json::from_str(include_str!("fixtures/claude-2.1.326-macos-x64-tls.json"))
+                .unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let client = AnthropicTransport::build(true).unwrap();
@@ -181,13 +185,7 @@ mod tests {
         take(&mut hello, session_length);
         let cipher_length = short(&mut hello);
         let ciphers = shorts(take(&mut hello, cipher_length));
-        assert_eq!(
-            ciphers,
-            vec![
-                0x1301, 0x1302, 0x1303, 0xc02b, 0xc02f, 0xc02c, 0xc030, 0xcca9, 0xcca8, 0xc009,
-                0xc013, 0xc00a, 0xc014, 0x009c, 0x009d, 0x002f, 0x0035
-            ]
-        );
+        assert_eq!(serde_json::json!(ciphers), reference["ciphers"]);
         let compression_length = take(&mut hello, 1)[0] as usize;
         assert_eq!(take(&mut hello, compression_length), &[0]);
         let extension_length = short(&mut hello);
@@ -200,19 +198,30 @@ mod tests {
             ids.push(id);
             data.insert(id, take(&mut extensions, len).to_vec());
         }
+        assert_eq!(serde_json::json!(ids), reference["extensions"]);
         assert_eq!(
-            ids,
-            vec![0, 23, 65281, 10, 11, 35, 16, 5, 13, 18, 51, 45, 43, 21]
+            serde_json::json!(shorts(&data[&10][2..])),
+            reference["groups"]
         );
-        assert_eq!(shorts(&data[&10]), vec![6, 29, 23, 24]);
+        assert_eq!(
+            serde_json::json!(&data[&11][1..]),
+            reference["point_formats"]
+        );
         assert_eq!(&data[&16], b"\x00\x09\x08http/1.1");
         assert_eq!(&data[&43], &[4, 3, 4, 3, 3]);
         assert_eq!(
-            shorts(&data[&13]),
-            vec![
-                18, 0x0403, 0x0804, 0x0401, 0x0503, 0x0805, 0x0501, 0x0806, 0x0601, 0x0201
-            ]
+            serde_json::json!(shorts(&data[&13][2..])),
+            reference["signature_algorithms"]
         );
+        let mut shares = &data[&51][2..];
+        let mut share_sizes = Vec::new();
+        while !shares.is_empty() {
+            let group = short(&mut shares);
+            let len = short(&mut shares);
+            take(&mut shares, len);
+            share_sizes.push([group, len]);
+        }
+        assert_eq!(serde_json::json!(share_sizes), reference["key_shares"]);
     }
 
     #[tokio::test]
@@ -249,7 +258,7 @@ mod tests {
             let wire = String::from_utf8(received).unwrap();
             assert!(wire.starts_with("POST /v1/messages?beta=true HTTP/1.1\r\n"));
             assert!(wire.contains("X-Stainless-OS: MacOS\r\n"));
-            assert!(wire.contains("X-Stainless-Arch: arm64\r\n"));
+            assert!(wire.contains("X-Stainless-Arch: x64\r\n"));
             let mut previous = 0;
             for name in HEADER_ORDER {
                 if let Some(pos) = wire.find(&format!("\r\n{name}:")) {

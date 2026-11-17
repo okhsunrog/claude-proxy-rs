@@ -1,0 +1,87 @@
+{
+  "legacy_version": 771,
+  "ciphers": [
+    4865,
+    4866,
+    4867,
+    49195,
+    49199,
+    49196,
+    49200,
+    52393,
+    52392,
+    49161,
+    49171,
+    49162,
+    49172,
+    156,
+    157,
+    47,
+    53
+  ],
+  "extensions": [
+    0,
+    23,
+    65281,
+    10,
+    11,
+    35,
+    16,
+    5,
+    13,
+    18,
+    51,
+    45,
+    43
+  ],
+  "groups": [
+    4588,
+    29,
+    23,
+    24
+  ],
+  "point_formats": [
+    0
+  ],
+  "signature_algorithms": [
+    1027,
+    2052,
+    1025,
+    1283,
+    2053,
+    1281,
+    2054,
+    1537,
+    2055,
+    1539,
+    513
+  ],
+  "alpn": [
+    "http/1.1"
+  ],
+  "supported_versions": [
+    772,
+    771
+  ],
+  "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49161-49171-49162-49172-156-157-47-53,0-23-65281-10-11-35-16-5-13-18-51-45-43,4588-29-23-24,0",
+  "ja3_md5": "1523504b38f0fae0d881d4b6554aac1b",
+  "key_shares": [
+    [
+      4588,
+      1216
+    ],
+    [
+      29,
+      32
+    ]
+  ],
+  "provenance": {
+    "date": "2026-11-17",
+    "version": "2.1.326",
+    "binary_sha256": "bd8e26290f93353590b831600a7ced02d625018fbaa2a82d8817368d3e2d2f82",
+    "guest": "macOS 14.8.9 (23J631), x86_64, QEMU/KVM",
+    "locale": "en-US, Singapore, Asia/Singapore",
+    "mode": "Native print mode, dummy OAuth token, first-party URL through local CONNECT mock",
+    "scope": "POST /v1/messages?beta=true; cold TLS handshake. No authenticated upstream validation."
+  }
+}

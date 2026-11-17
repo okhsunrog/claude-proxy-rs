@@ -503,7 +503,7 @@ mod tests {
         );
     }
     #[test]
-    fn generated_profile_is_macos_arm64_without_changing_working_context() {
+    fn generated_profile_is_macos_x64_without_changing_working_context() {
         let body = serde_json::json!({"model":"claude-sonnet-4-6", "system":"Tools execute on Linux.", "messages":[{"role":"user","content":"hello"}]});
         let request = build_anthropic_request(
             &Client::new(),
@@ -518,7 +518,7 @@ mod tests {
         .build()
         .unwrap();
         assert_eq!(request.headers()["x-stainless-os"], "MacOS");
-        assert_eq!(request.headers()["x-stainless-arch"], "arm64");
+        assert_eq!(request.headers()["x-stainless-arch"], "x64");
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(
                 request.body().unwrap().as_bytes().unwrap()
