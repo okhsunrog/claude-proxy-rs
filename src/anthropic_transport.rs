@@ -11,6 +11,9 @@ use wreq::{
     tls::{AlpnProtocol, ExtensionType as E, KeyShare, TlsOptions, TlsVersion},
 };
 
+#[cfg(test)]
+mod audit;
+
 const HEADER_ORDER: &[&str] = &[
     "Accept",
     "Authorization",
@@ -30,6 +33,7 @@ const HEADER_ORDER: &[&str] = &[
     "anthropic-version",
     "x-app",
     "x-claude-1p-request-class",
+    "x-claude-code-prev-tool-durations",
     "x-claude-code-prompt-id",
     "x-claude-code-request-class",
     "x-claude-code-sandy-plover",

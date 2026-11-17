@@ -504,6 +504,22 @@ SNI, record size/version, session-ID length and key-share sizes against a passiv
 capture of a successful direct OAuth request from the VM. Inference defaults to a
 600-second timeout; explicit request timeouts and valid client timeout headers take
 precedence. Native retry counters and conversation session IDs are retained.
+Native tool timing (`x-claude-code-prev-tool-durations`) is forwarded too.
+
+Private capture audits are opt-in and skipped by normal tests:
+
+```bash
+CLAUDE_PROXY_AUDIT_DIR=/path/to/private/captures cargo test captured_matrix_survives -- --ignored --nocapture
+```
+
+The matrix audit compares actual HTTP header order/case/values and final JSON/CCH
+after identity replacement and request preparation. It covers 15 captured requests:
+Sonnet 4.6, Opus 4.6 and Haiku 4.5, plain calls, a Read tool round trip, and a 429
+retry. Captures with real account metadata remain outside the repository. The
+separate ignored `live_native_and_generated_inference` test reads
+`{"access_token":"..."}` from stdin and makes two short, paid upstream requests.
+It exercises the production preparation/header/transport pipeline without starting
+the HTTP service or using its database, authentication middleware or usage storage.
 Certificate verification remains enabled. Other providers keep the existing HTTP
 client. GNU/Linux builds statically link the TLS library's C++ runtime.
 

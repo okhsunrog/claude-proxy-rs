@@ -308,6 +308,7 @@ pub fn build_anthropic_request(
             "x-stainless-timeout",
             "x-stainless-retry-count",
             "x-claude-1p-request-class",
+            "x-claude-code-prev-tool-durations",
             "x-claude-code-prompt-id",
             "x-claude-code-request-class",
             "x-claude-code-sandy-plover",
@@ -482,6 +483,10 @@ mod tests {
         );
         headers.insert("x-stainless-runtime-version", "v26.12.1".parse().unwrap());
         headers.insert("x-stainless-retry-count", "2".parse().unwrap());
+        headers.insert(
+            "x-claude-code-prev-tool-durations",
+            "Read=19".parse().unwrap(),
+        );
         let body = serde_json::json!({"model":"claude-sonnet-4-6"});
         let request = build_anthropic_request(
             &Client::new(),
@@ -497,6 +502,10 @@ mod tests {
         assert_eq!(request.headers().get_all("user-agent").iter().count(), 1);
         assert_eq!(request.headers()["user-agent"], headers["user-agent"]);
         assert_eq!(request.headers()["x-stainless-retry-count"], "2");
+        assert_eq!(
+            request.headers()["x-claude-code-prev-tool-durations"],
+            "Read=19"
+        );
         assert_eq!(
             request.headers().get_all("anthropic-beta").iter().count(),
             1
