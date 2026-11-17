@@ -4,8 +4,8 @@ set dotenv-load
 export PATH := "/usr/lib/llvm18/bin:" + env("PATH")
 export SQLX_OFFLINE := "true"
 
-server := "root@" + env_var("HOME_SRV_IP")
-deploy_dir := "/opt/claude-proxy"
+server := "root@" + env("CLAUDE_PROXY_DEPLOY_HOST", "sg.okhsunrog.dev")
+cloud_forge := env("CLOUD_FORGE_DIR", env("HOME") + "/code/cloud-forge")
 
 # Run the proxy server
 run:
@@ -18,6 +18,10 @@ build-ui:
 # Build release binary (includes embedded UI)
 build: build-ui
     cargo build --release
+
+# Portable Linux release, including on NixOS build hosts
+build-portable: build-ui
+    nix shell nixpkgs#cargo-zigbuild nixpkgs#zig nixpkgs#gnumake --command cargo zigbuild --locked --release --target x86_64-unknown-linux-musl
 
 # Run cargo tests
 test:
@@ -65,21 +69,9 @@ test-anthropic:
 # Run integration tests against running proxy
 test-api: test-openai test-anthropic
 
-# Deploy to server
-deploy: build
-    @echo "=== Deploying to {{server}} ==="
-    ssh {{server}} "mkdir -p {{deploy_dir}}"
-    ssh {{server}} "test -f {{deploy_dir}}/.env || printf 'CLAUDE_PROXY_ADMIN_USERNAME=admin\nCLAUDE_PROXY_ADMIN_PASSWORD=changeme\n' > {{deploy_dir}}/.env && chmod 600 {{deploy_dir}}/.env"
-    ssh {{server}} "grep -q '^CLAUDE_PROXY_DATABASE_URL=' {{deploy_dir}}/.env || grep -q '^DATABASE_URL=' {{deploy_dir}}/.env || { echo 'Missing CLAUDE_PROXY_DATABASE_URL or DATABASE_URL in {{deploy_dir}}/.env'; exit 1; }"
-    rsync -avz --progress target/release/claude-proxy-rs {{server}}:{{deploy_dir}}/
-    scp claude-proxy.service {{server}}:/etc/systemd/system/
-    ssh {{server}} "systemctl daemon-reload && systemctl enable claude-proxy && systemctl restart claude-proxy"
-    @sleep 2
-    ssh {{server}} "systemctl status claude-proxy --no-pager"
-    ssh {{server}} "curl -fsS http://127.0.0.1:4096/health"
-    @echo ""
-    @echo "=== Deployed! ==="
-    @echo "Admin UI: http://mira.local:4096/admin"
+# Update the existing Singapore deployment; preserve its protected config
+deploy: build-portable
+    ANSIBLE_CONFIG="{{cloud_forge}}/ansible.cfg" CLAUDE_PROXY_RELEASE_BINARY="{{justfile_directory()}}/target/x86_64-unknown-linux-musl/release/claude-proxy-rs" uv run --project "{{cloud_forge}}" ansible-playbook -i "{{cloud_forge}}/inventory.yml" "{{cloud_forge}}/site-claude-proxy.yml" --limit singapore -e claude_proxy_start=true
 
 # View server logs
 logs:

@@ -100,68 +100,20 @@ just sqlx-prepare
 
 ## Deployment
 
-The repository includes a systemd unit (`claude-proxy.service`) and a `just deploy` recipe. The recipe builds the embedded admin UI, builds the release binary, copies it to the server, installs the systemd unit, restarts the service, and checks `/health`.
-
-### Server prerequisites
-
-Install PostgreSQL on the server and create a dedicated database/user:
+The managed deployment lives in `~/code/cloud-forge` (`site-claude-proxy.yml`). The service runs on the Singapore VPS as `claude_proxy`, binds to its WireGuard address `10.78.78.1:4096`, and uses PostgreSQL 17 through a local Unix socket. Moscow terminates HTTPS for `https://aiproxy.okhsunrog.ru` and forwards requests over the existing WireGuard tunnel.
 
 ```bash
-sudo -u postgres createuser --pwprompt claude_proxy
-sudo -u postgres createdb -O claude_proxy claude_proxy
-```
-
-Create `/opt/claude-proxy/.env` on the server:
-
-```bash
-sudo mkdir -p /opt/claude-proxy
-sudo install -m 600 /dev/null /opt/claude-proxy/.env
-sudoedit /opt/claude-proxy/.env
-```
-
-Required server environment:
-
-```dotenv
-CLAUDE_PROXY_ADMIN_USERNAME=admin
-CLAUDE_PROXY_ADMIN_PASSWORD=change-this
-CLAUDE_PROXY_DATABASE_URL=postgresql://claude_proxy:change-this@127.0.0.1:5432/claude_proxy
-```
-
-The service binds to `0.0.0.0:4096` via `claude-proxy.service`.
-
-### Deploy from this repo
-
-Set the target host used by the `justfile`:
-
-```bash
-export HOME_SRV_IP=10.77.77.100
-```
-
-Then deploy:
-
-```bash
-just deploy
-```
-
-Useful server commands:
-
-```bash
+just deploy   # embedded UI + portable static release + Ansible update
 just status
 just logs
 just restart
 ```
 
-Manual equivalent:
+`just build-portable` uses cargo-zigbuild through Nix to build a static x86-64 musl executable that also runs outside NixOS. The first build compiles target dependencies separately; later builds reuse the normal target cache. `CLOUD_FORGE_DIR` overrides the infrastructure checkout location.
 
-```bash
-just build
-rsync -avz target/release/claude-proxy-rs root@$HOME_SRV_IP:/opt/claude-proxy/
-scp claude-proxy.service root@$HOME_SRV_IP:/etc/systemd/system/
-ssh root@$HOME_SRV_IP "systemctl daemon-reload && systemctl enable claude-proxy && systemctl restart claude-proxy"
-ssh root@$HOME_SRV_IP "curl -fsS http://127.0.0.1:4096/health"
-```
+Protected server configuration is `/etc/claude-proxy/environment`; persistent device identity is `/var/lib/claude-proxy/device-id`. Updates preserve these files and the database. The Ansible role installs the systemd unit and PostgreSQL, and verifies `/health`. It requires `CLAUDE_PROXY_ENV_FILE` only for initial configuration; it never creates a default admin password. See cloud-forge's `docs/CLAUDE-PROXY.md` for initial setup, migration and rollback.
 
-Open `http://<server>:4096/admin`, log in, connect OAuth, and create `sk-proxy-*` API keys.
+The standalone `claude-proxy.service` remains an example for unmanaged installations. Configure your own PostgreSQL database and administrator credentials before starting it.
 
 ---
 
