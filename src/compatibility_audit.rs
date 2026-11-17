@@ -26,6 +26,21 @@ async fn upstream(
 ) -> Response {
     captures.lock().await.push(body.clone());
     let threaded = body.get("thread").is_some();
+    let retry_probe = body["messages"][0]["content"]
+        .to_string()
+        .contains("audit retry");
+    if retry_probe {
+        let marker = body["messages"][0]["content"].to_string();
+        let attempt = captures
+            .lock()
+            .await
+            .iter()
+            .filter(|b| b["messages"][0]["content"].to_string() == marker)
+            .count();
+        if attempt == 1 || marker.contains("retry-max") {
+            return (axum::http::StatusCode::from_u16(529).unwrap(),[("retry-after-ms","0")],Json(json!({"type":"error","error":{"type":"overloaded_error","message":"retry audit"}}))).into_response();
+        }
+    }
     if body.pointer("/thread/type").and_then(Value::as_str) == Some("continue") {
         assert!(body.get("system").is_none() && body.get("tools").is_none());
         assert_eq!(body["tool_choice"]["name"], "mcp_Read");
@@ -54,7 +69,7 @@ async fn upstream(
             [
                 ("retry-after", "3"),
                 ("retry-after-ms", "3000"),
-                ("x-should-retry", "true"),
+                ("x-should-retry", "false"),
                 ("request-id", "audit-limit"),
                 ("set-cookie", "private-cookie"),
             ],
@@ -79,6 +94,9 @@ async fn upstream(
         .flatten()
         .filter(|b| b["type"] == "tool_result")
         .count();
+    if retry_probe {
+        turn = 3;
+    }
     // OpenCode also makes auxiliary title/summary calls without tools.
     if opencode && body.get("tools").is_none() {
         turn = 3;
@@ -346,7 +364,7 @@ async fn real_clients_through_http_and_postgres() {
             assert_eq!(response.status(), 429);
             assert_eq!(response.headers()["retry-after"], "3");
             assert_eq!(response.headers()["retry-after-ms"], "3000");
-            assert_eq!(response.headers()["x-should-retry"], "true");
+            assert_eq!(response.headers()["x-should-retry"], "false");
             assert_eq!(response.headers()["request-id"], "audit-limit");
             assert!(!response.headers().contains_key("set-cookie"));
         }
@@ -409,6 +427,58 @@ async fn real_clients_through_http_and_postgres() {
         .expect("OpenCode usage in DB");
         println!("OpenCode read/error/edit tool loop passed");
     }
+    let retry_key = state
+        .client_keys
+        .create("retry-audit".into())
+        .await
+        .unwrap();
+    for endpoint in ["messages", "chat/completions"] {
+        for streaming in [false, true] {
+            let marker = format!("audit retry {endpoint} {streaming}");
+            let response=client.post(format!("{proxy_url}/v1/{endpoint}")).bearer_auth(&retry_key.key).json(&json!({"model":"claude-sonnet-4-6","stream":streaming,"messages":[{"role":"user","content":marker}]})).send().await.unwrap();
+            assert_eq!(response.status(), 200);
+            assert!(response.text().await.unwrap().contains("done"));
+            let attempts = captures
+                .lock()
+                .await
+                .iter()
+                .filter(|b| b["messages"][0]["content"].to_string().contains(&marker))
+                .count();
+            assert_eq!(attempts, 2);
+        }
+    }
+    let response=client.post(format!("{proxy_url}/v1/messages")).bearer_auth(&retry_key.key).json(&json!({"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"audit retry-max"}]})).send().await.unwrap();
+    assert_eq!(response.status(), 529);
+    assert_eq!(
+        captures
+            .lock()
+            .await
+            .iter()
+            .filter(|b| b["messages"][0]["content"]
+                .to_string()
+                .contains("audit retry-max"))
+            .count(),
+        3
+    );
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let entries = state
+                .client_keys
+                .get_model_usage(&retry_key.id)
+                .await
+                .unwrap();
+            if let Some(entry) = entries.first()
+                && entry.total.input == 44
+            {
+                assert_eq!(entry.total.output, 28);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("Retries must record successful usage only once");
+    println!("HTTP retry audit passed: JSON/SSE, both formats, attempt cap and DB usage");
     let key = state
         .client_keys
         .create("audit-threads".into())

@@ -234,6 +234,8 @@ Messages threads preserve tool aliases and the conversation session across `thre
 
 Tool-search references are translated in both directions in server search results and custom `tool_result` content, including SSE block starts. Opaque text and tool input objects are not rewritten. Deferred tool definitions retain `defer_loading`; the proxy does not execute searches or expand references itself.
 
+Inference transport retries explicit HTTP 408, 429, 500, 502, 503, 504 and 529 responses at most twice before exposing a response. Retries respect `x-should-retry: false`, millisecond/second/HTTP-date retry hints, a five-second total wait budget and the original transport timeout. Longer hints are returned to the caller without an early retry. Retry count headers advance and each retry gets a fresh request ID; finalized request bytes stay identical. Network errors and errors after successful response headers are never automatically replayed. The existing single OAuth refresh on HTTP 401 remains separate.
+
 #### Alternative: OpenAI Compatible
 
 | Setting | Value |

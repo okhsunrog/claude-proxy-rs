@@ -2,7 +2,7 @@
 //! See fixtures/claude-2.1.326-macos-x64-tls.json for capture provenance.
 //! Header identity and model-visible working context are separate concerns.
 //! Upstream profile attribution and MIT notice: licenses/CLIProxyAPI.txt.
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
 use futures_util::TryStreamExt;
@@ -83,6 +83,48 @@ pub struct AnthropicTransport {
     client: wreq::Client,
 }
 
+const MAX_RETRIES: u32 = 2;
+const RETRY_WAIT_BUDGET: Duration = Duration::from_secs(5);
+
+fn retry_delay(
+    status: axum::http::StatusCode,
+    headers: &axum::http::HeaderMap,
+    attempt: u32,
+    now: SystemTime,
+) -> Option<Duration> {
+    if attempt >= MAX_RETRIES
+        || headers.get("x-should-retry").is_some_and(|v| v == "false")
+        || !matches!(status.as_u16(), 408 | 429 | 500 | 502 | 503 | 504 | 529)
+    {
+        return None;
+    }
+    let millis = headers
+        .get("retry-after-ms")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|n| n.is_finite() && *n >= 0.0)
+        .and_then(|n| Duration::try_from_secs_f64(n / 1000.0).ok());
+    let delay = millis
+        .or_else(|| {
+            let value = headers.get("retry-after")?.to_str().ok()?;
+            value
+                .parse::<f64>()
+                .ok()
+                .filter(|n| n.is_finite() && *n >= 0.0)
+                .and_then(|n| Duration::try_from_secs_f64(n).ok())
+                .or_else(|| {
+                    httpdate::parse_http_date(value)
+                        .ok()
+                        .map(|date| date.duration_since(now).unwrap_or_default())
+                })
+        })
+        .unwrap_or_else(|| {
+            use rand::RngExt;
+            Duration::from_millis(500 * (1_u64 << attempt) + rand::rng().random_range(0..=250))
+        });
+    (delay <= RETRY_WAIT_BUDGET).then_some(delay)
+}
+
 fn client_builder() -> wreq::ClientBuilder {
     let mut order = OrigHeaderMap::new();
     for &name in HEADER_ORDER {
@@ -151,14 +193,59 @@ impl AnthropicTransport {
                     .and_then(|seconds| Duration::try_from_secs_f64(seconds).ok())
             })
             .unwrap_or(Duration::from_secs(600));
-        let response = self
-            .client
-            .request(request.method().clone(), request.url().as_str())
-            .headers(headers)
-            .timeout(timeout)
-            .body(body)
-            .send()
-            .await?;
+        let deadline = tokio::time::Instant::now()
+            .checked_add(timeout)
+            .context("Inference timeout is too large")?;
+        let initial_retry = headers
+            .get("x-stainless-retry-count")
+            .and_then(|h| h.to_str().ok())
+            .and_then(|h| h.parse::<u32>().ok())
+            .unwrap_or(0);
+        let mut attempt = 0;
+        let mut waited = Duration::ZERO;
+        let response = loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            anyhow::ensure!(!remaining.is_zero(), "Inference request timeout exhausted");
+            let response = self
+                .client
+                .request(request.method().clone(), request.url().as_str())
+                .headers(headers.clone())
+                .timeout(remaining)
+                .body(body.clone())
+                .send()
+                .await?;
+            let Some(delay) = retry_delay(
+                response.status(),
+                response.headers(),
+                attempt,
+                SystemTime::now(),
+            ) else {
+                break response;
+            };
+            if waited.saturating_add(delay) > RETRY_WAIT_BUDGET
+                || tokio::time::Instant::now()
+                    .checked_add(delay)
+                    .is_none_or(|next| next >= deadline)
+            {
+                break response;
+            }
+            // Only explicit pre-response HTTP failures are retried. Network
+            // errors and successful response bodies are never replayed here.
+            drop(response);
+            tokio::time::sleep(delay).await;
+            waited += delay;
+            attempt += 1;
+            headers.insert(
+                "x-stainless-retry-count",
+                (initial_retry.saturating_add(attempt))
+                    .to_string()
+                    .parse()?,
+            );
+            headers.insert(
+                "x-client-request-id",
+                uuid::Uuid::new_v4().to_string().parse()?,
+            );
+        };
         let mut result = axum::http::Response::builder()
             .status(response.status())
             .version(response.version());
@@ -176,6 +263,125 @@ impl AnthropicTransport {
 mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[test]
+    fn retry_policy_respects_hints_caps_and_non_retryable_errors() {
+        use axum::http::{HeaderMap, StatusCode};
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1800000000);
+        let mut headers = HeaderMap::new();
+        for status in [400, 401, 403, 404, 409, 200] {
+            assert!(retry_delay(StatusCode::from_u16(status).unwrap(), &headers, 0, now).is_none());
+        }
+        headers.insert("retry-after-ms", "25".parse().unwrap());
+        headers.insert("retry-after", "3".parse().unwrap());
+        assert_eq!(
+            retry_delay(StatusCode::TOO_MANY_REQUESTS, &headers, 0, now),
+            Some(Duration::from_millis(25))
+        );
+        headers.remove("retry-after-ms");
+        assert_eq!(
+            retry_delay(StatusCode::SERVICE_UNAVAILABLE, &headers, 0, now),
+            Some(Duration::from_secs(3))
+        );
+        assert!(retry_delay(StatusCode::SERVICE_UNAVAILABLE, &headers, MAX_RETRIES, now).is_none());
+        headers.insert(
+            "retry-after",
+            httpdate::fmt_http_date(now + Duration::from_secs(2))
+                .parse()
+                .unwrap(),
+        );
+        assert_eq!(
+            retry_delay(StatusCode::SERVICE_UNAVAILABLE, &headers, 0, now),
+            Some(Duration::from_secs(2))
+        );
+        headers.insert("x-should-retry", "false".parse().unwrap());
+        assert!(retry_delay(StatusCode::SERVICE_UNAVAILABLE, &headers, 0, now).is_none());
+        headers.remove("x-should-retry");
+        headers.insert("retry-after", "60".parse().unwrap());
+        assert!(retry_delay(StatusCode::SERVICE_UNAVAILABLE, &headers, 0, now).is_none());
+        headers.insert("retry-after", "NaN".parse().unwrap());
+        let delay = retry_delay(StatusCode::SERVICE_UNAVAILABLE, &headers, 0, now).unwrap();
+        assert!((Duration::from_millis(500)..=Duration::from_millis(750)).contains(&delay));
+    }
+
+    #[tokio::test]
+    async fn retries_identical_bytes_and_stops_when_hint_exceeds_timeout() {
+        use axum::{
+            Router,
+            body::Bytes,
+            extract::State,
+            http::{HeaderMap, StatusCode, Uri},
+            routing::post,
+        };
+        let requests = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new()));
+        let handler = |State(requests): State<
+            std::sync::Arc<tokio::sync::Mutex<Vec<(String, HeaderMap, Bytes)>>>,
+        >,
+                       uri: Uri,
+                       headers: HeaderMap,
+                       body: Bytes| async move {
+            let mut requests = requests.lock().await;
+            let path = uri.path().to_owned();
+            let first = requests.iter().all(|(p, _, _)| *p != path);
+            requests.push((path.clone(), headers, body));
+            if first {
+                (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    [("retry-after", if path == "/budget" { "3" } else { "0" })],
+                    "{}",
+                )
+            } else {
+                (StatusCode::OK, [("retry-after", "0")], "{}")
+            }
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/v1/messages", post(handler))
+            .route("/budget", post(handler))
+            .with_state(requests.clone());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let transport = AnthropicTransport::build(true).unwrap();
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let body: serde_json::Value =
+            serde_json::from_str(include_str!("fixtures/claude-2.1.326-macos-x64-cch.json"))
+                .unwrap();
+        let response = transport
+            .send(
+                client
+                    .post(format!("http://{address}/v1/messages"))
+                    .header("x-stainless-retry-count", "2")
+                    .header("x-client-request-id", "original")
+                    .json(&body),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let captured = requests.lock().await;
+        assert_eq!(captured.len(), 2);
+        assert_eq!(captured[0].2, captured[1].2);
+        assert_eq!(captured[0].1["x-stainless-retry-count"], "2");
+        assert_eq!(captured[1].1["x-stainless-retry-count"], "3");
+        assert_ne!(
+            captured[0].1["x-client-request-id"],
+            captured[1].1["x-client-request-id"]
+        );
+        drop(captured);
+        let response = transport
+            .send(
+                client
+                    .post(format!("http://{address}/budget"))
+                    .timeout(Duration::from_millis(100))
+                    .json(&body),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 429);
+        assert_eq!(requests.lock().await.len(), 3);
+        server.abort();
+    }
 
     fn take<'a>(input: &mut &'a [u8], n: usize) -> &'a [u8] {
         let (value, rest) = input.split_at(n);

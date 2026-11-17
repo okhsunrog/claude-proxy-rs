@@ -489,6 +489,7 @@ dependencies = [
  "dotenvy",
  "eventsource-stream",
  "futures-util",
+ "httpdate",
  "llm-relay",
  "memory-serve",
  "rand",
