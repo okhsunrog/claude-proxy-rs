@@ -131,7 +131,7 @@ fn openai_events(
         let now = now_secs();
         let mut current_tool_call_id: Option<String> = None;
         let mut tool_call_index: u32 = 0;
-        let mut events = pin!(events);
+        let mut events = pin!(super::tool_events::restore(events, tool_name_map.clone()));
         let mut keep_alive = interval(KEEP_ALIVE_INTERVAL);
         keep_alive.reset();
         loop {
@@ -154,7 +154,7 @@ fn openai_events(
                                     && block.block_type == "tool_use"
                                 {
                                     current_tool_call_id = block.id.clone();
-                                    let name = block.name.as_ref().map(|n| tool_name_map.restore(n));
+                                    let name = block.name.clone();
 
                                     let chunk = json!({
                                         "id": format!("chatcmpl-{}", now),
@@ -308,7 +308,7 @@ fn native_events(
     tool_name_map: ToolNameMap,
 ) -> impl Stream<Item = Result<Bytes, IoError>> + Send {
     stream! {
-        let mut events = pin!(events);
+        let mut events = pin!(super::tool_events::restore(events, tool_name_map.clone()));
         let mut keep_alive = interval(KEEP_ALIVE_INTERVAL);
         keep_alive.reset();
         loop {
@@ -316,15 +316,7 @@ fn native_events(
                 biased;
                 next = events.next() => {
                     let Some(next) = next else { break; };
-                    let mut event = match next { Ok(event) => event, Err(e) => { yield Err(e); return; } };
-                    if event.get("type").and_then(Value::as_str) == Some("content_block_start")
-                        && let Some(block) = event.get_mut("content_block")
-                        && block.get("type").and_then(Value::as_str) == Some("tool_use")
-                        && let Some(name) = block.get("name").and_then(Value::as_str).map(|name| tool_name_map.restore(name))
-                        && let Some(block) = block.as_object_mut()
-                    {
-                        block.insert("name".into(), json!(name));
-                    }
+                    let event = match next { Ok(event) => event, Err(e) => { yield Err(e); return; } };
                     let kind = event.get("type").and_then(Value::as_str).unwrap_or("message");
                     let terminal = matches!(kind, "message_stop" | "error");
                     yield Ok(Bytes::from(format!("event: {kind}\ndata: {event}\n\n")));
@@ -638,6 +630,42 @@ mod regression_tests {
         let reports = reports.lock().unwrap();
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].input_tokens, 12);
+    }
+
+    #[tokio::test]
+    async fn adapted_tool_arguments_survive_fragmentation_in_both_formats() {
+        use crate::compatibility::ClientProfile;
+        use crate::transforms::tool_aliases::normalize_tools;
+        let mut body = json!({"tools":[{"name":"read_file","input_schema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}}]});
+        let map = normalize_tools(&mut body, ClientProfile::OpenAi);
+        let arguments = r#"{"file_path":"Привет.txt"}"#;
+        for split in arguments.char_indices().map(|(i, _)| i) {
+            let (first, second) = arguments.split_at(split);
+            let events = vec![
+                json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"id","name":"mcp_Read","input":{}}}),
+                json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":first}}),
+                json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":second}}),
+                json!({"type":"content_block_stop","index":0}),
+                json!({"type":"message_stop"}),
+            ];
+            for native in [false, true] {
+                let events = stream::iter(events.clone().into_iter().map(Ok));
+                let chunks: Vec<_> = if native {
+                    native_events(events, map.clone()).collect().await
+                } else {
+                    openai_events(events, "model".into(), map.clone())
+                        .collect()
+                        .await
+                };
+                let text = chunks
+                    .into_iter()
+                    .map(|c| String::from_utf8(c.unwrap().to_vec()).unwrap())
+                    .collect::<String>();
+                assert!(text.contains("read_file"), "{text}");
+                assert!(text.contains("\\\"path\\\""), "{text}");
+                assert!(!text.contains("file_path"), "{text}");
+            }
+        }
     }
 
     #[tokio::test]

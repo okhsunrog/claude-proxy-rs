@@ -16,8 +16,7 @@ use crate::capture::{Capture, capture_byte_stream};
 use crate::constants::ANTHROPIC_API_URL;
 use crate::error::ProxyError;
 use crate::transforms::{
-    prepare_anthropic_request, stream_anthropic_to_openai_with_usage, transform_openai_request,
-    transform_openai_response,
+    stream_anthropic_to_openai_with_usage, transform_openai_request, transform_openai_response,
 };
 
 use super::auth::{authenticate_openai, build_anthropic_request};
@@ -76,6 +75,10 @@ pub async fn chat_completions(
     };
 
     let cloak = state.should_cloak(headers.get("user-agent").and_then(|v| v.to_str().ok()));
+    let policy = match state.compatibility.for_request(&headers) {
+        Ok(policy) => policy,
+        Err(message) => return ProxyError::InvalidRequest(message).to_openai_response(),
+    };
 
     let stream = raw_body
         .get("stream")
@@ -115,7 +118,7 @@ pub async fn chat_completions(
             &session_id,
         );
     }
-    let prepared = prepare_anthropic_request(anthropic_value, cloak);
+    let prepared = crate::transforms::prepare::prepare_with_policy(anthropic_value, cloak, policy);
     if let Some(capture) = &capture {
         capture
             .write_prepared(&prepared.body, &prepared.betas, cloak)

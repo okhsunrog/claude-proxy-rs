@@ -13,10 +13,10 @@ use rand::RngExt;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use llm_relay::anthropic::cache_control::ensure_cache_control;
 use llm_relay::anthropic::tool_names::transform_request_tool_names;
 
-use super::tool_aliases::{ToolNameMap, normalize_claude_code_tool_names};
+use super::tool_aliases::{ToolNameMap, normalize_tools};
+use crate::compatibility::{ClientProfile, Compatibility};
 use crate::constants::SYSTEM_PREFIX;
 use sha2::{Digest, Sha256};
 
@@ -42,11 +42,16 @@ pub struct PreparedRequest {
 ///
 /// When `cloak` is false, steps 3 and 5 are skipped.
 /// Returns the transformed body and extracted betas.
+#[cfg(test)]
 pub fn prepare_anthropic_request(body: Value, cloak: bool) -> PreparedRequest {
+    prepare_with_policy(body, cloak, Compatibility::default())
+}
+
+pub fn prepare_with_policy(body: Value, cloak: bool, policy: Compatibility) -> PreparedRequest {
     let (betas, body) = extract_betas(body);
     // Native envelopes already carry the client's exact prompts, tool names,
     // cache policy and context edits. Rewriting them changes the wire contract.
-    if is_native_envelope(&body) {
+    if is_native_envelope(&body) || policy.profile == ClientProfile::Native {
         return PreparedRequest {
             body,
             betas,
@@ -61,17 +66,19 @@ pub fn prepare_anthropic_request(body: Value, cloak: bool) -> PreparedRequest {
         body
     };
     let mut body = body;
-    transform_request_tool_names(&mut body);
+    if !cloak {
+        transform_request_tool_names(&mut body);
+    }
     let body = if cloak {
         inject_system_message(body, true)
     } else {
         sanitize_system_only(body)
     };
-    let body = ensure_cache_control(body);
+    let body = super::cache_policy::apply(body, policy.cache);
 
     let mut body = body;
     let tool_name_map = if cloak {
-        normalize_claude_code_tool_names(&mut body)
+        normalize_tools(&mut body, policy.profile)
     } else {
         ToolNameMap::default()
     };
@@ -107,14 +114,30 @@ fn is_native_envelope(body: &Value) -> bool {
 /// 3. Auto-inject cache_control breakpoints
 ///
 /// Note: count_tokens doesn't support metadata or thinking.
-pub fn prepare_count_tokens_request(body: Value, cloak: bool) -> PreparedRequest {
+pub fn prepare_count_with_policy(
+    body: Value,
+    cloak: bool,
+    policy: Compatibility,
+) -> PreparedRequest {
     let (betas, body) = extract_betas(body);
+    if policy.profile == ClientProfile::Native {
+        return PreparedRequest {
+            body,
+            betas,
+            tool_name_map: ToolNameMap::default(),
+        };
+    }
     let body = if cloak {
         inject_system_message(body, false)
     } else {
         sanitize_system_only(body)
     };
-    let body = ensure_cache_control(body);
+    let body = super::cache_policy::apply(body, policy.cache);
+
+    let mut body = body;
+    if cloak {
+        normalize_tools(&mut body, policy.profile);
+    }
 
     PreparedRequest {
         body,

@@ -218,21 +218,15 @@ Extended thinking works via the extension's built-in controls — no model suffi
 
 Claude subscription OAuth is sensitive to the tool names sent to the native Anthropic API. Claude Code uses a fixed set of `mcp_*` tool names; third-party tools often send their own names such as `shell`, `patch`, `ask_followup_question`, or `update_todo_list`.
 
-In cloaking mode, the proxy best-effort normalizes known third-party tool names to Claude Code-compatible names before forwarding the request upstream. Tool descriptions and input schemas are kept intact, and response tool calls are mapped back to the client's original names before returning to the tool.
+In cloaking mode, only tools with a compatible object schema and a recognized client contract are mapped to built-in names. Supported adapters cover Read, Write, Edit and Bash. They translate argument fields in definitions, conversation history and responses, including streaming responses. Tool result content, IDs and error flags are preserved.
 
-Unknown or colliding tool names fail locally with `400 Bad Request` instead of being forwarded upstream. This is intentional: new tool vocabularies should be captured, reviewed, and added explicitly.
+Other tools are forwarded as separate MCP tools with their original descriptions and schemas. For example, Roo's read modes and OpenCode's directory reads are not treated as built-in Read. Unknown tools and alias collisions receive unique MCP names; responses restore the client's original names.
 
-Current tested support:
+Choose a client contract with `CLAUDE_PROXY_CLIENT_PROFILE=auto|generic|openai|cline|roo|opencode|claude-code` or the per-request `x-proxy-client-profile` header. The default `auto` inspects User-Agent and X-Title, falling back to conservative `generic` behavior. The `openai` profile is for applications with compatible file/command tools, not a tool vocabulary guaranteed by the OpenAI SDK. Profiles only permit candidate mappings; schema checks still apply. Native Claude Code requests bypass these adapters.
 
-| Tool | API mode tested | Status | Notes |
-|------|-----------------|--------|-------|
-| Claude Code | Anthropic native | Supported | Treated as first-party shape; cloaking is skipped in `auto` mode. |
-| ForgeCode | Anthropic native | Supported | Tested with tool normalization for `fs_search`, `Read`, `Write`, `undo`, `remove`, `patch`, `multi_patch`, `shell`, `fetch`, `skill`, `todo_write`, `todo_read`, and `Task`. |
-| Roo Code | Anthropic native | Supported | Tested with tool normalization for `ask_followup_question`, `attempt_completion`, `codebase_search`, `list_files`, `new_task`, `read_file`, `skill`, `search_files`, `switch_mode`, and `update_todo_list`. |
-| Kilo Code | Anthropic native | Not verified | Expected to work if it uses a supported tool vocabulary; capture and add aliases if it returns a local unknown-tool `400`. |
-| Cline | Anthropic native | Not recently verified | Basic native Anthropic shape should work; custom tool names may need aliases. |
+Cache policy is independent: `CLAUDE_PROXY_CACHE_POLICY=auto-5m|auto-1h|preserve`, overridable with `x-proxy-cache-policy`. The default remains `auto-5m`. `preserve` adds no breakpoints. `auto-1h` uses a one-hour TTL for newly added breakpoints when allowed by the existing marker order; it never changes client markers or places a one-hour marker after a five-minute marker. Top-level automatic caching is preserved without adding block markers. Native requests keep their own policy. One-hour cache writes have different pricing; see the [prompt caching documentation](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
 
-Some aliases are semantically approximate because Anthropic only accepts the Claude Code-compatible name set. The model still sees the original tool description and schema, which are the primary signals for how to call the tool.
+Existing automatic system-prompt substitutions remain enabled independently of the selected tool profile.
 
 #### Alternative: OpenAI Compatible
 

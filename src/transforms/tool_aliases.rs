@@ -1,39 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
+use super::tool_adapters::ArgumentAdapter;
+use crate::compatibility::ClientProfile;
 use serde_json::Value;
 #[cfg(test)]
 use serde_json::json;
-
-const CLAUDE_CODE_TOOLS: &[&str] = &[
-    "mcp_Agent",
-    "mcp_AskUserQuestion",
-    "mcp_Bash",
-    "mcp_CronCreate",
-    "mcp_CronDelete",
-    "mcp_CronList",
-    "mcp_Edit",
-    "mcp_EnterPlanMode",
-    "mcp_EnterWorktree",
-    "mcp_ExitPlanMode",
-    "mcp_ExitWorktree",
-    "mcp_LSP",
-    "mcp_Monitor",
-    "mcp_NotebookEdit",
-    "mcp_PushNotification",
-    "mcp_Read",
-    "mcp_ScheduleWakeup",
-    "mcp_ShareOnboardingGuide",
-    "mcp_Skill",
-    "mcp_TaskCreate",
-    "mcp_TaskGet",
-    "mcp_TaskList",
-    "mcp_TaskOutput",
-    "mcp_TaskStop",
-    "mcp_TaskUpdate",
-    "mcp_WebFetch",
-    "mcp_WebSearch",
-    "mcp_Write",
-];
 
 #[derive(Clone, Debug, Default)]
 pub struct ToolNameMap {
@@ -44,6 +15,7 @@ pub struct ToolNameMap {
 struct ToolNameAlias {
     upstream: String,
     client: String,
+    adapter: ArgumentAdapter,
 }
 
 impl ToolNameMap {
@@ -55,7 +27,14 @@ impl ToolNameMap {
             .unwrap_or_else(|| restore_unaliased(upstream_name))
     }
 
-    fn insert(&mut self, upstream: &str, client: &str) {
+    pub fn adapter(&self, upstream: &str) -> Option<&ArgumentAdapter> {
+        self.aliases
+            .iter()
+            .find(|a| a.upstream == upstream)
+            .map(|a| &a.adapter)
+    }
+
+    fn insert(&mut self, upstream: &str, client: &str, adapter: ArgumentAdapter) {
         if self
             .aliases
             .iter()
@@ -66,6 +45,7 @@ impl ToolNameMap {
         self.aliases.push(ToolNameAlias {
             upstream: upstream.to_string(),
             client: client.to_string(),
+            adapter,
         });
     }
 }
@@ -82,10 +62,18 @@ impl ToolNameMap {
 /// The rename is decided once from the `tools` definitions, then applied by
 /// lookup to `tool_choice` and to `tool_use` blocks in message history, so all
 /// three always agree (a collision-wrapped name must match everywhere).
-pub fn normalize_claude_code_tool_names(body: &mut Value) -> ToolNameMap {
+pub fn normalize_tools(body: &mut Value, profile: ClientProfile) -> ToolNameMap {
     let mut map = ToolNameMap::default();
-    let mut forward: HashMap<String, String> = HashMap::new();
-    let mut assigned: HashSet<String> = HashSet::new();
+    let mut forward: HashMap<String, (String, ArgumentAdapter)> = HashMap::new();
+    let mut assigned: HashSet<String> = body
+        .get("tools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|t| t.get("name").and_then(Value::as_str))
+        .filter(|n| n.starts_with("mcp__"))
+        .map(str::to_owned)
+        .collect();
     let mut wrapped: Vec<String> = Vec::new();
 
     if let Some(Value::Array(tools)) = body.get_mut("tools") {
@@ -106,12 +94,15 @@ pub fn normalize_claude_code_tool_names(body: &mut Value) -> ToolNameMap {
             else {
                 continue;
             };
-            let upstream = plan_upstream(&name, &assigned, &mut wrapped);
+            let (upstream, adapter) = plan_upstream(&name, tool, profile, &assigned, &mut wrapped);
+            if let Some(schema) = tool.get_mut("input_schema") {
+                adapter.schema(schema);
+            }
             assigned.insert(upstream.clone());
-            if upstream != name {
-                let client = strip_mcp_prefix(&name);
-                forward.insert(client.clone(), upstream.clone());
-                map.insert(&upstream, &client);
+            if !name.starts_with("mcp__") {
+                let client = name.clone();
+                forward.insert(client.clone(), (upstream.clone(), adapter.clone()));
+                map.insert(&upstream, &client, adapter);
                 set_name(tool, &upstream);
             }
         }
@@ -162,26 +153,32 @@ pub fn restore_response_tool_names(body: &mut Value, map: &ToolNameMap) {
 }
 
 /// Decide the upstream name for a client tool definition.
-fn plan_upstream(name: &str, assigned: &HashSet<String>, wrapped: &mut Vec<String>) -> String {
+fn plan_upstream(
+    name: &str,
+    tool: &Value,
+    profile: ClientProfile,
+    assigned: &HashSet<String>,
+    wrapped: &mut Vec<String>,
+) -> (String, ArgumentAdapter) {
     // Genuine MCP tools already use the `mcp__server__tool` shape Anthropic
     // accepts as native MCP usage — leave them exactly as-is.
     if name.starts_with("mcp__") {
-        return name.to_string();
+        return (name.to_string(), ArgumentAdapter::default());
     }
 
     // Known built-in / third-party alias → canonical name, unless that
     // canonical name is already taken this request (e.g. grep + glob both map
     // to mcp_WebSearch); in that case fall through to wrapping.
-    if let Some(canonical) = normalize_tool_name(name)
-        && !assigned.contains(&canonical)
+    if let Some((canonical, adapter)) = ArgumentAdapter::select(name, tool, profile)
+        && !assigned.contains(canonical)
     {
-        return canonical;
+        return (canonical.to_owned(), adapter);
     }
 
     // Unrecognized tool, or an alias collision: wrap into the mcp__ namespace.
-    let client = strip_mcp_prefix(name);
+    let client = name.to_owned();
     wrapped.push(client.clone());
-    wrap_unique(&client, assigned)
+    (wrap_unique(&client, assigned), ArgumentAdapter::default())
 }
 
 /// Wrap a client tool name into a unique `mcp__`-prefixed name.
@@ -200,7 +197,7 @@ fn wrap_unique(client: &str, assigned: &HashSet<String>) -> String {
 /// Apply a planned rename to a `name` field by forward lookup. Names not in the
 /// map (genuine MCP tools, typed tools, tools absent from the definitions) are
 /// left untouched.
-fn apply_forward(value: &mut Value, forward: &HashMap<String, String>) {
+fn apply_forward(value: &mut Value, forward: &HashMap<String, (String, ArgumentAdapter)>) {
     let Some(name) = value
         .get("name")
         .and_then(|n| n.as_str())
@@ -208,8 +205,11 @@ fn apply_forward(value: &mut Value, forward: &HashMap<String, String>) {
     else {
         return;
     };
-    if let Some(upstream) = forward.get(&strip_mcp_prefix(&name)) {
+    if let Some((upstream, adapter)) = forward.get(&name) {
         set_name(value, upstream);
+        if let Some(input) = value.get_mut("input") {
+            adapter.forward(input);
+        }
     }
 }
 
@@ -251,45 +251,15 @@ fn restore_name_field(value: &mut Value, map: &ToolNameMap) {
     };
 
     let client_name = map.restore(&name);
+    if let Some(adapter) = map.adapter(&name)
+        && let Some(input) = value.get_mut("input")
+    {
+        adapter.reverse(input);
+    }
     tracing::info!(tool = %client_name, "tool_use");
     if let Some(obj) = value.as_object_mut() {
         obj.insert("name".to_string(), Value::String(client_name));
     }
-}
-
-fn normalize_tool_name(name: &str) -> Option<String> {
-    if CLAUDE_CODE_TOOLS.contains(&name) {
-        return Some(name.to_string());
-    }
-
-    let base = strip_mcp_prefix(name);
-    let lower = base.to_ascii_lowercase();
-    let normalized = match lower.as_str() {
-        "agent" | "task" | "new_task" => "mcp_Agent",
-        "askuserquestion" | "ask_user_question" | "ask_followup_question" => "mcp_AskUserQuestion",
-        "bash" | "shell" | "terminal" | "run_command" | "execute" => "mcp_Bash",
-        "edit" | "remove" | "delete" => "mcp_Edit",
-        "list_files" => "mcp_EnterWorktree",
-        "switch_mode" => "mcp_EnterPlanMode",
-        "lsp" | "multi_patch" | "multipatch" | "codebase_search" => "mcp_LSP",
-        "notebookedit" | "notebook_edit" | "patch" => "mcp_NotebookEdit",
-        "read" | "read_file" => "mcp_Read",
-        "skill" => "mcp_Skill",
-        "todowrite" | "todo_write" => "mcp_TaskCreate",
-        "todoget" | "todo_get" => "mcp_TaskGet",
-        "todoread" | "todo_read" | "todo_list" | "task_list" => "mcp_TaskList",
-        "taskoutput" | "task_output" | "attempt_completion" => "mcp_TaskOutput",
-        "taskstop" | "task_stop" | "undo" => "mcp_TaskStop",
-        "taskupdate" | "task_update" | "update_todo_list" => "mcp_TaskUpdate",
-        "fetch" | "web_fetch" | "webfetch" | "http" | "http_request" => "mcp_WebFetch",
-        "fs_search" | "search" | "web_search" | "websearch" | "grep" | "glob" | "search_files" => {
-            "mcp_WebSearch"
-        }
-        "write" | "write_file" => "mcp_Write",
-        _ => return None,
-    };
-
-    Some(normalized.to_string())
 }
 
 fn strip_mcp_prefix(name: &str) -> String {
@@ -319,200 +289,86 @@ fn restore_unaliased(name: &str) -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn normalizes_common_tool_aliases() {
-        let mut body = json!({
-            "tools": [
-                {"name": "mcp_shell"},
-                {"name": "mcp_fs_search"},
-                {"name": "mcp_Read"},
-                {"name": "mcp_patch"},
-                {"name": "mcp_multi_patch"}
-            ],
-            "tool_choice": {"type": "tool", "name": "mcp_shell"},
-            "messages": [{
-                "role": "assistant",
-                "content": [{"type": "tool_use", "name": "mcp_fs_search"}]
-            }]
-        });
-
-        let map = normalize_claude_code_tool_names(&mut body);
-
-        assert_eq!(body["tools"][0]["name"], "mcp_Bash");
-        assert_eq!(body["tools"][1]["name"], "mcp_WebSearch");
-        assert_eq!(body["tools"][2]["name"], "mcp_Read");
-        assert_eq!(body["tools"][3]["name"], "mcp_NotebookEdit");
-        assert_eq!(body["tools"][4]["name"], "mcp_LSP");
-        assert_eq!(body["tool_choice"]["name"], "mcp_Bash");
-        assert_eq!(body["messages"][0]["content"][0]["name"], "mcp_WebSearch");
-        assert_eq!(map.restore("mcp_Bash"), "shell");
-        assert_eq!(map.restore("mcp_WebSearch"), "fs_search");
-        // mcp_Read is already canonical (no alias entry); restored via fallback.
-        assert_eq!(map.restore("mcp_Read"), "Read");
-        assert_eq!(map.restore("mcp_NotebookEdit"), "patch");
-        assert_eq!(map.restore("mcp_LSP"), "multi_patch");
+    pub fn read_tool(name: &str) -> Value {
+        json!({"name":name,"input_schema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}})
     }
 
     #[test]
-    fn wraps_unknown_tool_names() {
-        // OpenCode-style flat MCP names and bare builtins it doesn't share with
-        // Claude Code get wrapped into the mcp__ namespace instead of a 400.
-        let mut body = json!({
-            "tools": [
-                {"name": "chrome-devtools_click"},
-                {"name": "telegram_send_message"},
-                {"name": "question"}
-            ]
-        });
-
-        let map = normalize_claude_code_tool_names(&mut body);
-
-        assert_eq!(body["tools"][0]["name"], "mcp__chrome-devtools_click");
-        assert_eq!(body["tools"][1]["name"], "mcp__telegram_send_message");
-        assert_eq!(body["tools"][2]["name"], "mcp__question");
+    fn schema_history_choice_and_arguments_round_trip() {
+        let result =
+            json!({"type":"tool_result","tool_use_id":"id","is_error":true,"content":"missing"});
+        let mut body = json!({"tools":[read_tool("read_file")],"tool_choice":{"type":"tool","name":"read_file"},"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"id","name":"read_file","input":{"path":"file.txt"}}]},{"role":"user","content":[result.clone()]}]});
+        let map = normalize_tools(&mut body, ClientProfile::OpenAi);
+        assert_eq!(body["tools"][0]["name"], "mcp_Read");
         assert_eq!(
-            map.restore("mcp__chrome-devtools_click"),
-            "chrome-devtools_click"
+            body["tools"][0]["input_schema"]["required"],
+            json!(["file_path"])
         );
         assert_eq!(
-            map.restore("mcp__telegram_send_message"),
-            "telegram_send_message"
+            body["messages"][0]["content"][0]["input"],
+            json!({"file_path":"file.txt"})
         );
-        assert_eq!(map.restore("mcp__question"), "question");
-    }
-
-    #[test]
-    fn wraps_colliding_aliases() {
-        // grep and glob both alias to mcp_WebSearch — the first wins the
-        // canonical name, the second is wrapped uniquely (no more 400).
-        let mut body = json!({
-            "tools": [{"name": "grep"}, {"name": "glob"}]
-        });
-
-        let map = normalize_claude_code_tool_names(&mut body);
-
-        assert_eq!(body["tools"][0]["name"], "mcp_WebSearch");
-        assert_eq!(body["tools"][1]["name"], "mcp__glob");
-        assert_eq!(map.restore("mcp_WebSearch"), "grep");
-        assert_eq!(map.restore("mcp__glob"), "glob");
-    }
-
-    #[test]
-    fn history_tool_use_matches_definition() {
-        // A collision-wrapped name must be applied identically in history.
-        let mut body = json!({
-            "tools": [{"name": "grep"}, {"name": "glob"}],
-            "messages": [{
-                "role": "assistant",
-                "content": [{"type": "tool_use", "name": "glob"}]
-            }]
-        });
-
-        normalize_claude_code_tool_names(&mut body);
-
-        assert_eq!(body["messages"][0]["content"][0]["name"], "mcp__glob");
-    }
-
-    #[test]
-    fn leaves_typed_and_genuine_mcp_tools_untouched() {
-        let mut body = json!({
-            "tools": [
-                {"type": "web_search_20250305", "name": "web_search"},
-                {"name": "mcp__flashprobe__list_ports"},
-                {"name": "chrome-devtools_click"}
-            ]
-        });
-
-        let map = normalize_claude_code_tool_names(&mut body);
-
-        assert_eq!(body["tools"][0]["name"], "web_search");
-        assert_eq!(body["tools"][1]["name"], "mcp__flashprobe__list_ports");
-        assert_eq!(body["tools"][2]["name"], "mcp__chrome-devtools_click");
-        // Untouched tools have no alias entry and restore verbatim.
-        assert_eq!(map.restore("web_search"), "web_search");
-        assert_eq!(
-            map.restore("mcp__flashprobe__list_ports"),
-            "mcp__flashprobe__list_ports"
-        );
-    }
-
-    #[test]
-    fn normalizes_roo_code_aliases() {
-        let mut body = json!({
-            "tools": [
-                {"name": "ask_followup_question"},
-                {"name": "attempt_completion"},
-                {"name": "codebase_search"},
-                {"name": "list_files"},
-                {"name": "new_task"},
-                {"name": "read_file"},
-                {"name": "skill"},
-                {"name": "search_files"},
-                {"name": "switch_mode"},
-                {"name": "update_todo_list"}
-            ]
-        });
-
-        let map = normalize_claude_code_tool_names(&mut body);
-        let names: Vec<&str> = body["tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|tool| tool["name"].as_str().unwrap())
-            .collect();
-
-        assert_eq!(
-            names,
-            vec![
-                "mcp_AskUserQuestion",
-                "mcp_TaskOutput",
-                "mcp_LSP",
-                "mcp_EnterWorktree",
-                "mcp_Agent",
-                "mcp_Read",
-                "mcp_Skill",
-                "mcp_WebSearch",
-                "mcp_EnterPlanMode",
-                "mcp_TaskUpdate",
-            ]
-        );
-        assert_eq!(map.restore("mcp_AskUserQuestion"), "ask_followup_question");
-        assert_eq!(map.restore("mcp_TaskOutput"), "attempt_completion");
-        assert_eq!(map.restore("mcp_EnterWorktree"), "list_files");
-        assert_eq!(map.restore("mcp_EnterPlanMode"), "switch_mode");
-    }
-
-    #[test]
-    fn restores_response_tool_names() {
-        let mut body = json!({
-            "tools": [{"name": "mcp_shell"}]
-        });
-        let map = normalize_claude_code_tool_names(&mut body);
-        let mut response = json!({
-            "content": [{"type": "tool_use", "name": "mcp_Bash"}]
-        });
-
+        assert_eq!(body["tool_choice"]["name"], "mcp_Read");
+        assert_eq!(body["messages"][1]["content"][0], result);
+        let mut response = json!({"content":[{"type":"tool_use","id":"next","name":"mcp_Read","input":{"file_path":"other.txt"}}]});
         restore_response_tool_names(&mut response, &map);
-
-        assert_eq!(response["content"][0]["name"], "shell");
+        assert_eq!(response["content"][0]["name"], "read_file");
+        assert_eq!(response["content"][0]["input"], json!({"path":"other.txt"}));
     }
 
     #[test]
-    fn restore_preserves_genuine_mcp_tool_names() {
-        // Native Claude Code (cloak=false) builds no alias map, so every
-        // response tool name falls through to the unaliased fallback. Genuine
-        // MCP tools (double-underscore) must round-trip verbatim; built-ins
-        // prefixed by the request pipeline still strip back to their bare name.
-        let map = ToolNameMap::default();
-        assert_eq!(
-            map.restore("mcp__flashprobe__list_ports"),
-            "mcp__flashprobe__list_ports"
-        );
-        assert_eq!(
-            map.restore("mcp__stm32-data__list_chips"),
-            "mcp__stm32-data__list_chips"
-        );
-        assert_eq!(map.restore("mcp_Read"), "Read");
-        assert_eq!(map.restore("mcp_Bash"), "Bash");
+    fn incompatible_contracts_remain_mcp() {
+        for name in [
+            "list_files",
+            "grep",
+            "switch_mode",
+            "remove",
+            "patch",
+            "new_task",
+        ] {
+            let original = read_tool(name);
+            let mut body = json!({"tools":[original.clone()]});
+            let map = normalize_tools(&mut body, ClientProfile::Roo);
+            assert_eq!(body["tools"][0]["name"], format!("mcp__{name}"));
+            assert_eq!(body["tools"][0]["input_schema"], original["input_schema"]);
+            assert_eq!(map.restore(&format!("mcp__{name}")), name);
+        }
+        for profile in [ClientProfile::Generic, ClientProfile::OpenCode] {
+            let name = if profile == ClientProfile::OpenCode {
+                "read"
+            } else {
+                "read_file"
+            };
+            let mut body = json!({"tools":[read_tool(name)]});
+            normalize_tools(&mut body, profile);
+            assert_eq!(body["tools"][0]["name"], format!("mcp__{name}"));
+        }
+        let mut tool = read_tool("read_file");
+        tool["input_schema"]["properties"]["mode"] =
+            json!({"type":"string","enum":["slice","indentation"]});
+        let mut body = json!({"tools":[tool.clone()]});
+        normalize_tools(&mut body, ClientProfile::Roo);
+        assert_eq!(body["tools"][0]["name"], "mcp__read_file");
+        assert_eq!(body["tools"][0]["input_schema"], tool["input_schema"]);
+    }
+
+    #[test]
+    fn reserves_mcp_names_and_preserves_client_prefixes() {
+        let mut body = json!({"tools":[read_tool("foo"),read_tool("mcp__foo"),read_tool("mcp_custom"),{"type":"web_search_20250305","name":"web_search"}]});
+        let map = normalize_tools(&mut body, ClientProfile::Generic);
+        assert_eq!(body["tools"][0]["name"], "mcp__foo_2");
+        assert_eq!(body["tools"][1]["name"], "mcp__foo");
+        assert_eq!(map.restore("mcp__mcp_custom"), "mcp_custom");
+        assert_eq!(body["tools"][3]["name"], "web_search");
+    }
+
+    #[test]
+    fn collision_retains_second_contract() {
+        let second = read_tool("read_file");
+        let mut body = json!({"tools":[read_tool("Read"),second.clone()]});
+        normalize_tools(&mut body, ClientProfile::OpenAi);
+        assert_eq!(body["tools"][0]["name"], "mcp_Read");
+        assert_eq!(body["tools"][1]["name"], "mcp__read_file");
+        assert_eq!(body["tools"][1]["input_schema"], second["input_schema"]);
     }
 }

@@ -14,10 +14,7 @@ use crate::auth::usage::usage_from_json;
 use crate::capture::{Capture, capture_byte_stream};
 use crate::constants::{ANTHROPIC_API_URL, ANTHROPIC_COUNT_TOKENS_URL};
 use crate::error::ProxyError;
-use crate::transforms::{
-    prepare_anthropic_request, prepare_count_tokens_request, restore_response_tool_names,
-    stream_restore_native_tool_names_with_usage,
-};
+use crate::transforms::{restore_response_tool_names, stream_restore_native_tool_names_with_usage};
 
 use super::auth::{authenticate_anthropic, build_anthropic_request, extract_client_betas};
 
@@ -44,6 +41,10 @@ pub async fn messages(
     };
 
     let cloak = state.should_cloak(headers.get("user-agent").and_then(|v| v.to_str().ok()));
+    let policy = match state.compatibility.for_request(&headers) {
+        Ok(policy) => policy,
+        Err(message) => return ProxyError::InvalidRequest(message).to_anthropic_response(),
+    };
     let model = model.to_string();
 
     let stream = body
@@ -73,7 +74,7 @@ pub async fn messages(
             &session_id,
         );
     }
-    let mut prepared = prepare_anthropic_request(body, cloak);
+    let mut prepared = crate::transforms::prepare::prepare_with_policy(body, cloak, policy);
     // Forward beta flags the client sent in the `anthropic-beta` header. Native
     // Claude Code carries them there (not in a body `betas` field), and dropping
     // them makes Anthropic reject newer tool types like `advisor_*` with a 400.
@@ -275,6 +276,10 @@ pub async fn count_tokens(
     };
 
     let cloak = state.should_cloak(headers.get("user-agent").and_then(|v| v.to_str().ok()));
+    let policy = match state.compatibility.for_request(&headers) {
+        Ok(policy) => policy,
+        Err(message) => return ProxyError::InvalidRequest(message).to_anthropic_response(),
+    };
     let capture = Capture::begin(
         &state.capture,
         "anthropic",
@@ -289,7 +294,7 @@ pub async fn count_tokens(
     let session_id =
         crate::identity::session_id(&body, &headers, &auth.client_key.id, &state.device_id);
     // Apply lighter transformations for count_tokens (no metadata/tools support)
-    let mut prepared = prepare_count_tokens_request(body, cloak);
+    let mut prepared = crate::transforms::prepare::prepare_count_with_policy(body, cloak, policy);
     // Forward client-supplied beta flags (see note in `messages`).
     for beta in extract_client_betas(&headers) {
         if !prepared.betas.contains(&beta) {

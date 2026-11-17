@@ -32,6 +32,7 @@ pub struct Config {
     pub cors_mode: CorsMode,
     pub disable_auth: bool,
     pub cloak_mode: CloakMode,
+    pub compatibility: crate::compatibility::Compatibility,
     pub stt_requests_per_minute: u32,
     pub stt_max_concurrent: usize,
 }
@@ -95,6 +96,16 @@ impl Config {
             cors_mode,
             disable_auth,
             cloak_mode,
+            compatibility: crate::compatibility::Compatibility {
+                profile: crate::compatibility::ClientProfile::parse(
+                    &env::var("CLAUDE_PROXY_CLIENT_PROFILE").unwrap_or_else(|_| "auto".into()),
+                )
+                .expect("Invalid CLAUDE_PROXY_CLIENT_PROFILE"),
+                cache: crate::compatibility::CachePolicy::parse(
+                    &env::var("CLAUDE_PROXY_CACHE_POLICY").unwrap_or_else(|_| "auto-5m".into()),
+                )
+                .expect("Invalid CLAUDE_PROXY_CACHE_POLICY"),
+            },
             // Zero explicitly disables only the local per-key rate limit.
             stt_requests_per_minute: env_number("CLAUDE_PROXY_STT_REQUESTS_PER_MINUTE", 120, true),
             stt_max_concurrent: usize::from(env_number::<u16>(

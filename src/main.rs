@@ -2,6 +2,7 @@ mod admin_session;
 mod anthropic_transport;
 mod auth;
 mod capture;
+mod compatibility;
 mod config;
 mod constants;
 mod db;
@@ -63,6 +64,7 @@ pub struct AppState {
     pub disable_auth: bool,
     /// Cloaking mode (always / never / auto)
     pub cloak_mode: CloakMode,
+    pub compatibility: compatibility::Compatibility,
     /// Single source of truth for Claude subscription usage. Owns cached
     /// snapshot, freshness timestamps, fetcher dispatch, and header-based
     /// patching. See `usage::UsageCache` for the freshness model.
@@ -256,6 +258,7 @@ async fn main() -> Result<()> {
         secure_cookies,
         disable_auth,
         cloak_mode,
+        compatibility: config.compatibility,
         usage_cache: UsageCache::new(),
         device_id: identity::load_device_id(std::path::Path::new(
             &std::env::var("CLAUDE_PROXY_DEVICE_ID_FILE")
@@ -302,6 +305,8 @@ async fn main() -> Result<()> {
             HeaderName::from_static("x-claude-code-session-id"),
             HeaderName::from_static("anthropic-version"),
             HeaderName::from_static("x-proxy-compatibility"),
+            HeaderName::from_static("x-proxy-client-profile"),
+            HeaderName::from_static("x-proxy-cache-policy"),
         ])
         .expose_headers([HeaderName::from_static("x-proxy-compatibility-warnings")])
         .allow_credentials(true);

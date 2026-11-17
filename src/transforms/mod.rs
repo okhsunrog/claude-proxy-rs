@@ -6,13 +6,17 @@
 //! - `streaming`: SSE stream transformations
 
 pub mod billing;
+pub mod cache_policy;
 pub mod openai_compat;
 pub mod prepare;
 pub mod streaming;
+pub mod tool_adapters;
 pub mod tool_aliases;
+pub mod tool_events;
 
 pub use openai_compat::{transform_openai_request, transform_openai_response};
-pub use prepare::{prepare_anthropic_request, prepare_count_tokens_request};
+#[cfg(test)]
+pub use prepare::prepare_anthropic_request;
 pub use streaming::{
     stream_anthropic_to_openai_with_usage, stream_restore_native_tool_names_with_usage,
 };
