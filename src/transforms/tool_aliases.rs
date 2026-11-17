@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use super::tool_adapters::ArgumentAdapter;
 use crate::compatibility::ClientProfile;
@@ -9,6 +9,9 @@ use serde_json::json;
 #[derive(Clone, Debug, Default)]
 pub struct ToolNameMap {
     aliases: Vec<ToolNameAlias>,
+    assigned: HashSet<String>,
+    profile: ClientProfile,
+    inline_enabled: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -19,34 +22,92 @@ struct ToolNameAlias {
 }
 
 impl ToolNameMap {
-    pub fn forward_request(&self, body: &mut Value) {
-        if let Some(choice) = body.get_mut("tool_choice") {
-            self.forward_block(choice);
-        }
+    pub fn forward_request(&mut self, body: &mut Value) {
+        self.assigned.extend(reserved_names(body));
         if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
             for message in messages {
                 if let Some(content) = message.get_mut("content").and_then(Value::as_array_mut) {
-                    for block in content {
-                        if block.get("type").and_then(Value::as_str) == Some("tool_use") {
-                            self.forward_block(block);
+                    let original = std::mem::take(content);
+                    for mut block in original {
+                        if self.inline_enabled
+                            && block.get("type").and_then(Value::as_str) == Some("tool_addition")
+                            && let Some(definition) = block.pointer_mut("/tool/definition")
+                        {
+                            let previous = definition
+                                .get("name")
+                                .and_then(Value::as_str)
+                                .and_then(|name| {
+                                    self.aliases.iter().rev().find(|a| a.client == name)
+                                })
+                                .map(|a| a.upstream.clone());
+                            self.normalize_definition(definition, true);
+                            if let Some(previous) = previous
+                                && definition.get("name").and_then(Value::as_str)
+                                    != Some(previous.as_str())
+                            {
+                                content.push(serde_json::json!({"type":"tool_removal","tool":{"type":"tool_reference","name":previous}}));
+                            }
                         }
-                        rewrite_references(block, &|name| {
+                        if block.get("type").and_then(Value::as_str) == Some("tool_use") {
+                            self.forward_block(&mut block);
+                        }
+                        rewrite_references(&mut block, &|name| {
                             self.aliases
                                 .iter()
+                                .rev()
                                 .find(|a| a.client == name)
                                 .map(|a| a.upstream.clone())
                         });
+                        content.push(block);
                     }
                 }
             }
         }
+        if let Some(choice) = body.get_mut("tool_choice") {
+            self.forward_block(choice);
+        }
+    }
+
+    fn normalize_definition(&mut self, tool: &mut Value, inline: bool) {
+        let Some(name) = tool.get("name").and_then(Value::as_str).map(str::to_owned) else {
+            return;
+        };
+        if name.starts_with("mcp__")
+            || tool
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|t| !t.is_empty() && t != "custom")
+        {
+            self.assigned.insert(name.clone());
+            self.insert(&name, &name, ArgumentAdapter::default());
+            return;
+        }
+        let (upstream, adapter) = if inline {
+            (
+                self.aliases
+                    .iter()
+                    .rev()
+                    .find(|a| a.client == name && a.upstream.starts_with("mcp__"))
+                    .map(|a| a.upstream.clone())
+                    .unwrap_or_else(|| wrap_unique(&name, &self.assigned)),
+                ArgumentAdapter::default(),
+            )
+        } else {
+            plan_upstream(&name, tool, self.profile, &self.assigned, &mut Vec::new())
+        };
+        if let Some(schema) = tool.get_mut("input_schema") {
+            adapter.schema(schema);
+        }
+        self.assigned.insert(upstream.clone());
+        self.insert(&upstream, &name, adapter);
+        set_name(tool, &upstream);
     }
 
     fn forward_block(&self, block: &mut Value) {
         let Some(alias) = block
             .get("name")
             .and_then(Value::as_str)
-            .and_then(|n| self.aliases.iter().find(|a| a.client == n))
+            .and_then(|n| self.aliases.iter().rev().find(|a| a.client == n))
         else {
             return;
         };
@@ -65,7 +126,12 @@ impl ToolNameMap {
                     + a.adapter.estimated_bytes()
                     + std::mem::size_of::<ToolNameAlias>()
             })
-            .sum()
+            .sum::<usize>()
+            + self
+                .assigned
+                .iter()
+                .map(|s| s.len() + std::mem::size_of::<String>())
+                .sum::<usize>()
     }
     pub fn restore(&self, upstream_name: &str) -> String {
         self.aliases
@@ -111,95 +177,108 @@ impl ToolNameMap {
 /// lookup to `tool_choice` and to `tool_use` blocks in message history, so all
 /// three always agree (a collision-wrapped name must match everywhere).
 pub fn normalize_tools(body: &mut Value, profile: ClientProfile) -> ToolNameMap {
-    let mut map = ToolNameMap::default();
-    let mut forward: HashMap<String, (String, ArgumentAdapter)> = HashMap::new();
-    let mut assigned: HashSet<String> = body
-        .get("tools")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|t| t.get("name").and_then(Value::as_str))
-        .filter(|n| n.starts_with("mcp__"))
-        .map(str::to_owned)
-        .collect();
-    let mut wrapped: Vec<String> = Vec::new();
-
-    if let Some(Value::Array(tools)) = body.get_mut("tools") {
-        for tool in tools.iter_mut() {
-            // Anthropic typed/server tools (web_search, advisor, …) carry a
-            // `type` field and must reach the API under their real name.
-            if tool
-                .get("type")
-                .and_then(|t| t.as_str())
-                .is_some_and(|t| !t.is_empty() && t != "custom")
-            {
-                continue;
-            }
-            let Some(name) = tool
-                .get("name")
-                .and_then(|n| n.as_str())
-                .map(str::to_string)
-            else {
-                continue;
-            };
-            let (upstream, adapter) = plan_upstream(&name, tool, profile, &assigned, &mut wrapped);
-            if let Some(schema) = tool.get_mut("input_schema") {
-                adapter.schema(schema);
-            }
-            assigned.insert(upstream.clone());
-            if !name.starts_with("mcp__") {
-                let client = name.clone();
-                forward.insert(client.clone(), (upstream.clone(), adapter.clone()));
-                map.insert(&upstream, &client, adapter);
-                set_name(tool, &upstream);
-            }
+    let mut map = ToolNameMap {
+        profile,
+        inline_enabled: true,
+        ..ToolNameMap::default()
+    };
+    map.assigned.extend(reserved_names(body));
+    // Threads can redefine tools later. A stable MCP name keeps fixed fields
+    // (including forced tool_choice) valid without freezing an argument adapter.
+    let thread = body.get("thread").is_some();
+    if let Some(tools) = body.get_mut("tools").and_then(Value::as_array_mut) {
+        for tool in tools {
+            map.normalize_definition(tool, thread);
         }
     }
-
-    if body
-        .get("tool_choice")
-        .and_then(|tc| tc.get("type"))
-        .and_then(|t| t.as_str())
-        == Some("tool")
-        && let Some(tool_choice) = body.get_mut("tool_choice")
-    {
-        apply_forward(tool_choice, &forward);
-    }
-
-    if let Some(Value::Array(messages)) = body.get_mut("messages") {
-        for msg in messages.iter_mut() {
-            let Some(Value::Array(content)) = msg.get_mut("content") else {
-                continue;
-            };
-            for block in content.iter_mut() {
-                if block.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
-                    apply_forward(block, &forward);
-                }
-            }
-        }
-    }
-
-    if !wrapped.is_empty() {
-        tracing::debug!(
-            count = wrapped.len(),
-            tools = %wrapped.join(", "),
-            "wrapped unrecognized tool names into mcp__ namespace"
-        );
-    }
-
-    if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
-        for message in messages {
-            if let Some(content) = message.get_mut("content").and_then(Value::as_array_mut) {
-                for block in content {
-                    rewrite_references(block, &|name| {
-                        forward.get(name).map(|(name, _)| name.clone())
-                    });
-                }
-            }
-        }
-    }
-
+    map.forward_request(body);
     map
+}
+
+fn reserved_names(body: &Value) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut reserve = |tool: &Value| {
+        if let Some(name) = tool.get("name").and_then(Value::as_str)
+            && (name.starts_with("mcp__")
+                || tool
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .is_some_and(|t| !t.is_empty() && t != "custom"))
+        {
+            names.push(name.to_owned());
+        }
+    };
+    if let Some(tools) = body.get("tools").and_then(Value::as_array) {
+        for tool in tools {
+            reserve(tool);
+        }
+    }
+    if let Some(messages) = body.get("messages").and_then(Value::as_array) {
+        for message in messages {
+            if let Some(content) = message.get("content").and_then(Value::as_array) {
+                for block in content {
+                    if block.get("type").and_then(Value::as_str) == Some("tool_addition")
+                        && let Some(tool) = block.pointer("/tool/definition")
+                    {
+                        reserve(tool);
+                    }
+                }
+            }
+        }
+    }
+    names
+}
+
+pub fn validate_tool_search(body: &Value, model: &str) -> Result<(), crate::error::ProxyError> {
+    let model = model.to_ascii_lowercase();
+    let legacy = model.starts_with("claude-3")
+        || model.starts_with("claude-2")
+        || model.starts_with("claude-instant")
+        || matches!(
+            model.as_str(),
+            "claude-opus-4"
+                | "claude-opus-4-0"
+                | "claude-opus-4-20250514"
+                | "claude-opus-4-1"
+                | "claude-opus-4-1-20250805"
+                | "claude-sonnet-4"
+                | "claude-sonnet-4-0"
+                | "claude-sonnet-4-20250514"
+        );
+    let requires_search = |tool: &Value| {
+        tool.get("defer_loading").and_then(Value::as_bool) == Some(true)
+            || tool
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|t| t.starts_with("tool_search_tool_"))
+    };
+    if legacy
+        && (body
+            .get("tools")
+            .and_then(Value::as_array)
+            .is_some_and(|tools| tools.iter().any(requires_search))
+            || body
+                .get("messages")
+                .and_then(Value::as_array)
+                .is_some_and(|messages| {
+                    messages.iter().any(|m| {
+                        m.get("content")
+                            .and_then(Value::as_array)
+                            .is_some_and(|content| {
+                                content.iter().any(|b| {
+                                    b.get("type").and_then(Value::as_str) == Some("tool_addition")
+                                        && b.pointer("/tool/definition")
+                                            .is_some_and(requires_search)
+                                })
+                            })
+                    })
+                }))
+    {
+        return Err(crate::error::ProxyError::InvalidRequest(format!(
+            "Model {model} does not support tool search or deferred loading; choose a supported model"
+        )));
+    }
+    Ok(())
 }
 
 pub fn restore_response_tool_names(body: &mut Value, map: &ToolNameMap) {
@@ -223,13 +302,20 @@ pub fn restore_response_tool_names(body: &mut Value, map: &ToolNameMap) {
 fn rewrite_references(block: &mut Value, rename: &impl Fn(&str) -> Option<String>) {
     match block.get("type").and_then(Value::as_str) {
         Some("tool_reference") => {
-            if let Some(name) = block
-                .get("tool_name")
-                .and_then(Value::as_str)
-                .and_then(rename)
+            let field = if block.get("tool_name").is_some() {
+                "tool_name"
+            } else {
+                "name"
+            };
+            if let Some(name) = block.get(field).and_then(Value::as_str).and_then(rename)
                 && let Some(object) = block.as_object_mut()
             {
-                object.insert("tool_name".into(), Value::String(name));
+                object.insert(field.into(), Value::String(name));
+            }
+        }
+        Some("tool_addition" | "tool_removal") => {
+            if let Some(tool) = block.get_mut("tool") {
+                rewrite_references(tool, rename);
             }
         }
         Some("tool_result" | "tool_search_tool_result") => {
@@ -297,25 +383,6 @@ fn wrap_unique(client: &str, assigned: &HashSet<String>) -> String {
         .map(|i| format!("{stem}_{i}"))
         .find(|candidate| !assigned.contains(candidate))
         .expect("a free suffixed name always exists")
-}
-
-/// Apply a planned rename to a `name` field by forward lookup. Names not in the
-/// map (genuine MCP tools, typed tools, tools absent from the definitions) are
-/// left untouched.
-fn apply_forward(value: &mut Value, forward: &HashMap<String, (String, ArgumentAdapter)>) {
-    let Some(name) = value
-        .get("name")
-        .and_then(|n| n.as_str())
-        .map(str::to_string)
-    else {
-        return;
-    };
-    if let Some((upstream, adapter)) = forward.get(&name) {
-        set_name(value, upstream);
-        if let Some(input) = value.get_mut("input") {
-            adapter.forward(input);
-        }
-    }
 }
 
 fn set_name(value: &mut Value, name: &str) {
@@ -521,5 +588,50 @@ mod tests {
             "read_file"
         );
         assert_eq!(response["content"][2], opaque);
+    }
+
+    #[test]
+    fn inline_redefinition_preserves_history_and_switches_active_contract() {
+        let tool = read_tool("read_file");
+        let changed = json!({"name":"read_file","input_schema":{"type":"object","properties":{"directory":{"type":"string"}},"required":["directory"]}});
+        let mut body = json!({"tools":[tool],"tool_choice":{"type":"tool","name":"read_file"},"messages":[
+            {"role":"assistant","content":[{"type":"tool_use","name":"read_file","input":{"path":"old"}}]},
+            {"role":"system","content":[{"type":"tool_addition","tool":{"type":"tool_definition","definition":changed.clone()}}]},
+            {"role":"assistant","content":[{"type":"tool_use","name":"read_file","input":{"directory":"new"}}]}
+        ]});
+        let mut map = normalize_tools(&mut body, ClientProfile::OpenAi);
+        assert_eq!(body["messages"][0]["content"][0]["name"], "mcp_Read");
+        assert_eq!(
+            body["messages"][0]["content"][0]["input"],
+            json!({"file_path":"old"})
+        );
+        assert_eq!(
+            body["messages"][1]["content"][0],
+            json!({"type":"tool_removal","tool":{"type":"tool_reference","name":"mcp_Read"}})
+        );
+        let inline = &body["messages"][1]["content"][1]["tool"]["definition"];
+        assert_eq!(inline["name"], "mcp__read_file");
+        assert_eq!(inline["input_schema"], changed["input_schema"]);
+        assert_eq!(body["messages"][2]["content"][0]["name"], "mcp__read_file");
+        assert_eq!(body["tool_choice"]["name"], "mcp__read_file");
+        let mut response = json!({"content":[{"type":"tool_use","name":"mcp__read_file","input":{"directory":"new"}}]});
+        restore_response_tool_names(&mut response, &map);
+        assert_eq!(response["content"][0]["name"], "read_file");
+        assert_eq!(response["content"][0]["input"], json!({"directory":"new"}));
+        let mut continued = json!({"messages":[{"role":"system","content":[{"type":"tool_removal","tool":{"type":"tool_reference","name":"read_file"}}]}]});
+        map.forward_request(&mut continued);
+        assert_eq!(
+            continued["messages"][0]["content"][0]["tool"]["name"],
+            "mcp__read_file"
+        );
+    }
+
+    #[test]
+    fn legacy_model_search_is_rejected_without_dropping_features() {
+        let body =
+            json!({"tools":[{"type":"tool_search_tool_regex_20251119","name":"tool_search"}]});
+        assert!(validate_tool_search(&body, "claude-sonnet-4-20250514").is_err());
+        assert!(validate_tool_search(&body, "claude-sonnet-4-6").is_ok());
+        assert!(validate_tool_search(&body, "future-model").is_ok());
     }
 }

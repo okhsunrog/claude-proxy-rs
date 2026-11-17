@@ -25,6 +25,30 @@ async fn upstream(
     Json(body): Json<Value>,
 ) -> Response {
     captures.lock().await.push(body.clone());
+    if body["messages"][0]["content"]
+        .to_string()
+        .contains("audit tool-search")
+    {
+        let name = body["tools"][1]["name"].clone();
+        assert_eq!(body["tools"][0]["name"], "tool_search");
+        assert_eq!(body["tools"][1]["defer_loading"], true);
+        let content = if body["messages"].as_array().unwrap().len() == 1 {
+            json!([
+                {"type":"server_tool_use","id":"srv_search","name":"tool_search","input":{"query":"directory"}},
+                {"type":"tool_search_tool_result","tool_use_id":"srv_search","content":{"type":"tool_search_tool_search_result","tool_references":[{"type":"tool_reference","tool_name":name}]}},
+                {"type":"tool_use","id":"discovered","name":name,"input":{"directory":"folder"}}
+            ])
+        } else {
+            assert_eq!(
+                body["messages"][1]["content"][1]["content"]["tool_references"][0]["tool_name"],
+                name
+            );
+            assert_eq!(body["messages"][1]["content"][2]["name"], name);
+            assert_eq!(body["messages"][2]["content"][0]["content"], "folder read");
+            json!([{"type":"text","text":"search done"}])
+        };
+        return Json(json!({"id":"msg_search","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":content,"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":11,"output_tokens":7}})).into_response();
+    }
     let threaded = body.get("thread").is_some();
     let retry_probe = body["messages"][0]["content"]
         .to_string()
@@ -43,11 +67,10 @@ async fn upstream(
     }
     if body.pointer("/thread/type").and_then(Value::as_str) == Some("continue") {
         assert!(body.get("system").is_none() && body.get("tools").is_none());
-        assert_eq!(body["tool_choice"]["name"], "mcp_Read");
-        assert_eq!(
-            body["messages"][0]["content"][0]["content"][0]["tool_name"],
-            "mcp_Read"
-        );
+        assert_eq!(body["tool_choice"]["name"], "mcp__read_file");
+        if let Some(reference) = body.pointer("/messages/0/content/0/content/0/tool_name") {
+            assert_eq!(reference, "mcp__read_file");
+        }
         let captures = captures.lock().await;
         let created = captures
             .iter()
@@ -137,6 +160,27 @@ async fn upstream(
         }
         _ => json!({"type":"text","text":"done"}),
     };
+    if threaded {
+        content["name"] = json!("mcp__read_file");
+        let inline = body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|m| m["content"].as_array())
+            .flatten()
+            .find_map(|b| b.pointer("/tool/definition"));
+        if let Some(tool) = inline {
+            assert_eq!(tool["name"], "mcp__read_file");
+            assert!(
+                tool["input_schema"]["properties"]
+                    .get("directory")
+                    .is_some()
+            );
+            content["input"] = json!({"directory":"folder"});
+        } else {
+            content["input"] = json!({"path":"probe.txt"});
+        }
+    }
     if opencode && turn < 3 {
         let needle = if turn < 2 { "read" } else { "edit" };
         let tool = body["tools"]
@@ -427,6 +471,32 @@ async fn real_clients_through_http_and_postgres() {
         .expect("OpenCode usage in DB");
         println!("OpenCode read/error/edit tool loop passed");
     }
+    let search_key = state
+        .client_keys
+        .create("search-audit".into())
+        .await
+        .unwrap();
+    let output = Command::new("uv")
+        .args([
+            "run",
+            "--project",
+            "tests/clients",
+            "python",
+            "tests/clients/tool_search.py",
+        ])
+        .env("PROXY_AUDIT_URL", &proxy_url)
+        .env("PROXY_AUDIT_KEY", &search_key.key)
+        .kill_on_drop(true)
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    println!("{}", String::from_utf8_lossy(&output.stdout));
     let retry_key = state
         .client_keys
         .create("retry-audit".into())
@@ -519,6 +589,12 @@ async fn real_clients_through_http_and_postgres() {
     )
     .unwrap();
     for body in bodies.iter().filter(|b| b.get("tools").is_some()) {
+        if body["messages"][0]["content"]
+            .to_string()
+            .contains("audit tool-search")
+        {
+            continue;
+        }
         if body.get("thread").is_some() {
             continue;
         }

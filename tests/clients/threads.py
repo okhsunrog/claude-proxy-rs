@@ -9,7 +9,7 @@ client = anthropic.Anthropic(
     default_headers={"x-proxy-client-profile": "openai"},
 )
 base = dict(model="claude-sonnet-4-6", max_tokens=100,
-            betas=["message-threads-2026-08-12"],
+            betas=["message-threads-2026-08-12", "inline-tools-2026-09-15"],
             tool_choice={"type": "tool", "name": "read_file"})
 tools = [{"name": "read_file", "input_schema": {"type": "object", "properties": {
     "path": {"type": "string"}}, "required": ["path"], "additionalProperties": False}}]
@@ -33,6 +33,18 @@ for streaming in (False, True):
         second = client.beta.messages.create(**request)
     assert second.content[0].name == "read_file"
     assert second.content[0].input == {"path": "probe.txt"}
+    inline = dict(base, thread={"type": "continue", "previous_message_id": second.id}, messages=[{
+        "role": "system", "content": [{"type": "tool_addition", "tool": {
+            "type": "tool_definition", "definition": {"name": "read_file", "input_schema": {
+                "type": "object", "properties": {"directory": {"type": "string"}},
+                "required": ["directory"], "additionalProperties": False}}}}]}])
+    if streaming:
+        with client.beta.messages.stream(**inline) as stream:
+            updated = stream.get_final_message()
+    else:
+        updated = client.beta.messages.create(**inline)
+    assert updated.content[0].name == "read_file"
+    assert updated.content[0].input == {"directory": "folder"}
     try:
         client.beta.messages.create(**dict(request, system=None))
     except anthropic.BadRequestError:

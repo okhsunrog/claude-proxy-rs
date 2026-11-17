@@ -91,7 +91,7 @@ pub fn prepare_with_policy(body: Value, cloak: bool, policy: Compatibility) -> P
 
 pub fn prepare_continuation(
     body: Value,
-    map: ToolNameMap,
+    mut map: ToolNameMap,
     transform_thinking: bool,
 ) -> PreparedRequest {
     let (betas, body) = extract_betas(body);

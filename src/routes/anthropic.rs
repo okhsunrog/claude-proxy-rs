@@ -45,6 +45,9 @@ pub async fn messages(
         Err(message) => return ProxyError::InvalidRequest(message).to_anthropic_response(),
     };
     let model = model.to_string();
+    if let Err(error) = crate::transforms::tool_aliases::validate_tool_search(&body, &model) {
+        return error.to_anthropic_response();
+    }
 
     let stream = body
         .get("stream")
