@@ -499,6 +499,11 @@ checksum against the client implementation. First-party prompt/request identifie
 and request classification headers are retained when supplied by a native client.
 Prepared diagnostic captures precede transport finalization; their billing checksum
 may differ from the final wire body. Count-token requests are not signed this way.
+The cold ClientHello test also compares the full non-random extension contents,
+SNI, record size/version, session-ID length and key-share sizes against a passive
+capture of a successful direct OAuth request from the VM. Inference defaults to a
+600-second timeout; explicit request timeouts and valid client timeout headers take
+precedence. Native retry counters and conversation session IDs are retained.
 Certificate verification remains enabled. Other providers keep the existing HTTP
 client. GNU/Linux builds statically link the TLS library's C++ runtime.
 

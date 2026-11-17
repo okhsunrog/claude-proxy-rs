@@ -76,22 +76,26 @@ pub struct AnthropicTransport {
     client: wreq::Client,
 }
 
+fn client_builder() -> wreq::ClientBuilder {
+    let mut order = OrigHeaderMap::new();
+    for &name in HEADER_ORDER {
+        order.insert(name);
+    }
+    wreq::Client::builder()
+        .tls_options(tls_options())
+        .http1_only()
+        .orig_headers(order)
+        .redirect(wreq::redirect::Policy::none())
+        .timeout(Duration::from_secs(600))
+}
+
 impl AnthropicTransport {
     pub fn new() -> Result<Self> {
         Self::build(false)
     }
 
     fn build(no_proxy: bool) -> Result<Self> {
-        let mut order = OrigHeaderMap::new();
-        for &name in HEADER_ORDER {
-            order.insert(name);
-        }
-        let builder = wreq::Client::builder()
-            .tls_options(tls_options())
-            .http1_only()
-            .orig_headers(order)
-            .redirect(wreq::redirect::Policy::none())
-            .timeout(Duration::from_secs(300));
+        let builder = client_builder();
         let builder = if no_proxy {
             builder.no_proxy()
         } else {
@@ -126,10 +130,25 @@ impl AnthropicTransport {
         // Adding a CCH field can change the body length. Let the transport
         // calculate framing from the finalized bytes, including on retries.
         headers.remove(reqwest::header::CONTENT_LENGTH);
+        let timeout = request
+            .timeout()
+            .copied()
+            .or_else(|| {
+                headers
+                    .get("x-stainless-timeout")?
+                    .to_str()
+                    .ok()?
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|seconds| *seconds > 0.0)
+                    .and_then(|seconds| Duration::try_from_secs_f64(seconds).ok())
+            })
+            .unwrap_or(Duration::from_secs(600));
         let response = self
             .client
             .request(request.method().clone(), request.url().as_str())
             .headers(headers)
+            .timeout(timeout)
             .body(body)
             .send()
             .await?;
@@ -165,6 +184,28 @@ mod tests {
             .chunks_exact(2)
             .map(|x| u16::from_be_bytes([x[0], x[1]]))
             .collect()
+    }
+
+    #[tokio::test]
+    async fn respects_explicit_request_timeout() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/v1/messages", listener.local_addr().unwrap());
+        let (done, pending) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let _ = pending.await;
+            drop(socket);
+        });
+        let request = reqwest::Client::new()
+            .post(url)
+            .header("x-stainless-timeout", "600")
+            .timeout(Duration::from_millis(50))
+            .body("{}");
+        let result = AnthropicTransport::build(true).unwrap().send(request).await;
+        let error = result.unwrap_err();
+        assert!(error.downcast_ref::<wreq::Error>().unwrap().is_timeout());
+        done.send(()).unwrap();
+        server.await.unwrap();
     }
 
     #[tokio::test]
@@ -245,28 +286,58 @@ mod tests {
             serde_json::from_str(include_str!("fixtures/claude-2.1.326-macos-x64-tls.json"))
                 .unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let client = AnthropicTransport::build(true).unwrap();
+        let client = AnthropicTransport {
+            client: client_builder()
+                .no_proxy()
+                .proxy(
+                    wreq::Proxy::all(format!("http://{}", listener.local_addr().unwrap())).unwrap(),
+                )
+                .build()
+                .unwrap(),
+        };
         let request = reqwest::Client::new()
-            .post(format!("https://localhost:{port}/v1/messages"))
+            .post("https://api.anthropic.com/v1/messages")
             .body("{}");
         let task = tokio::spawn(async move { client.send(request).await });
         let (mut stream, _) = tokio::time::timeout(Duration::from_secs(5), listener.accept())
             .await
             .unwrap()
             .unwrap();
+        let mut connect = Vec::new();
+        while !connect.ends_with(b"\r\n\r\n") {
+            connect.push(stream.read_u8().await.unwrap());
+        }
+        assert!(connect.starts_with(b"CONNECT api.anthropic.com:443 HTTP/1.1\r\n"));
+        stream
+            .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+            .await
+            .unwrap();
         let mut record = [0; 5];
         stream.read_exact(&mut record).await.unwrap();
         assert_eq!(record[0], 22);
         let mut bytes = vec![0; usize::from(u16::from_be_bytes([record[3], record[4]]))];
         stream.read_exact(&mut bytes).await.unwrap();
+        assert_eq!(
+            serde_json::json!(u16::from_be_bytes([record[1], record[2]])),
+            reference["record_version"]
+        );
+        assert_eq!(serde_json::json!(bytes.len() + 5), reference["record_size"]);
         // Close before a certificate or any HTTP data is transmitted.
         drop(stream);
         assert!(task.await.unwrap().is_err());
         let mut hello = bytes.as_slice();
         assert_eq!(take(&mut hello, 1), &[1]);
-        take(&mut hello, 3 + 2 + 32);
+        take(&mut hello, 3);
+        assert_eq!(
+            serde_json::json!(short(&mut hello)),
+            reference["legacy_version"]
+        );
+        take(&mut hello, 32);
         let session_length = take(&mut hello, 1)[0] as usize;
+        assert_eq!(
+            serde_json::json!(session_length),
+            reference["session_id_length"]
+        );
         take(&mut hello, session_length);
         let cipher_length = short(&mut hello);
         let ciphers = shorts(take(&mut hello, cipher_length));
@@ -284,6 +355,13 @@ mod tests {
             data.insert(id, take(&mut extensions, len).to_vec());
         }
         assert_eq!(serde_json::json!(ids), reference["extensions"]);
+        for (id, expected) in reference["extension_bytes"].as_object().unwrap() {
+            let actual: String = data[&id.parse::<u16>().unwrap()]
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
+            assert_eq!(actual, expected.as_str().unwrap(), "extension {id}");
+        }
         assert_eq!(
             serde_json::json!(shorts(&data[&10][2..])),
             reference["groups"]

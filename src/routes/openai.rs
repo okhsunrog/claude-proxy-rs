@@ -127,7 +127,7 @@ pub async fn chat_completions(
         ANTHROPIC_API_URL,
         &auth.token,
         Some(&prepared.betas),
-        &state.session_id,
+        &session_id,
         &prepared.body,
         Some(&headers),
     );
@@ -162,7 +162,7 @@ pub async fn chat_completions(
             ANTHROPIC_API_URL,
             &new_token,
             Some(&prepared.betas),
-            &state.session_id,
+            &session_id,
             &prepared.body,
             Some(&headers),
         );

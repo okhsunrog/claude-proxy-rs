@@ -100,7 +100,7 @@ pub async fn messages(
         ANTHROPIC_API_URL,
         &auth.token,
         Some(&prepared.betas),
-        &state.session_id,
+        &session_id,
         &prepared.body,
         Some(&headers),
     );
@@ -135,7 +135,7 @@ pub async fn messages(
             ANTHROPIC_API_URL,
             &new_token,
             Some(&prepared.betas),
-            &state.session_id,
+            &session_id,
             &prepared.body,
             Some(&headers),
         );
@@ -286,6 +286,8 @@ pub async fn count_tokens(
     )
     .await;
 
+    let session_id =
+        crate::identity::session_id(&body, &headers, &auth.client_key.id, &state.device_id);
     // Apply lighter transformations for count_tokens (no metadata/tools support)
     let mut prepared = prepare_count_tokens_request(body, cloak);
     // Forward client-supplied beta flags (see note in `messages`).
@@ -305,7 +307,7 @@ pub async fn count_tokens(
         ANTHROPIC_COUNT_TOKENS_URL,
         &auth.token,
         Some(&prepared.betas),
-        &state.session_id,
+        &session_id,
         &prepared.body,
         Some(&headers),
     );

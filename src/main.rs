@@ -40,7 +40,6 @@ use url::Url;
 use usage::UsageCache;
 use utoipa::openapi::{InfoBuilder, OpenApi, OpenApiBuilder};
 use utoipa_axum::{router::OpenApiRouter, routes};
-use uuid::Uuid;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const GIT_HASH: &str = env!("GIT_HASH");
@@ -68,9 +67,6 @@ pub struct AppState {
     /// snapshot, freshness timestamps, fetcher dispatch, and header-based
     /// patching. See `usage::UsageCache` for the freshness model.
     pub usage_cache: UsageCache,
-    /// Stable session UUID sent as X-Claude-Code-Session-Id header on every inference request.
-    /// Matches Claude Code's per-process session ID behavior.
-    pub session_id: String,
     pub device_id: String,
     /// Optional request/response capture sink for debugging client compatibility.
     pub capture: CaptureConfig,
@@ -261,7 +257,6 @@ async fn main() -> Result<()> {
         disable_auth,
         cloak_mode,
         usage_cache: UsageCache::new(),
-        session_id: Uuid::new_v4().to_string(),
         device_id: identity::load_device_id(std::path::Path::new(
             &std::env::var("CLAUDE_PROXY_DEVICE_ID_FILE")
                 .unwrap_or_else(|_| ".claude-proxy-device-id".into()),

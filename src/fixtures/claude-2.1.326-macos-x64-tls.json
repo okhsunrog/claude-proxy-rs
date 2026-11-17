@@ -82,6 +82,26 @@
     "guest": "macOS 14.8.9 (23J631), x86_64, QEMU/KVM",
     "locale": "en-US, Singapore, Asia/Singapore",
     "mode": "Native print mode, dummy OAuth token, first-party URL through local CONNECT mock",
-    "scope": "POST /v1/messages?beta=true; cold TLS handshake. No authenticated upstream validation."
+    "scope": "Cold inference TLS handshake captured passively on the virtual NIC during a successful direct first-party OAuth request; key material omitted."
+  },
+  "record_version": 769,
+  "record_size": 1508,
+  "session_id_length": 32,
+  "compression_methods": [
+    0
+  ],
+  "extension_bytes": {
+    "0": "00140000116170692e616e7468726f7069632e636f6d",
+    "23": "",
+    "65281": "00",
+    "10": "000811ec001d00170018",
+    "11": "0100",
+    "35": "",
+    "16": "000908687474702f312e31",
+    "5": "0100000000",
+    "13": "001604030804040105030805050108060601080706030201",
+    "18": "",
+    "45": "0101",
+    "43": "0403040303"
   }
 }
