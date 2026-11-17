@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { chatgptLogin, chatgptLogout, chatgptPoll, chatgptStatus, chatgptModels } from '../client'
 import type { DeviceLogin, AvailableModel } from '../client'
+import ExternalAuthLink from './ExternalAuthLink.vue'
 
 const connected = ref(false)
 const busy = ref(false)
@@ -97,10 +98,10 @@ onMounted(refresh)
     </div>
     <UAlert v-if="error" class="mt-4" color="error" :description="error" />
     <div v-if="login" class="mt-4 space-y-3">
+      <ExternalAuthLink :url="login.verification_url" label="ChatGPT authorization link" />
       <p>Open ChatGPT and enter this code:</p>
       <p class="font-mono text-xl tracking-wider">{{ login.user_code }}</p>
       <div class="flex flex-wrap gap-2">
-        <UButton :to="login.verification_url" target="_blank">Open ChatGPT</UButton>
         <UButton :loading="busy" color="neutral" @click="check">Check sign-in</UButton>
         <UButton :disabled="busy" color="neutral" variant="ghost" @click="disconnect"
           >Cancel</UButton

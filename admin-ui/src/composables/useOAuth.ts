@@ -13,6 +13,7 @@ export function useOAuth() {
   const isLoading = ref(false)
   const error = ref<string | null>(null)
   const showCodeInput = ref(false)
+  const authorizationUrl = ref<string | null>(null)
   const subscriptionUsage = ref<SubscriptionUsageResponse | null>(null)
   const isLoadingUsage = ref(false)
   const planName = ref<string | null>(null)
@@ -54,11 +55,15 @@ export function useOAuth() {
   async function connect() {
     isLoading.value = true
     error.value = null
+    authorizationUrl.value = null
+    showCodeInput.value = false
     try {
-      const { data } = await startOauthFlow()
+      const { data } = await startOauthFlow({ throwOnError: true })
       if (data?.url) {
-        window.open(data.url, 'oauth', 'width=600,height=800')
+        authorizationUrl.value = data.url
         showCodeInput.value = true
+      } else {
+        error.value = 'The server did not return an authorization link'
       }
     } catch {
       error.value = 'Failed to start OAuth flow'
@@ -77,6 +82,7 @@ export function useOAuth() {
       })
       if (data?.success) {
         showCodeInput.value = false
+        authorizationUrl.value = null
         await checkStatus()
         return true
       } else {
@@ -96,6 +102,8 @@ export function useOAuth() {
     error.value = null
     try {
       await deleteOauth()
+      authorizationUrl.value = null
+      showCodeInput.value = false
       await checkStatus()
       return true
     } catch {
@@ -112,6 +120,7 @@ export function useOAuth() {
     isLoadingUsage,
     error,
     showCodeInput,
+    authorizationUrl,
     subscriptionUsage,
     planName,
     checkStatus,

@@ -14,6 +14,7 @@ declare module 'vue' {
     CategoryDistribution: typeof import('./src/components/CategoryDistribution.vue')['default']
     ChatGptSection: typeof import('./src/components/ChatGptSection.vue')['default']
     CreateKeyForm: typeof import('./src/components/CreateKeyForm.vue')['default']
+    ExternalAuthLink: typeof import('./src/components/ExternalAuthLink.vue')['default']
     KeyCard: typeof import('./src/components/KeyCard.vue')['default']
     KeyModelAccess: typeof import('./src/components/KeyModelAccess.vue')['default']
     KeyModelTable: typeof import('./src/components/KeyModelTable.vue')['default']

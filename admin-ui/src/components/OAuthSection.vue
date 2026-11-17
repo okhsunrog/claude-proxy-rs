@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { deleteWebSession, getWebSessionStatus, saveWebSession } from '../client/sdk.gen'
 import { useOAuth } from '../composables/useOAuth'
+import ExternalAuthLink from './ExternalAuthLink.vue'
 
 const {
   isConnected,
@@ -9,6 +10,7 @@ const {
   isLoadingUsage,
   error,
   showCodeInput,
+  authorizationUrl,
   subscriptionUsage,
   planName,
   checkStatus,
@@ -440,7 +442,12 @@ function getUsageItems(): UsageDisplayItem[] {
       </div>
 
       <div v-if="showCodeInput" class="space-y-2">
-        <p class="text-sm text-muted">Paste the authorization code from the popup:</p>
+        <ExternalAuthLink
+          v-if="authorizationUrl"
+          :url="authorizationUrl"
+          label="Claude authorization link"
+        />
+        <p class="text-sm text-muted">After signing in, paste the authorization code here:</p>
         <div class="flex gap-2">
           <UInput
             v-model="oauthCode"
