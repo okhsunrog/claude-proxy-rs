@@ -4,3 +4,5 @@
 *.pem
 
 .claude-proxy-device-id
+/tests/clients/.venv/
+__pycache__/

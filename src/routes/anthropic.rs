@@ -12,7 +12,6 @@ use tracing::{debug, info, warn};
 use crate::AppState;
 use crate::auth::usage::usage_from_json;
 use crate::capture::{Capture, capture_byte_stream};
-use crate::constants::{ANTHROPIC_API_URL, ANTHROPIC_COUNT_TOKENS_URL};
 use crate::error::ProxyError;
 use crate::transforms::{restore_response_tool_names, stream_restore_native_tool_names_with_usage};
 
@@ -98,7 +97,7 @@ pub async fn messages(
 
     let req_builder = build_anthropic_request(
         &state.http_client,
-        ANTHROPIC_API_URL,
+        &state.inference_url,
         &auth.token,
         Some(&prepared.betas),
         &session_id,
@@ -133,7 +132,7 @@ pub async fn messages(
         };
         let retry_builder = build_anthropic_request(
             &state.http_client,
-            ANTHROPIC_API_URL,
+            &state.inference_url,
             &new_token,
             Some(&prepared.betas),
             &session_id,
@@ -309,7 +308,7 @@ pub async fn count_tokens(
 
     let req_builder = build_anthropic_request(
         &state.http_client,
-        ANTHROPIC_COUNT_TOKENS_URL,
+        &state.count_tokens_url,
         &auth.token,
         Some(&prepared.betas),
         &session_id,

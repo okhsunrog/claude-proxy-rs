@@ -3,6 +3,8 @@ mod anthropic_transport;
 mod auth;
 mod capture;
 mod compatibility;
+#[cfg(test)]
+mod compatibility_audit;
 mod config;
 mod constants;
 mod db;
@@ -57,6 +59,8 @@ pub struct AppState {
     pub transcription_limits: routes::transcription::TranscriptionLimits,
     pub http_client: Client,
     pub anthropic_transport: anthropic_transport::AnthropicTransport,
+    pub inference_url: String,
+    pub count_tokens_url: String,
     pub admin_credentials: AdminCredentials,
     /// Whether to set Secure flag on cookies (true when not binding to localhost)
     pub secure_cookies: bool,
@@ -254,6 +258,8 @@ async fn main() -> Result<()> {
         oauth,
         http_client,
         anthropic_transport: anthropic_transport::AnthropicTransport::new()?,
+        inference_url: constants::ANTHROPIC_API_URL.into(),
+        count_tokens_url: constants::ANTHROPIC_COUNT_TOKENS_URL.into(),
         admin_credentials,
         secure_cookies,
         disable_auth,

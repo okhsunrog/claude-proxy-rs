@@ -151,25 +151,9 @@ pub fn transform_openai_response(
     resp: MessagesResponse,
     tool_names: &ToolNameMap,
 ) -> Result<Value, String> {
-    let raw = serde_json::to_value(resp).map_err(|e| e.to_string())?;
-    let mut response = translate_response(Protocol::Messages, Protocol::ChatCompletions, &raw)?;
-    if let Some(choices) = response.get_mut("choices").and_then(Value::as_array_mut) {
-        for choice in choices {
-            if let Some(calls) = choice
-                .pointer_mut("/message/tool_calls")
-                .and_then(Value::as_array_mut)
-            {
-                for call in calls {
-                    if let Some(name) = call.pointer_mut("/function/name")
-                        && let Some(original) = name.as_str()
-                    {
-                        *name = Value::String(tool_names.restore(original));
-                    }
-                }
-            }
-        }
-    }
-    Ok(response)
+    let mut raw = serde_json::to_value(resp).map_err(|e| e.to_string())?;
+    super::tool_aliases::restore_response_tool_names(&mut raw, tool_names);
+    translate_response(Protocol::Messages, Protocol::ChatCompletions, &raw)
 }
 
 #[cfg(test)]

@@ -13,7 +13,6 @@ use llm_relay::wire::anthropic::MessagesResponse;
 
 use crate::AppState;
 use crate::capture::{Capture, capture_byte_stream};
-use crate::constants::ANTHROPIC_API_URL;
 use crate::error::ProxyError;
 use crate::transforms::{
     stream_anthropic_to_openai_with_usage, transform_openai_request, transform_openai_response,
@@ -127,7 +126,7 @@ pub async fn chat_completions(
 
     let req_builder = build_anthropic_request(
         &state.http_client,
-        ANTHROPIC_API_URL,
+        &state.inference_url,
         &auth.token,
         Some(&prepared.betas),
         &session_id,
@@ -162,7 +161,7 @@ pub async fn chat_completions(
         };
         let retry_builder = build_anthropic_request(
             &state.http_client,
-            ANTHROPIC_API_URL,
+            &state.inference_url,
             &new_token,
             Some(&prepared.betas),
             &session_id,
