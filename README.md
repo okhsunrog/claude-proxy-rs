@@ -150,6 +150,39 @@ print(response.content[0].text)
 
 Both APIs accept `x-api-key: sk-proxy-...` or `Authorization: Bearer sk-proxy-...`.
 
+### Claude Code default connection (Linux/macOS)
+
+To use the proxy with the ordinary `claude` command, merge these entries into
+`~/.claude/settings.json` and export your proxy key as `MY_AI_PROXY`:
+
+```json
+{
+  "apiKeyHelper": "printf \"%s\" \"${MY_AI_PROXY:?MY_AI_PROXY is not set}\"",
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://your-proxy.example",
+    "ANTHROPIC_API_KEY": "",
+    "ANTHROPIC_AUTH_TOKEN": "",
+    "DISABLE_TELEMETRY": "1",
+    "DISABLE_ERROR_REPORTING": "1",
+    "DISABLE_FEEDBACK_COMMAND": "1",
+    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1"
+  }
+}
+```
+
+The helper reads the exported key without saving it in JSON. Settings `env`
+values themselves do not expand shell variables. Empty credential overrides
+prevent inherited provider keys/tokens from taking precedence over the helper.
+The proxy accepts its output through either `x-api-key` or bearer authorization.
+Relaunch Claude Code after changing startup telemetry settings.
+
+These four opt-outs disable telemetry, error reports and feedback, while other
+background requests can remain. `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
+also suppresses release notes, feature checks and auto-updates, but does not
+block all network access or configured marketplace installations. See the
+[2.1.326 background traffic audit](docs/client-background-traffic-2026-11-20.md)
+for observed requests and the limits of these switches.
+
 ### IDE Extensions
 
 #### Cline / Roo Code / Kilo Code (Recommended)
