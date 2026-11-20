@@ -1,3 +1,6 @@
+//! Add cache breakpoints without overriding explicit client TTLs. Native request
+//! envelopes bypass this module in prepare; top-level automatic caching also
+//! bypasses block injection here. Marker placement/count comes from llm-relay.
 use crate::compatibility::CachePolicy;
 use serde_json::Value;
 
@@ -15,6 +18,9 @@ pub fn apply(body: Value, policy: CachePolicy) -> Value {
         .filter(|p| body.pointer(p).is_some())
         .collect();
     let mut body = llm_relay::anthropic::cache_control::ensure_cache_control(body);
+    // Mixed TTLs require all 1h markers before 5m markers in prompt order.
+    // Keep existing markers intact; after the first short marker, new ones
+    // retain their default 5m TTL even under Auto1h.
     let mut short_seen = false;
     for path in paths(&body) {
         let Some(marker) = body.pointer_mut(&path) else {
@@ -31,6 +37,8 @@ pub fn apply(body: Value, policy: CachePolicy) -> Value {
     body
 }
 
+/// Candidate markers in upstream prompt order: tools, system, then messages.
+/// Absent pointers are intentional: this also discovers newly injected markers.
 fn paths(body: &Value) -> Vec<String> {
     let mut paths = Vec::new();
     for section in ["tools", "system"] {

@@ -621,12 +621,9 @@ mod tests {
         let prompt = request.headers()["x-claude-code-prompt-id"]
             .to_str()
             .unwrap();
-        assert!(uuid::Uuid::parse_str(prompt).is_ok());
+        uuid::Uuid::parse_str(prompt).unwrap();
         assert!(body["system"][0]["text"].as_str().unwrap().contains(prompt));
         assert_eq!(request.headers()["x-claude-code-request-class"], "main");
-        assert!(
-            uuid::Uuid::parse_str(request.headers()["x-client-request-id"].to_str().unwrap())
-                .is_ok()
-        );
+        uuid::Uuid::parse_str(request.headers()["x-client-request-id"].to_str().unwrap()).unwrap();
     }
 }

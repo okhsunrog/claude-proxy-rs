@@ -1,10 +1,80 @@
-//! Final-body CCH checksum, verified against the macOS 2.1.326 capture.
+//! Generated billing text and final-body CCH, checked against macOS 2.1.326.
+//! Despite its name, x-anthropic-billing-header is system[0].text, not an HTTP
+//! header. The SHA-256 prompt suffix and xxHash64 body checksum are independent.
 //! Algorithm reference: CLIProxyAPI 7df56074, claude_signing.go (MIT notice in
 //! licenses/CLIProxyAPI.txt). This checksum is not an authentication credential.
 use anyhow::{Context, Result};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
+use uuid::Uuid;
 
-const SEED: u64 = 0x4D659218E32A3268;
+use crate::constants::CAPTURED_CLAUDE_CODE_VERSION;
+
+// Constants recovered from the client implementation and checked against the
+// 2.1.326 macOS capture. This public salt is compatibility data, not a secret.
+// These are zero-based UTF-16 offsets; absent positions contribute ASCII '0'.
+const PROMPT_SALT: &str = "59cf53e54c78";
+const PROMPT_SAMPLE_INDICES: [usize; 3] = [4, 7, 20];
+const PROMPT_SUFFIX_HEX_LEN: usize = 3;
+
+/// Build the first system text block for a generated SDK-style request.
+/// Native blocks are preserved by preparation; this only synthesizes missing
+/// identity. `dispatch` is false for count_tokens, which omits prompt counters.
+/// The UUID is also read by routes::auth to populate the prompt-ID header.
+pub fn prefix(body: &Value, dispatch: bool) -> String {
+    let content = body
+        .get("messages")
+        .and_then(Value::as_array)
+        .and_then(|a| {
+            a.iter()
+                .find(|m| m.get("role").and_then(Value::as_str) == Some("user"))
+        })
+        .and_then(|m| m.get("content"));
+    let text = content
+        .and_then(|v| {
+            v.as_str().or_else(|| {
+                v.as_array()
+                    .and_then(|a| a.iter().find_map(|b| b.get("text").and_then(Value::as_str)))
+            })
+        })
+        .unwrap_or("");
+    let suffix = prompt_suffix(text);
+    let mut prefix = format!(
+        "x-anthropic-billing-header: cc_version={CAPTURED_CLAUDE_CODE_VERSION}.{suffix}; cc_entrypoint=sdk-cli;"
+    );
+    if !dispatch {
+        return prefix;
+    }
+    let prompt_id = Uuid::new_v4();
+    prefix.push_str(&format!(
+        " cc_prompt_id={prompt_id}; cc_turn_origin=sdk; cc_prompt_index=0; cc_turn_index=1;"
+    ));
+    prefix
+}
+
+/// A short prompt/version marker, separate from the final-body CCH below.
+/// Three hex digits cannot authenticate a binary or prove server acceptance.
+fn prompt_suffix(text: &str) -> String {
+    // The installed JS binary indexes UTF-16 code units, not Unicode scalars.
+    let units: Vec<u16> = text.encode_utf16().collect();
+    let sampled: Vec<u16> = PROMPT_SAMPLE_INDICES
+        .iter()
+        .map(|&i| units.get(i).copied().unwrap_or(u16::from(b'0')))
+        .collect();
+    let hash = Sha256::digest(
+        format!(
+            "{PROMPT_SALT}{}{CAPTURED_CLAUDE_CODE_VERSION}",
+            String::from_utf16_lossy(&sampled)
+        )
+        .as_bytes(),
+    );
+    let suffix: String = hash.iter().map(|b| format!("{b:02x}")).collect();
+    suffix.chars().take(PROMPT_SUFFIX_HEX_LEN).collect()
+}
+
+// Captured CCH uses seeded xxHash64 truncated to 20 bits (five hex digits).
+const CCH_SEED: u64 = 0x4D659218E32A3268;
+const CCH_MASK: u64 = 0xfffff;
 
 /// Recompute after account identity, prompts, tools and caching have been changed.
 /// The input comes from our JSON serializer, so normalizing a Value preserves the
@@ -42,7 +112,10 @@ pub fn finalize(body: &[u8]) -> Result<Vec<u8>> {
     let mut normalized = value.clone();
     normalize(&mut normalized);
     let bytes = serde_json::to_vec(&normalized)?;
-    let checksum = format!("{:05x}", xxhash_rust::xxh64::xxh64(&bytes, SEED) & 0xfffff);
+    let checksum = format!(
+        "{:05x}",
+        xxhash_rust::xxh64::xxh64(&bytes, CCH_SEED) & CCH_MASK
+    );
     billing.replace_range(offset..offset + 5, &checksum);
     *value
         .pointer_mut("/system/0/text")
@@ -50,6 +123,9 @@ pub fn finalize(body: &[u8]) -> Result<Vec<u8>> {
     Ok(serde_json::to_vec(&value)?)
 }
 
+// Mirror the captured client's recursive normalization. Dispatch model/token
+// fields are excluded, while identity, prompts and tools remain checksummed.
+// Do not sort object keys: serde_json/preserve_order retains serialization order.
 fn normalize(value: &mut Value) {
     match value {
         Value::Object(object) => {
@@ -75,6 +151,41 @@ fn normalize(value: &mut Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn prompt_marker_preserves_utf16_sampling_and_counting_envelope() {
+        // Fixed vectors include a surrogate at a sampled position. These were
+        // independently calculated using UTF-16LE sampling and SHA-256.
+        assert_eq!(prompt_suffix(""), "bc0");
+        assert_eq!(prompt_suffix("hi"), "bc0");
+        assert_eq!(prompt_suffix("abcd😀efghijklmnopqrstu"), "673");
+        let body = json!({"messages":[
+            {"role":"assistant","content":"ignored"},
+            {"role":"user","content":[{"type":"image"},{"type":"text","text":"Reply exactly OK."}]}
+        ]});
+        assert_eq!(
+            prefix(&body, false),
+            "x-anthropic-billing-header: cc_version=2.1.326.dd3; cc_entrypoint=sdk-cli;"
+        );
+        // Header literals must stay aligned with the version used in the hash.
+        assert!(crate::constants::INFERENCE_USER_AGENT.contains(CAPTURED_CLAUDE_CODE_VERSION));
+        assert!(crate::constants::USER_AGENT.ends_with(CAPTURED_CLAUDE_CODE_VERSION));
+    }
+
+    #[test]
+    fn billing_marker_matches_captured_prompt_and_changes_with_prompt() {
+        let body = json!({"messages":[{"role":"user","content":"Reply exactly OK."}]});
+        let billing = prefix(&body, true);
+        assert!(billing.starts_with("x-anthropic-billing-header: cc_version=2.1.326.dd3; cc_entrypoint=sdk-cli; cc_prompt_id="));
+        assert!(billing.ends_with("; cc_turn_origin=sdk; cc_prompt_index=0; cc_turn_index=1;"));
+        assert_ne!(
+            billing.split("; cc_prompt_id=").next(),
+            prefix(
+                &json!({"messages":[{"role":"user","content":"A different first prompt changes sampled characters."}]}), true
+            ).split("; cc_prompt_id=").next()
+        );
+    }
 
     fn checksum(body: &Value) -> String {
         let out: Value =
@@ -84,7 +195,9 @@ mod tests {
             .unwrap()
             .split("cch=")
             .nth(1)
-            .unwrap()[..5]
+            .unwrap()
+            .get(..5)
+            .unwrap()
             .to_owned()
     }
 

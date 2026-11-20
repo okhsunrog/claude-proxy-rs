@@ -123,7 +123,7 @@ mod tests {
         assert_eq!(first.len(), 64);
         assert_eq!(first, load_device_id(&path).unwrap());
         fs::write(&path, "broken").unwrap();
-        assert!(load_device_id(&path).is_err());
+        load_device_id(&path).unwrap_err();
         fs::remove_dir_all(root).unwrap();
     }
     #[test]

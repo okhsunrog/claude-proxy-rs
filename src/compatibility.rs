@@ -1,3 +1,6 @@
+//! Client contract and cache policy selection. Explicit request headers override
+//! configured defaults; Auto uses client identity only as a mapping hint. Tool
+//! schema checks still decide whether an individual alias is safe to adapt.
 use axum::http::HeaderMap;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -157,7 +160,7 @@ mod tests {
             assert_eq!(policy.profile, ClientProfile::Generic);
             assert_eq!(policy.cache, CachePolicy::Auto1h);
             headers.insert("x-proxy-cache-policy", "bad".parse().unwrap());
-            assert!(Compatibility::default().for_request(&headers).is_err());
+            Compatibility::default().for_request(&headers).unwrap_err();
         }
     }
 }

@@ -16,6 +16,9 @@ impl ArgumentAdapter {
             .map(|(a, b)| a.len() + b.len() + std::mem::size_of::<(String, String)>())
             .sum()
     }
+    /// Recognized names alone are insufficient: reject unsupported properties,
+    /// ambiguous mappings and complex schemas rather than silently discard them.
+    /// None means the caller must retain the tool as a separate MCP contract.
     pub fn select(
         name: &str,
         tool: &Value,

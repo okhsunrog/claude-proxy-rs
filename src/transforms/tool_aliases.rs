@@ -1,3 +1,7 @@
+//! Assign reversible upstream tool names and keep history/tool_choice aligned.
+//! Static definitions may use schema-checked adapters. Inline tool contracts use
+//! stable MCP names without argument adaptation so a later schema replacement
+//! cannot reinterpret calls already in the conversation.
 use std::collections::HashSet;
 
 use super::tool_adapters::ArgumentAdapter;
@@ -22,6 +26,8 @@ struct ToolNameAlias {
 }
 
 impl ToolNameMap {
+    /// Rewrite calls and deferred tool references using the same mapping as
+    /// definitions. Retain prior aliases so historical calls remain resolvable.
     pub fn forward_request(&mut self, body: &mut Value) {
         self.assigned.extend(reserved_names(body));
         if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
@@ -82,6 +88,8 @@ impl ToolNameMap {
             self.insert(&name, &name, ArgumentAdapter::default());
             return;
         }
+        // Inline definitions can change mid-conversation. Preserve their exact
+        // schemas under a stable MCP alias instead of selecting a new built-in.
         let (upstream, adapter) = if inline {
             (
                 self.aliases
@@ -167,15 +175,16 @@ impl ToolNameMap {
 /// Rewrite client tool names to Claude Code-compatible names for the cloaked
 /// OAuth upstream, returning a map to reverse them on the response.
 ///
-/// Known Claude Code built-ins and third-party aliases map to their canonical
-/// `mcp_*` name. Genuine MCP tools (`mcp__server__tool`) and Anthropic typed
-/// tools (those carrying a `type` field) are left untouched. Everything else —
-/// unrecognized tools and alias collisions — is wrapped into the `mcp__`
-/// namespace, which Anthropic bills as native MCP usage. Nothing is rejected.
+/// Built-ins and profile aliases map to canonical `mcp_*` names only when their
+/// schemas pass ArgumentAdapter checks. Genuine MCP tools (`mcp__server__tool`)
+/// and server tools (non-custom `type`) are left untouched. Other definitions,
+/// including `type: custom` and alias collisions, use the `mcp__` namespace.
+/// This mapping preserves client execution contracts; it does not establish
+/// how the upstream service classifies or bills those tools.
 ///
-/// The rename is decided once from the `tools` definitions, then applied by
-/// lookup to `tool_choice` and to `tool_use` blocks in message history, so all
-/// three always agree (a collision-wrapped name must match everywhere).
+/// Initial names come from `tools`; inline additions extend the same map.
+/// Lookup applies it to `tool_choice`, history calls and search references, so
+/// a collision-wrapped name agrees across definitions and use sites.
 pub fn normalize_tools(body: &mut Value, profile: ClientProfile) -> ToolNameMap {
     let mut map = ToolNameMap {
         profile,
@@ -631,7 +640,7 @@ mod tests {
         let body =
             json!({"tools":[{"type":"tool_search_tool_regex_20251119","name":"tool_search"}]});
         assert!(validate_tool_search(&body, "claude-sonnet-4-20250514").is_err());
-        assert!(validate_tool_search(&body, "claude-sonnet-4-6").is_ok());
-        assert!(validate_tool_search(&body, "future-model").is_ok());
+        validate_tool_search(&body, "claude-sonnet-4-6").unwrap();
+        validate_tool_search(&body, "future-model").unwrap();
     }
 }

@@ -84,6 +84,8 @@ pub struct AnthropicTransport {
 }
 
 const MAX_RETRIES: u32 = 2;
+// Additional attempts share both this cumulative sleep budget and the original
+// request deadline. Retry-count headers include retries already made by clients.
 const RETRY_WAIT_BUDGET: Duration = Duration::from_secs(5);
 
 fn retry_delay(
@@ -229,8 +231,9 @@ impl AnthropicTransport {
             {
                 break response;
             }
-            // Only explicit pre-response HTTP failures are retried. Network
-            // errors and successful response bodies are never replayed here.
+            // Only selected HTTP error statuses are retried before exposing
+            // a response to the client. Network errors and successful bodies
+            // are never replayed: upstream execution may already have begun.
             drop(response);
             tokio::time::sleep(delay).await;
             waited += delay;
@@ -313,10 +316,9 @@ mod tests {
             http::{HeaderMap, StatusCode, Uri},
             routing::post,
         };
-        let requests = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new()));
-        let handler = |State(requests): State<
-            std::sync::Arc<tokio::sync::Mutex<Vec<(String, HeaderMap, Bytes)>>>,
-        >,
+        type CapturedRequests = std::sync::Arc<tokio::sync::Mutex<Vec<(String, HeaderMap, Bytes)>>>;
+        let requests = CapturedRequests::default();
+        let handler = |State(requests): State<CapturedRequests>,
                        uri: Uri,
                        headers: HeaderMap,
                        body: Bytes| async move {
@@ -394,7 +396,9 @@ mod tests {
     }
     fn shorts(input: &[u8]) -> Vec<u16> {
         input
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|x| u16::from_be_bytes([x[0], x[1]]))
             .collect()
     }
@@ -406,7 +410,7 @@ mod tests {
         let (done, pending) = tokio::sync::oneshot::channel::<()>();
         let server = tokio::spawn(async move {
             let (socket, _) = listener.accept().await.unwrap();
-            let _ = pending.await;
+            drop(pending.await);
             drop(socket);
         });
         let request = reqwest::Client::new()
@@ -537,7 +541,7 @@ mod tests {
         assert_eq!(serde_json::json!(bytes.len() + 5), reference["record_size"]);
         // Close before a certificate or any HTTP data is transmitted.
         drop(stream);
-        assert!(task.await.unwrap().is_err());
+        task.await.unwrap().unwrap_err();
         let mut hello = bytes.as_slice();
         assert_eq!(take(&mut hello, 1), &[1]);
         take(&mut hello, 3);

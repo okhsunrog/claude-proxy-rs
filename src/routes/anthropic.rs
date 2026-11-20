@@ -353,7 +353,7 @@ pub async fn count_tokens(
 
     let session_id =
         crate::identity::session_id(&body, &headers, &auth.client_key.id, &state.device_id);
-    // Apply lighter transformations for count_tokens (no metadata/tools support)
+    // Reuse prompt/tool/cache preparation without inference dispatch counters.
     let mut prepared = crate::transforms::prepare::prepare_count_with_policy(body, cloak, policy);
     // Forward client-supplied beta flags (see note in `messages`).
     for beta in extract_client_betas(&headers) {

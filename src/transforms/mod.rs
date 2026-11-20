@@ -1,9 +1,13 @@
 //! Request/response transformations for the Anthropic API proxy.
 //!
 //! This module provides:
-//! - `prepare`: Prepare any request for Anthropic API (system injection, user ID, etc.)
-//! - `openai_compat`: OpenAI ↔ Anthropic format conversion
-//! - `streaming`: SSE stream transformations
+//! - `prepare`: native bypass and policy-driven request preparation
+//! - `billing`: captured prompt markers and final serialized-body checksum
+//! - `cache_policy`: preserve explicit TTLs or add bounded cache breakpoints
+//! - `tool_adapters` / `tool_aliases`: schema-checked, reversible tool contracts
+//! - `tool_events`: restore adapted arguments once streamed JSON is complete
+//! - `openai_compat` / `responses`: API format conversion
+//! - `streaming`: SSE format conversion and usage accounting
 
 pub mod billing;
 pub mod cache_policy;

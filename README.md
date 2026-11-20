@@ -471,6 +471,22 @@ capture of a successful direct OAuth request from the VM. Inference defaults to 
 precedence. Native retry counters and conversation session IDs are retained.
 Native tool timing (`x-claude-code-prev-tool-durations`) is forwarded too.
 
+The generated billing text lives in `src/transforms/billing.rs`, separate from
+request preparation. Despite its name, `x-anthropic-billing-header` is the first
+system text block. Its three-hex prompt suffix is SHA-256 over the captured public
+salt, UTF-16 code units at zero-based offsets 4/7/20 (missing units become `0`), and
+the captured client version. The independent five-hex `cch` uses normalized final
+JSON and seeded xxHash64. Neither value is a secret or proof of client origin.
+When upgrading the captured version, update the version/user-agent constants and
+recheck prompt markers, dispatch fields, beta defaults, HTTP and TLS against new
+captures together. Changing only the advertised version is insufficient.
+
+The proxy does not synthesize product telemetry, trusted-device registration or
+background agents. Pointing a local client at the proxy also does not disable
+that client's separate telemetry connections. Platform headers and model-visible
+environment text are separate: generated macOS headers do not rewrite paths, OS
+descriptions or tool results supplied by the calling application.
+
 Private capture audits are opt-in and skipped by normal tests:
 
 ```bash

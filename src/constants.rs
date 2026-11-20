@@ -35,7 +35,11 @@ pub const OPUS_4_6_MAX_OUTPUT: u32 = 128000;
 /// Default max output tokens for Claude 4 models (64K)  
 pub const DEFAULT_MAX_OUTPUT: u32 = 64000;
 
-/// User-Agent for inference requests — matches Claude Code's getUserAgent() function.
+/// Version of the captured client, not a claim about the latest upstream release.
+/// Keep the user-agent literals below and capture fixtures in sync when upgrading.
+pub const CAPTURED_CLAUDE_CODE_VERSION: &str = "2.1.326";
+
+/// User-Agent for generated inference requests, observed in SDK-style captures.
 /// Format: claude-cli/{VERSION} ({USER_TYPE}, {ENTRYPOINT})
 pub const INFERENCE_USER_AGENT: &str = "claude-cli/2.1.326 (external, sdk-cli)";
 
@@ -43,7 +47,7 @@ pub const INFERENCE_USER_AGENT: &str = "claude-cli/2.1.326 (external, sdk-cli)";
 pub const INFERENCE_OS: &str = "MacOS";
 pub const INFERENCE_ARCH: &str = "x64";
 
-/// User-Agent for admin/non-inference requests — matches getClaudeCodeUserAgent().
+/// User-Agent for admin/non-inference requests, separate from the inference UA.
 /// Used for usage API, profile, bootstrap calls.
 pub const USER_AGENT: &str = "claude-code/2.1.326";
 

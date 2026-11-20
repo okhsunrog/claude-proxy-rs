@@ -367,26 +367,26 @@ mod tests {
     async fn request_limits_are_per_key() {
         let limits = TranscriptionLimits::new(3, 4);
         for _ in 0..3 {
-            assert!(limits.admit("a").await.is_ok());
+            limits.admit("a").await.unwrap();
         }
         let retry = limits.admit("a").await.unwrap_err();
         assert!(retry > Duration::from_secs(59));
-        assert!(limits.admit("b").await.is_ok());
+        limits.admit("b").await.unwrap();
         limits.requests.lock().await.get_mut("a").unwrap().0 =
-            Instant::now() - Duration::from_secs(61);
-        assert!(limits.admit("a").await.is_ok());
+            Instant::now().checked_sub(Duration::from_secs(61)).unwrap();
+        limits.admit("a").await.unwrap();
     }
     #[tokio::test]
     async fn unlimited_rate_keeps_concurrency_bounded() {
         let limits = TranscriptionLimits::new(0, 1);
         for _ in 0..200 {
-            assert!(limits.admit("a").await.is_ok());
+            limits.admit("a").await.unwrap();
         }
         assert!(limits.requests.lock().await.is_empty());
         let permit = limits.concurrency.try_acquire().unwrap();
-        assert!(limits.concurrency.try_acquire().is_err());
+        limits.concurrency.try_acquire().unwrap_err();
         drop(permit);
-        assert!(limits.concurrency.try_acquire().is_ok());
+        drop(limits.concurrency.try_acquire().unwrap());
     }
     #[test]
     fn throttle_header_rounds_up() {

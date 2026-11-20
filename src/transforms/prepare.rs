@@ -1,13 +1,13 @@
 //! Prepare requests for the Anthropic API.
 //!
-//! This module provides a unified pipeline for transforming any request
-//! before sending it to the Anthropic API, including:
-//! - Extracting betas from request body to headers
-//! - Disabling thinking when tool_choice forces tool use
-//! - Injecting fake user ID for OAuth
-//! - Adding mcp_ prefix to tool names
-//! - Injecting system message prefix
-//! - Auto-injecting cache_control breakpoints for optimal caching
+//! Routes apply OAuth account/session identity before entering this pipeline.
+//! After extracting body betas, recognized native envelopes bypass prompt,
+//! tool and cache rewrites. Other clients use compatibility policy to prepare
+//! their prompts, tools and cache markers. Continuations reuse the saved tool
+//! mapping instead of inventing names without the original definitions.
+//!
+//! This prepares JSON, not final wire bytes: the inference transport computes
+//! CCH after serialization and selects the ordered HTTP/TLS profile.
 
 use rand::RngExt;
 use serde_json::{Value, json};
@@ -18,7 +18,6 @@ use llm_relay::anthropic::tool_names::transform_request_tool_names;
 use super::tool_aliases::{ToolNameMap, normalize_tools};
 use crate::compatibility::{ClientProfile, Compatibility};
 use crate::constants::SYSTEM_PREFIX;
-use sha2::{Digest, Sha256};
 
 /// Result of preparing a request for Anthropic API.
 pub struct PreparedRequest {
@@ -30,23 +29,15 @@ pub struct PreparedRequest {
     pub tool_name_map: ToolNameMap,
 }
 
-/// Prepare a request body for the Anthropic API.
-///
-/// This applies all necessary transformations:
-/// 1. Extract and remove `betas` array from body
-/// 2. Disable thinking if `tool_choice` forces tool use
-/// 3. Inject fake user ID in metadata (if cloaking)
-/// 4. Add mcp_ prefix to tool names
-/// 5. Inject system message prefix (if cloaking)
-/// 6. Auto-inject cache_control breakpoints (tools, system, messages)
-///
-/// When `cloak` is false, steps 3 and 5 are skipped.
-/// Returns the transformed body and extracted betas.
+/// Test convenience wrapper using the default compatibility policy.
 #[cfg(test)]
 pub fn prepare_anthropic_request(body: Value, cloak: bool) -> PreparedRequest {
     prepare_with_policy(body, cloak, Compatibility::default())
 }
 
+/// Prepare a complete request; native envelopes bypass compatibility rewrites.
+/// `cloak` enables generated SDK identity and schema-aware tool adapters. The
+/// other non-native path keeps the legacy tool prefix and system sanitization.
 pub fn prepare_with_policy(body: Value, cloak: bool, policy: Compatibility) -> PreparedRequest {
     let (betas, body) = extract_betas(body);
     // Native envelopes already carry the client's exact prompts, tool names,
@@ -89,6 +80,8 @@ pub fn prepare_with_policy(body: Value, cloak: bool, policy: Compatibility) -> P
     }
 }
 
+/// Continue with the original aliases and thinking policy. The upstream thread
+/// already owns system/tools/cache state; do not inject a second envelope.
 pub fn prepare_continuation(
     body: Value,
     mut map: ToolNameMap,
@@ -125,14 +118,9 @@ pub(crate) fn is_native_envelope(body: &Value) -> bool {
             .is_some_and(is_valid_user_id)
 }
 
-/// Prepare a count_tokens request for the Anthropic API.
-///
-/// This applies only the transformations appropriate for count_tokens:
-/// 1. Extract and remove `betas` array from body
-/// 2. Inject system message prefix (if cloaking)
-/// 3. Auto-inject cache_control breakpoints
-///
-/// Note: count_tokens doesn't support metadata or thinking.
+/// Prepare token counting with the same prompt/tool/cache policy as inference,
+/// but without generated prompt dispatch fields. Native profiles bypass these
+/// rewrites. This helper does not inject metadata or alter thinking settings.
 pub fn prepare_count_with_policy(
     body: Value,
     cloak: bool,
@@ -212,7 +200,9 @@ fn disable_thinking_if_forced(mut body: Value) -> Value {
     body
 }
 
-/// Inject a fake user ID into request metadata if missing or invalid.
+/// Supply fallback JSON identity only if routes have not supplied a valid ID.
+/// Production routes normally use apply_identity with persisted device/account
+/// state first; this fallback must not replace that stable identity.
 fn inject_fake_user_id(mut body: Value) -> Value {
     let needs_injection = match body.get("metadata") {
         None => true,
@@ -237,7 +227,9 @@ fn inject_fake_user_id(mut body: Value) -> Value {
     body
 }
 
-/// Replace only token-owner identity and conversation state; preserve native extras.
+/// Bind account/session to the selected OAuth owner and conversation. Preserve
+/// a valid native device ID and extra fields such as parent_session_id; use the
+/// persisted proxy installation ID only when a device ID is absent or malformed.
 pub fn apply_identity(body: &mut Value, device: &str, account: Option<&str>, session: &str) {
     let mut id = body
         .pointer("/metadata/user_id")
@@ -265,48 +257,12 @@ pub fn apply_identity(body: &mut Value, device: &str, account: Option<&str>, ses
     }
 }
 
-fn billing_prefix(body: &Value) -> String {
-    let content = body
-        .get("messages")
-        .and_then(Value::as_array)
-        .and_then(|a| {
-            a.iter()
-                .find(|m| m.get("role").and_then(Value::as_str) == Some("user"))
-        })
-        .and_then(|m| m.get("content"));
-    let text = content
-        .and_then(|v| {
-            v.as_str().or_else(|| {
-                v.as_array()
-                    .and_then(|a| a.iter().find_map(|b| b.get("text").and_then(Value::as_str)))
-            })
-        })
-        .unwrap_or("");
-    // The installed JS binary indexes UTF-16 code units, not Unicode scalars.
-    let units: Vec<u16> = text.encode_utf16().collect();
-    let sampled: Vec<u16> = [4, 7, 20]
-        .iter()
-        .map(|&i| units.get(i).copied().unwrap_or(u16::from(b'0')))
-        .collect();
-    let hash = Sha256::digest(
-        format!("59cf53e54c78{}2.1.326", String::from_utf16_lossy(&sampled)).as_bytes(),
-    );
-    let suffix: String = hash.iter().map(|b| format!("{b:02x}")).collect();
-    let suffix: String = suffix.chars().take(3).collect();
-    let prompt_id = Uuid::new_v4();
-    format!(
-        "x-anthropic-billing-header: cc_version=2.1.326.{suffix}; cc_entrypoint=sdk-cli; cc_prompt_id={prompt_id}; cc_turn_origin=sdk; cc_prompt_index=0; cc_turn_index=1;"
-    )
-}
-
 /// Inject system message prefix into the request body (Claude Code identity).
 ///
-/// Cache_control is handled separately by ensure_cache_control().
+/// Cache markers are handled separately by cache_policy::apply. Billing prefix
+/// generation belongs to billing; the final CCH is deferred to the transport.
 fn inject_system_message(mut body: Value, dispatch: bool) -> Value {
-    let mut billing = billing_prefix(&body);
-    if !dispatch && let Some(index) = billing.find(" cc_prompt_id=") {
-        billing.truncate(index);
-    }
+    let billing = super::billing::prefix(&body, dispatch);
     let obj = match body.as_object_mut() {
         Some(o) => o,
         None => return body,
@@ -341,7 +297,7 @@ fn inject_system_message(mut body: Value, dispatch: bool) -> Value {
 }
 
 /// Sanitize system prompt without injecting the Claude Code prefix.
-/// Still applies OpenCode sanitization since the OAuth backend blocks it.
+/// Retain the legacy OpenCode compatibility rewrite for non-native requests.
 fn sanitize_system_only(mut body: Value) -> Value {
     let obj = match body.as_object_mut() {
         Some(o) => o,
@@ -410,9 +366,9 @@ fn sanitize_system(mut system: Value) -> Value {
                     .replace("opencode", "Claude")
                     .replace("Opencode", "Claude")
                     .replace("OPENCODE", "Claude")
-                    // Anthropic flags this exact OpenCode env-injection phrase as a
-                    // non-Claude-Code agent fingerprint and bills the request as extra
-                    // usage instead of subscription; reword it (verified via probes).
+                    // Legacy compatibility wording retained from earlier probes.
+                    // This replacement alone does not establish server-side
+                    // client classification or subscription billing behavior.
                     .replace(
                         "Here is some useful information about the environment you are running in:",
                         "Working context:",
@@ -532,7 +488,7 @@ mod tests {
     #[test]
     fn test_generate_fake_user_id_format() {
         let id = generate_fake_user_id();
-        assert!(serde_json::from_str::<Value>(&id).is_ok());
+        serde_json::from_str::<Value>(&id).unwrap();
         assert!(is_valid_user_id(&id));
     }
 
@@ -566,18 +522,5 @@ mod tests {
             serde_json::from_str(empty["metadata"]["user_id"].as_str().unwrap()).unwrap();
         assert_eq!(id["device_id"], "b".repeat(64));
         assert_eq!(id["account_uuid"], "");
-    }
-    #[test]
-    fn billing_marker_matches_captured_prompt_and_changes_with_prompt() {
-        let body = json!({"messages":[{"role":"user","content":"Reply exactly OK."}]});
-        let billing = billing_prefix(&body);
-        assert!(billing.starts_with("x-anthropic-billing-header: cc_version=2.1.326.dd3; cc_entrypoint=sdk-cli; cc_prompt_id="));
-        assert!(billing.ends_with("; cc_turn_origin=sdk; cc_prompt_index=0; cc_turn_index=1;"));
-        assert_ne!(
-            billing.split("; cc_prompt_id=").next(),
-            billing_prefix(
-                &json!({"messages":[{"role":"user","content":"A different first prompt changes sampled characters."}]})
-            ).split("; cc_prompt_id=").next()
-        );
     }
 }

@@ -632,7 +632,7 @@ mod regression_tests {
         )])
         .chain(stream::pending());
         let mut events = Box::pin(tracked_events(body, finish));
-        assert!(events.next().await.unwrap().is_ok());
+        events.next().await.unwrap().unwrap();
         drop(events);
         let reports = reports.lock().unwrap();
         assert_eq!(reports.len(), 1);
@@ -776,7 +776,7 @@ mod regression_tests {
             );
             if native {
                 let mut response = Box::pin(native_events(events, ToolNameMap::default()));
-                assert!(response.next().await.unwrap().is_ok());
+                response.next().await.unwrap().unwrap();
                 drop(response);
             } else {
                 let mut response = Box::pin(openai_events(
@@ -784,7 +784,7 @@ mod regression_tests {
                     "model".into(),
                     ToolNameMap::default(),
                 ));
-                assert!(response.next().await.unwrap().is_ok());
+                response.next().await.unwrap().unwrap();
                 drop(response);
             }
             assert_eq!(reports.lock().unwrap().len(), 1);
@@ -802,7 +802,7 @@ mod regression_tests {
         .collect()
         .await;
         assert_eq!(output.len(), 1);
-        assert!(output[0].is_err());
+        output[0].as_ref().unwrap_err();
         assert_eq!(reports.lock().unwrap().len(), 1);
     }
 }

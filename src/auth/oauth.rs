@@ -392,11 +392,14 @@ mod tests {
             .unwrap()
             .1
             .into_owned();
-        assert!(manager.take_verifier("code", &first_state).await.is_err());
-        assert!(manager.take_verifier("", &state).await.is_err());
+        manager
+            .take_verifier("code", &first_state)
+            .await
+            .unwrap_err();
+        manager.take_verifier("", &state).await.unwrap_err();
         let verifier = manager.take_verifier("code", &state).await.unwrap();
         assert_ne!(verifier, state);
-        assert!(manager.take_verifier("code", &state).await.is_err());
+        manager.take_verifier("code", &state).await.unwrap_err();
     }
 
     #[tokio::test]
@@ -405,9 +408,11 @@ mod tests {
         *manager.pending.write().await = Some(PendingFlow {
             verifier: "v".into(),
             state: "s".into(),
-            started: Instant::now() - std::time::Duration::from_secs(601),
+            started: Instant::now()
+                .checked_sub(std::time::Duration::from_secs(601))
+                .unwrap(),
         });
-        assert!(manager.take_verifier("code", "s").await.is_err());
+        manager.take_verifier("code", "s").await.unwrap_err();
         assert!(manager.pending.read().await.is_none());
     }
     #[tokio::test]

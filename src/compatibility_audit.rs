@@ -54,14 +54,14 @@ async fn upstream(
         .to_string()
         .contains("audit retry");
     if retry_probe {
-        let marker = body["messages"][0]["content"].to_string();
+        let marker = &body["messages"][0]["content"];
         let attempt = captures
             .lock()
             .await
             .iter()
-            .filter(|b| b["messages"][0]["content"].to_string() == marker)
+            .filter(|b| &b["messages"][0]["content"] == marker)
             .count();
-        if attempt == 1 || marker.contains("retry-max") {
+        if attempt == 1 || marker.to_string().contains("retry-max") {
             return (axum::http::StatusCode::from_u16(529).unwrap(),[("retry-after-ms","0")],Json(json!({"type":"error","error":{"type":"overloaded_error","message":"retry audit"}}))).into_response();
         }
     }

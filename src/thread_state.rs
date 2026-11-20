@@ -11,9 +11,11 @@ use tokio::sync::Mutex;
 
 const TTL: Duration = Duration::from_secs(300);
 const MAX_ENTRIES: usize = 1024;
+// Approximate retained payload/struct bytes, not an allocator/RSS hard limit.
 const MAX_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Clone, PartialEq, Eq)]
+/// A message ID is reusable only by the same proxy key, OAuth account and model.
 pub struct Scope {
     pub key: String,
     pub account: String,
@@ -46,6 +48,7 @@ impl Entry {
 }
 
 #[derive(Default)]
+/// FIFO eviction with a fixed lifetime from insertion; reads do not extend TTL.
 pub struct ThreadStore {
     entries: Mutex<VecDeque<Entry>>,
 }
@@ -140,14 +143,20 @@ pub fn track(
 ) -> impl futures_util::Stream<Item = Result<Value, std::io::Error>> + Send {
     use futures_util::StreamExt;
     async_stream::stream! {
-        let mut events=std::pin::pin!(events);
-        let mut message=None;
-        while let Some(event)=events.next().await {
-            if let Ok(event)=&event {
+        let mut events = std::pin::pin!(events);
+        let mut message = None;
+        while let Some(event) = events.next().await {
+            if let Ok(event) = &event {
                 match event.get("type").and_then(Value::as_str) {
-                    Some("message_start")=>message=event.get("message").cloned(),
-                    Some("message_stop")=>if let (Some(turn),Some(message))=(&turn,&message) {turn.record(message).await;},
-                    _=>{}
+                    Some("message_start") => message = event.get("message").cloned(),
+                    Some("message_stop") => {
+                        // Publish before yielding the terminal event, so a client
+                        // can immediately continue using the returned message ID.
+                        if let (Some(turn), Some(message)) = (&turn, &message) {
+                            turn.record(message).await;
+                        }
+                    }
+                    _ => {}
                 }
             }
             yield event;
